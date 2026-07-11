@@ -65,4 +65,7 @@ internal/handler/    HTTP handlers
 ## CI
 
 GitHub Actions runs `test`, `vet`, and `lint` on every push and pull request,
-then builds the binary and uploads it as a workflow artifact.
+then builds the binary and uploads it as a workflow artifact. On pushes to
+`main`, it also builds the Docker image and publishes it to the GitHub
+Container Registry at `ghcr.io/andrewcgraves/sparks-effect-api`, tagged with
+`latest` and the commit SHA.
