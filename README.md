@@ -6,7 +6,7 @@ frontend can call to compute transit reach for a given route.
 
 ## Requirements
 
-- [Go](https://go.dev/dl/) 1.23+
+- [Go](https://go.dev/dl/) 1.25+
 - [Docker](https://www.docker.com/) (optional, for containerized runs)
 - `golangci-lint` (installed automatically by `make lint` if missing)
 
