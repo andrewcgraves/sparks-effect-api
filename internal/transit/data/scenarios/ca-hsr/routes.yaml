@@ -1,0 +1,72 @@
+# Route geometries are simplified LineStrings (WGS84, GeoJSON coordinate order: [lng, lat]).
+# Phase 1 geometry captures the Peninsula, Pacheco Pass, Central Valley U-turn at Merced,
+# Tehachapi crossing, and LA basin segments.  Points are simplified from the CA GIS
+# alignment for map display; not surveyed-grade.
+#
+# GIS sources:
+#   https://gis.data.ca.gov/datasets/california-high-speed-rail-statewide-alignments
+#   https://gis.data.ca.gov/datasets/california-high-speed-rail-statewide-stations
+
+- id: "00000000-0000-4002-8001-000000000001"
+  scenario_id: "00000000-0000-4001-8001-000000000001"
+  name: "CA HSR Phase 1 — San Francisco to Anaheim"
+  mode: "rail"
+  bidirectional: true
+  geometry:
+    type: LineString
+    coordinates:
+      - [-122.389, 37.789]   # SF Transbay Terminal
+      - [-122.406, 37.714]   # SF/Daly City
+      - [-122.387, 37.599]   # Millbrae
+      - [-122.198, 37.479]   # Palo Alto
+      - [-122.033, 37.430]   # Sunnyvale
+      - [-121.903, 37.330]   # San Jose Diridon
+      - [-121.780, 37.200]   # Morgan Hill
+      - [-121.568, 37.006]   # Gilroy
+      - [-121.350, 36.970]   # Heading into hills
+      - [-121.230, 36.990]   # Pacheco Pass summit
+      - [-121.000, 37.020]   # Valley entrance west
+      - [-120.850, 37.055]   # Los Banos area
+      - [-120.600, 37.150]   # Heading north to Merced
+      - [-120.483, 37.302]   # Merced
+      - [-120.400, 37.150]   # Back south from Merced
+      - [-120.200, 37.030]   # Chowchilla
+      - [-120.062, 36.961]   # Madera
+      - [-119.900, 36.850]   # Between Madera and Fresno
+      - [-119.784, 36.738]   # Fresno
+      - [-119.700, 36.530]   # South Fresno
+      - [-119.645, 36.330]   # Kings/Tulare (Hanford)
+      - [-119.500, 36.100]   # Corcoran
+      - [-119.300, 35.700]   # Wasco
+      - [-119.019, 35.373]   # Bakersfield
+      - [-118.900, 35.200]   # Tehachapi foothills
+      - [-118.750, 35.050]   # Tehachapi Mountains
+      - [-118.600, 34.900]   # Mojave/Lancaster
+      - [-118.450, 34.750]   # Antelope Valley approach
+      - [-118.116, 34.578]   # Palmdale
+      - [-118.200, 34.440]   # Santa Clarita/Canyon Country
+      - [-118.280, 34.300]   # Sylmar
+      - [-118.358, 34.200]   # Burbank Airport
+      - [-118.310, 34.150]   # Heading to LA
+      - [-118.236, 34.056]   # LA Union Station
+      - [-118.050, 33.940]   # Between LA and Anaheim
+      - [-117.876, 33.800]   # Anaheim (ARTIC)
+
+- id: "00000000-0000-4002-8001-000000000002"
+  scenario_id: "00000000-0000-4001-8001-000000000001"
+  name: "CA HSR Desert Xpress — Palmdale to Las Vegas"
+  mode: "rail"
+  bidirectional: true
+  geometry:
+    type: LineString
+    coordinates:
+      - [-118.116, 34.578]   # Palmdale
+      - [-117.800, 34.550]   # East through Antelope Valley
+      - [-117.450, 34.510]   # Near Adelanto
+      - [-117.185, 34.500]   # Victor Valley (Apple Valley)
+      - [-116.900, 34.600]   # High desert heading NE
+      - [-116.700, 34.800]   # Barstow area
+      - [-116.500, 35.100]   # Mojave high desert
+      - [-115.800, 35.600]   # Near Nevada border
+      - [-115.300, 35.900]   # Entering Nevada
+      - [-115.136, 36.174]   # Las Vegas Convention Center area

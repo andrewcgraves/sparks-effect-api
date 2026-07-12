@@ -1,0 +1,143 @@
+# Station coordinates are approximate point locations for the planned HSR stops.
+# Source: CA GIS stations layer + official HSR Business Plan station maps.
+# All 15 stations from the 2026 Business Plan travel-times matrix are included.
+# platform_height: high = level boarding with Avelia Liberty trainsets.
+#
+# Note: Victor Valley (Apple Valley/Victorville) and Las Vegas are on the Desert Xpress
+# segment and share the Palmdale intermodal hub.  Burbank Airport station serves
+# the Hollywood Burbank Airport.
+
+- id: "00000000-0000-4005-8001-000000000001"
+  scenario_id: "00000000-0000-4001-8001-000000000001"
+  slug: "sf"
+  name: "San Francisco (Transbay)"
+  platform_height: "high"
+  location:
+    type: Point
+    coordinates: [-122.389, 37.789]
+
+- id: "00000000-0000-4005-8001-000000000002"
+  scenario_id: "00000000-0000-4001-8001-000000000001"
+  slug: "millbrae"
+  name: "Millbrae"
+  platform_height: "high"
+  location:
+    type: Point
+    coordinates: [-122.387, 37.599]
+
+- id: "00000000-0000-4005-8001-000000000003"
+  scenario_id: "00000000-0000-4001-8001-000000000001"
+  slug: "san-jose"
+  name: "San Jose (Diridon)"
+  platform_height: "high"
+  location:
+    type: Point
+    coordinates: [-121.903, 37.330]
+
+- id: "00000000-0000-4005-8001-000000000004"
+  scenario_id: "00000000-0000-4001-8001-000000000001"
+  slug: "gilroy"
+  name: "Gilroy"
+  platform_height: "high"
+  location:
+    type: Point
+    coordinates: [-121.568, 37.006]
+
+- id: "00000000-0000-4005-8001-000000000005"
+  scenario_id: "00000000-0000-4001-8001-000000000001"
+  slug: "merced"
+  name: "Merced"
+  platform_height: "high"
+  location:
+    type: Point
+    coordinates: [-120.483, 37.302]
+
+- id: "00000000-0000-4005-8001-000000000006"
+  scenario_id: "00000000-0000-4001-8001-000000000001"
+  slug: "madera"
+  name: "Madera"
+  platform_height: "high"
+  location:
+    type: Point
+    coordinates: [-120.062, 36.961]
+
+- id: "00000000-0000-4005-8001-000000000007"
+  scenario_id: "00000000-0000-4001-8001-000000000001"
+  slug: "fresno"
+  name: "Fresno"
+  platform_height: "high"
+  location:
+    type: Point
+    coordinates: [-119.784, 36.738]
+
+- id: "00000000-0000-4005-8001-000000000008"
+  scenario_id: "00000000-0000-4001-8001-000000000001"
+  slug: "kings-tulare"
+  name: "Kings/Tulare (Hanford)"
+  platform_height: "high"
+  location:
+    type: Point
+    coordinates: [-119.645, 36.330]
+
+- id: "00000000-0000-4005-8001-000000000009"
+  scenario_id: "00000000-0000-4001-8001-000000000001"
+  slug: "bakersfield"
+  name: "Bakersfield"
+  platform_height: "high"
+  location:
+    type: Point
+    coordinates: [-119.019, 35.373]
+
+- id: "00000000-0000-4005-8001-00000000000a"
+  scenario_id: "00000000-0000-4001-8001-000000000001"
+  slug: "palmdale"
+  name: "Palmdale"
+  platform_height: "high"
+  location:
+    type: Point
+    coordinates: [-118.116, 34.578]
+
+- id: "00000000-0000-4005-8001-00000000000b"
+  scenario_id: "00000000-0000-4001-8001-000000000001"
+  slug: "victor-valley"
+  name: "Victor Valley (Apple Valley)"
+  platform_height: "high"
+  location:
+    type: Point
+    coordinates: [-117.185, 34.500]
+
+- id: "00000000-0000-4005-8001-00000000000c"
+  scenario_id: "00000000-0000-4001-8001-000000000001"
+  slug: "burbank-airport"
+  name: "Burbank Airport"
+  platform_height: "high"
+  location:
+    type: Point
+    coordinates: [-118.358, 34.200]
+
+- id: "00000000-0000-4005-8001-00000000000d"
+  scenario_id: "00000000-0000-4001-8001-000000000001"
+  slug: "los-angeles"
+  name: "Los Angeles (Union Station)"
+  platform_height: "high"
+  location:
+    type: Point
+    coordinates: [-118.236, 34.056]
+
+- id: "00000000-0000-4005-8001-00000000000e"
+  scenario_id: "00000000-0000-4001-8001-000000000001"
+  slug: "anaheim"
+  name: "Anaheim (ARTIC)"
+  platform_height: "high"
+  location:
+    type: Point
+    coordinates: [-117.876, 33.800]
+
+- id: "00000000-0000-4005-8001-00000000000f"
+  scenario_id: "00000000-0000-4001-8001-000000000001"
+  slug: "las-vegas"
+  name: "Las Vegas"
+  platform_height: "high"
+  location:
+    type: Point
+    coordinates: [-115.136, 36.174]

@@ -1,0 +1,117 @@
+# Services for the CA HSR scenario.
+#
+# HSR Express: key stops only (skips Madera and Kings/Tulare).
+# HSR Local: all Phase 1 stops SF–Anaheim.
+# Desert Xpress: Palmdale–Victor Valley–Las Vegas spur (separate operating concession).
+#
+# Frequency windows are representative of the 2026 Business Plan peak/off-peak headways.
+# HeadwayS 1800 = every 30 min (peak), 3600 = every 60 min (off-peak).
+
+- id: "00000000-0000-4004-8001-000000000001"
+  scenario_id: "00000000-0000-4001-8001-000000000001"
+  route_id: "00000000-0000-4002-8001-000000000001"
+  vehicle_type_id: "00000000-0000-4003-8001-000000000001"
+  name: "HSR Express"
+  direction: "both"
+  active: true
+  stops:
+    - station_id: "00000000-0000-4005-8001-000000000001"
+      sequence: 1
+    - station_id: "00000000-0000-4005-8001-000000000002"
+      sequence: 2
+    - station_id: "00000000-0000-4005-8001-000000000003"
+      sequence: 3
+    - station_id: "00000000-0000-4005-8001-000000000004"
+      sequence: 4
+    - station_id: "00000000-0000-4005-8001-000000000005"
+      sequence: 5
+    - station_id: "00000000-0000-4005-8001-000000000007"
+      sequence: 6
+    - station_id: "00000000-0000-4005-8001-000000000009"
+      sequence: 7
+    - station_id: "00000000-0000-4005-8001-00000000000a"
+      sequence: 8
+    - station_id: "00000000-0000-4005-8001-00000000000c"
+      sequence: 9
+    - station_id: "00000000-0000-4005-8001-00000000000d"
+      sequence: 10
+    - station_id: "00000000-0000-4005-8001-00000000000e"
+      sequence: 11
+  frequency_windows:
+    - id: "00000000-0000-4006-8001-000000000001"
+      service_id: "00000000-0000-4004-8001-000000000001"
+      start_time: "06:00"
+      end_time: "09:00"
+      headway_s: 1800
+    - id: "00000000-0000-4006-8001-000000000002"
+      service_id: "00000000-0000-4004-8001-000000000001"
+      start_time: "09:00"
+      end_time: "22:00"
+      headway_s: 3600
+
+- id: "00000000-0000-4004-8001-000000000002"
+  scenario_id: "00000000-0000-4001-8001-000000000001"
+  route_id: "00000000-0000-4002-8001-000000000001"
+  vehicle_type_id: "00000000-0000-4003-8001-000000000001"
+  name: "HSR Local"
+  direction: "both"
+  active: true
+  stops:
+    - station_id: "00000000-0000-4005-8001-000000000001"
+      sequence: 1
+    - station_id: "00000000-0000-4005-8001-000000000002"
+      sequence: 2
+    - station_id: "00000000-0000-4005-8001-000000000003"
+      sequence: 3
+    - station_id: "00000000-0000-4005-8001-000000000004"
+      sequence: 4
+    - station_id: "00000000-0000-4005-8001-000000000005"
+      sequence: 5
+    - station_id: "00000000-0000-4005-8001-000000000006"
+      sequence: 6
+    - station_id: "00000000-0000-4005-8001-000000000007"
+      sequence: 7
+    - station_id: "00000000-0000-4005-8001-000000000008"
+      sequence: 8
+    - station_id: "00000000-0000-4005-8001-000000000009"
+      sequence: 9
+    - station_id: "00000000-0000-4005-8001-00000000000a"
+      sequence: 10
+    - station_id: "00000000-0000-4005-8001-00000000000c"
+      sequence: 11
+    - station_id: "00000000-0000-4005-8001-00000000000d"
+      sequence: 12
+    - station_id: "00000000-0000-4005-8001-00000000000e"
+      sequence: 13
+  frequency_windows:
+    - id: "00000000-0000-4006-8001-000000000003"
+      service_id: "00000000-0000-4004-8001-000000000002"
+      start_time: "06:00"
+      end_time: "09:00"
+      headway_s: 3600
+    - id: "00000000-0000-4006-8001-000000000004"
+      service_id: "00000000-0000-4004-8001-000000000002"
+      start_time: "09:00"
+      end_time: "20:00"
+      headway_s: 5400
+
+- id: "00000000-0000-4004-8001-000000000003"
+  scenario_id: "00000000-0000-4001-8001-000000000001"
+  route_id: "00000000-0000-4002-8001-000000000002"
+  vehicle_type_id: "00000000-0000-4003-8001-000000000001"
+  name: "Desert Xpress"
+  direction: "both"
+  active: true
+  stops:
+    - station_id: "00000000-0000-4005-8001-00000000000a"
+      sequence: 1
+    - station_id: "00000000-0000-4005-8001-00000000000b"
+      sequence: 2
+    - station_id: "00000000-0000-4005-8001-00000000000f"
+      sequence: 3
+  frequency_windows:
+    - id: "00000000-0000-4006-8001-000000000005"
+      service_id: "00000000-0000-4004-8001-000000000003"
+      start_time: "06:00"
+      end_time: "22:00"
+      headway_s: 7200

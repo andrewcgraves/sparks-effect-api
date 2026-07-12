@@ -1,0 +1,237 @@
+# Station-to-station travel times in minutes.
+# Source: CA HSR 2026 Business Plan (https://hsr.ca.gov/communications-outreach/reports/business-plans/2026-business-plan/)
+# Values are from the published travel-time matrix; minor asymmetries preserved from source.
+#
+# MVP note: per the data model, times are normally computed from route geometry + speed
+# restrictions + vehicle physics.  This seed artifact unblocks SPA-27 (isochrone chaining)
+# before the physics compiler is built.  Long-term these values will be derived, not stored.
+#
+# Station slugs map to the stations.yaml id list.
+
+scenario_slug: "ca-hsr"
+minutes_matrix:
+  sf:
+    millbrae: 15
+    san-jose: 56
+    gilroy: 79
+    merced: 136
+    madera: 113
+    fresno: 124
+    kings-tulare: 140
+    bakersfield: 170
+    palmdale: 203
+    victor-valley: 240
+    burbank-airport: 251
+    los-angeles: 269
+    anaheim: 306
+    las-vegas: 330
+  millbrae:
+    sf: 15
+    san-jose: 39
+    gilroy: 62
+    merced: 119
+    madera: 96
+    fresno: 107
+    kings-tulare: 123
+    bakersfield: 154
+    palmdale: 187
+    victor-valley: 224
+    burbank-airport: 234
+    los-angeles: 253
+    anaheim: 289
+    las-vegas: 314
+  san-jose:
+    sf: 56
+    millbrae: 39
+    gilroy: 21
+    merced: 78
+    madera: 55
+    fresno: 65
+    kings-tulare: 82
+    bakersfield: 112
+    palmdale: 145
+    victor-valley: 182
+    burbank-airport: 193
+    los-angeles: 211
+    anaheim: 248
+    las-vegas: 272
+  gilroy:
+    sf: 79
+    millbrae: 62
+    san-jose: 21
+    merced: 56
+    madera: 33
+    fresno: 44
+    kings-tulare: 59
+    bakersfield: 86
+    palmdale: 123
+    victor-valley: 160
+    burbank-airport: 170
+    los-angeles: 189
+    anaheim: 225
+    las-vegas: 250
+  merced:
+    sf: 135
+    millbrae: 118
+    san-jose: 77
+    gilroy: 54
+    madera: 20
+    fresno: 38
+    kings-tulare: 54
+    bakersfield: 80
+    palmdale: 117
+    victor-valley: 154
+    burbank-airport: 165
+    los-angeles: 183
+    anaheim: 220
+    las-vegas: 244
+  madera:
+    sf: 117
+    millbrae: 100
+    san-jose: 59
+    gilroy: 32
+    merced: 20
+    fresno: 9
+    kings-tulare: 25
+    bakersfield: 51
+    palmdale: 88
+    victor-valley: 125
+    burbank-airport: 136
+    los-angeles: 154
+    anaheim: 191
+    las-vegas: 215
+  fresno:
+    sf: 128
+    millbrae: 111
+    san-jose: 70
+    gilroy: 43
+    merced: 38
+    madera: 9
+    kings-tulare: 13
+    bakersfield: 40
+    palmdale: 78
+    victor-valley: 115
+    burbank-airport: 125
+    los-angeles: 144
+    anaheim: 180
+    las-vegas: 205
+  kings-tulare:
+    sf: 143
+    millbrae: 126
+    san-jose: 85
+    gilroy: 59
+    merced: 54
+    madera: 25
+    fresno: 13
+    bakersfield: 25
+    palmdale: 61
+    victor-valley: 98
+    burbank-airport: 109
+    los-angeles: 127
+    anaheim: 164
+    las-vegas: 188
+  bakersfield:
+    sf: 173
+    millbrae: 156
+    san-jose: 115
+    gilroy: 85
+    merced: 80
+    madera: 51
+    fresno: 40
+    kings-tulare: 25
+    palmdale: 31
+    victor-valley: 68
+    burbank-airport: 79
+    los-angeles: 97
+    anaheim: 134
+    las-vegas: 158
+  palmdale:
+    sf: 202
+    millbrae: 186
+    san-jose: 144
+    gilroy: 122
+    merced: 113
+    madera: 84
+    fresno: 72
+    kings-tulare: 58
+    bakersfield: 28
+    victor-valley: 19
+    burbank-airport: 46
+    los-angeles: 64
+    anaheim: 101
+    las-vegas: 109
+  victor-valley:
+    sf: 239
+    millbrae: 223
+    san-jose: 181
+    gilroy: 159
+    merced: 150
+    madera: 121
+    fresno: 109
+    kings-tulare: 95
+    bakersfield: 65
+    palmdale: 19
+    burbank-airport: 86
+    los-angeles: 104
+    anaheim: 141
+    las-vegas: 90
+  burbank-airport:
+    sf: 251
+    millbrae: 234
+    san-jose: 193
+    gilroy: 170
+    merced: 161
+    madera: 132
+    fresno: 121
+    kings-tulare: 106
+    bakersfield: 76
+    palmdale: 46
+    victor-valley: 85
+    los-angeles: 17
+    anaheim: 53
+    las-vegas: 175
+  los-angeles:
+    sf: 269
+    millbrae: 253
+    san-jose: 212
+    gilroy: 189
+    merced: 180
+    madera: 151
+    fresno: 139
+    kings-tulare: 125
+    bakersfield: 95
+    palmdale: 65
+    victor-valley: 104
+    burbank-airport: 17
+    anaheim: 32
+    las-vegas: 194
+  anaheim:
+    sf: 306
+    millbrae: 289
+    san-jose: 248
+    gilroy: 225
+    merced: 216
+    madera: 187
+    fresno: 176
+    kings-tulare: 161
+    bakersfield: 131
+    palmdale: 102
+    victor-valley: 141
+    burbank-airport: 53
+    los-angeles: 32
+    las-vegas: 231
+  las-vegas:
+    sf: 329
+    millbrae: 313
+    san-jose: 271
+    gilroy: 249
+    merced: 240
+    madera: 211
+    fresno: 199
+    kings-tulare: 185
+    bakersfield: 155
+    palmdale: 109
+    victor-valley: 90
+    burbank-airport: 176
+    los-angeles: 194
+    anaheim: 231

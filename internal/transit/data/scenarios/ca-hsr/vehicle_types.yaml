@@ -1,0 +1,12 @@
+# Alstom Avelia Liberty — the trainset selected for CA HSR Phase 1.
+# Nominal max 350 km/h; US operations capped at 320 km/h on Phase 1 track.
+# Acceleration/deceleration are representative figures for a trapezoidal speed profile.
+- id: "00000000-0000-4003-8001-000000000001"
+  name: "Alstom Avelia Liberty (electric)"
+  propulsion: "electric"
+  max_speed_kmh: 320
+  acceleration_ms2: 0.5
+  deceleration_ms2: 0.6
+  floor_height: "high"
+  dwell_level_s: 90
+  dwell_step_s: 180
