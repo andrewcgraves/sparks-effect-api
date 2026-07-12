@@ -3,7 +3,6 @@ slug: "ca-hsr"
 name: "California High-Speed Rail"
 description: >
   The California High-Speed Rail system connecting San Francisco to Anaheim via the
-  Central Valley, with a Desert Express extension to Las Vegas. Phase 1 opens the
-  SF–LA corridor; the Palmdale–Las Vegas segment (Desert Xpress) is a separate
-  operating concession sharing the Palmdale station.
+  Central Valley. Phase 1 opens the SF–LA/Anaheim corridor. Brightline West
+  (Palmdale–Las Vegas) is seeded but commented out for later reactivation.
 status: "published"

@@ -81,8 +81,8 @@ func TestScenarioBySlug_found(t *testing.T) {
 	}
 
 	stations, ok := body["stations"].([]any)
-	if !ok || len(stations) < 15 {
-		t.Errorf("expected at least 15 stations, got %d", len(stations))
+	if !ok || len(stations) < 13 {
+		t.Errorf("expected at least 13 Phase 1 stations, got %d", len(stations))
 	}
 
 	services, ok := body["services"].([]any)
@@ -287,8 +287,8 @@ func TestScenarioStations_found(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &stations); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if len(stations) < 15 {
-		t.Fatalf("expected at least 15 stations, got %d", len(stations))
+	if len(stations) < 13 {
+		t.Fatalf("expected at least 13 Phase 1 stations, got %d", len(stations))
 	}
 	for _, st := range stations {
 		if st["slug"] == nil || st["slug"] == "" {

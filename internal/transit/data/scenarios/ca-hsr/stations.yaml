@@ -1,11 +1,8 @@
 # Station coordinates are approximate point locations for the planned HSR stops.
 # Source: CA GIS stations layer + official HSR Business Plan station maps.
-# All 15 stations from the 2026 Business Plan travel-times matrix are included.
-# platform_height: high = level boarding with Avelia Liberty trainsets.
-#
-# Note: Victor Valley (Apple Valley/Victorville) and Las Vegas are on the Desert Xpress
-# segment and share the Palmdale intermodal hub.  Burbank Airport station serves
-# the Hollywood Burbank Airport.
+# Phase 1 stations (SF–Anaheim) are active. Brightline West stations (Victor Valley,
+# Las Vegas) are commented out below for later reactivation; they share Palmdale.
+# platform_height: high = level boarding with Siemens Venture EMU trainsets.
 
 - id: "00000000-0000-4005-8001-000000000001"
   scenario_id: "00000000-0000-4001-8001-000000000001"
@@ -97,14 +94,15 @@
     type: Point
     coordinates: [-118.116, 34.578]
 
-- id: "00000000-0000-4005-8001-00000000000b"
-  scenario_id: "00000000-0000-4001-8001-000000000001"
-  slug: "victor-valley"
-  name: "Victor Valley (Apple Valley)"
-  platform_height: "high"
-  location:
-    type: Point
-    coordinates: [-117.185, 34.500]
+# --- Brightline West (deferred) ---
+# - id: "00000000-0000-4005-8001-00000000000b"
+#   scenario_id: "00000000-0000-4001-8001-000000000001"
+#   slug: "victor-valley"
+#   name: "Victor Valley (Apple Valley)"
+#   platform_height: "high"
+#   location:
+#     type: Point
+#     coordinates: [-117.185, 34.500]
 
 - id: "00000000-0000-4005-8001-00000000000c"
   scenario_id: "00000000-0000-4001-8001-000000000001"
@@ -133,11 +131,12 @@
     type: Point
     coordinates: [-117.876, 33.800]
 
-- id: "00000000-0000-4005-8001-00000000000f"
-  scenario_id: "00000000-0000-4001-8001-000000000001"
-  slug: "las-vegas"
-  name: "Las Vegas"
-  platform_height: "high"
-  location:
-    type: Point
-    coordinates: [-115.136, 36.174]
+# --- Brightline West (deferred) ---
+# - id: "00000000-0000-4005-8001-00000000000f"
+#   scenario_id: "00000000-0000-4001-8001-000000000001"
+#   slug: "las-vegas"
+#   name: "Las Vegas"
+#   platform_height: "high"
+#   location:
+#     type: Point
+#     coordinates: [-115.136, 36.174]

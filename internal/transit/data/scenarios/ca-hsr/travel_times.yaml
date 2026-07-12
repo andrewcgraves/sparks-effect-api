@@ -1,14 +1,14 @@
 # Adjacent segment travel times in minutes.
 # Source: CA HSR 2026 Business Plan travel-time matrix (https://hsr.ca.gov/communications-outreach/reports/business-plans/2026-business-plan/).
 # Each entry represents the time between two consecutive stops on a service.
-# Segments are ordered in the primary service direction (SF → Anaheim for Phase 1,
-# Palmdale → Las Vegas for Desert Xpress).
+# Segments are ordered in the primary service direction (SF → Anaheim for Phase 1).
+# Brightline West spur segments (Palmdale → Las Vegas) are commented out for later use.
 #
 # Multi-hop origin–destination times are derived by summing consecutive segments in code
 # (see Store.TravelTimeBetween). This replaces the full NxN matrix; callers do not store
 # computed OD times — the store sums on demand.
 #
-# Station slugs match stations.yaml id values.
+# Station slugs match stations.yaml slug values.
 
 scenario_slug: "ca-hsr"
 segments:
@@ -49,10 +49,10 @@ segments:
   - from: los-angeles
     to: anaheim
     minutes: 32
-  # Desert Xpress spur: Palmdale → Las Vegas (separate operating concession)
-  - from: palmdale
-    to: victor-valley
-    minutes: 19
-  - from: victor-valley
-    to: las-vegas
-    minutes: 90
+  # --- Brightline West (deferred) — Palmdale → Las Vegas ---
+  # - from: palmdale
+  #   to: victor-valley
+  #   minutes: 19
+  # - from: victor-valley
+  #   to: las-vegas
+  #   minutes: 90

@@ -61,8 +61,8 @@ func TestGetRoutesByScenario(t *testing.T) {
 	sc, _ := store.GetScenarioBySlug("ca-hsr")
 	routes := store.GetRoutesByScenario(sc.ID)
 
-	if len(routes) < 2 {
-		t.Fatalf("expected at least 2 routes (Phase 1 + Desert Xpress), got %d", len(routes))
+	if len(routes) != 1 {
+		t.Fatalf("expected 1 active route (Phase 1; Brightline West deferred), got %d", len(routes))
 	}
 
 	for _, r := range routes {
@@ -83,8 +83,8 @@ func TestGetStationsByScenario(t *testing.T) {
 	sc, _ := store.GetScenarioBySlug("ca-hsr")
 	stations := store.GetStationsByScenario(sc.ID)
 
-	if len(stations) != 15 {
-		t.Errorf("expected 15 stations, got %d", len(stations))
+	if len(stations) != 13 {
+		t.Errorf("expected 13 Phase 1 stations (Brightline West deferred), got %d", len(stations))
 	}
 
 	slugsSeen := make(map[string]bool)
@@ -105,11 +105,16 @@ func TestGetStationsByScenario(t *testing.T) {
 	}
 
 	required := []string{"sf", "millbrae", "san-jose", "gilroy", "merced", "madera",
-		"fresno", "kings-tulare", "bakersfield", "palmdale", "victor-valley",
-		"burbank-airport", "los-angeles", "anaheim", "las-vegas"}
+		"fresno", "kings-tulare", "bakersfield", "palmdale",
+		"burbank-airport", "los-angeles", "anaheim"}
 	for _, slug := range required {
 		if !slugsSeen[slug] {
 			t.Errorf("missing required station slug %q", slug)
+		}
+	}
+	for _, deferred := range []string{"victor-valley", "las-vegas"} {
+		if slugsSeen[deferred] {
+			t.Errorf("deferred Brightline West station %q should not be loaded", deferred)
 		}
 	}
 }
@@ -119,8 +124,8 @@ func TestGetServicesByScenario(t *testing.T) {
 	sc, _ := store.GetScenarioBySlug("ca-hsr")
 	services := store.GetServicesByScenario(sc.ID)
 
-	if len(services) < 3 {
-		t.Fatalf("expected at least 3 services, got %d", len(services))
+	if len(services) != 2 {
+		t.Fatalf("expected 2 active services (Express + Local; Brightline West deferred), got %d", len(services))
 	}
 
 	for _, svc := range services {
