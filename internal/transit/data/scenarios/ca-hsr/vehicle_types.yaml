@@ -1,0 +1,14 @@
+# Siemens Venture EMU — the trainset expected for CA HSR Phase 1.
+# Performance figures based on Siemens Venture platform specifications and Siemens Velaro
+# family benchmarks adapted for US HSR operations.  Max speed reflects Phase 1 track design
+# speed of 320 km/h; acceleration/deceleration are representative trapezoidal-profile values.
+# Sources: Siemens Mobility Venture EMU product sheet; CA HSR 2026 Business Plan.
+- id: "00000000-0000-4003-8001-000000000001"
+  name: "Siemens Venture EMU (electric)"
+  propulsion: "electric"
+  max_speed_kmh: 320
+  acceleration_ms2: 0.5
+  deceleration_ms2: 0.65
+  floor_height: "high"
+  dwell_level_s: 90
+  dwell_step_s: 180

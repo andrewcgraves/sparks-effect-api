@@ -1,4 +1,3 @@
-// Command api runs the Sparks Effect REST API.
 package main
 
 import (
@@ -13,11 +12,18 @@ import (
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
 	"github.com/andrewcgraves/sparks-effect-api/internal/server"
+	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
 func main() {
 	cfg := config.Load()
-	srv := server.New(cfg)
+
+	store, err := transit.NewStore()
+	if err != nil {
+		log.Fatalf("failed to load transit data: %v", err)
+	}
+
+	srv := server.New(cfg, store)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

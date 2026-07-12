@@ -1,4 +1,3 @@
-// Package server wires up the HTTP routes and server for the API.
 package server
 
 import (
@@ -8,13 +7,22 @@ import (
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
+	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
 // New builds an *http.Server with all routes registered, ready to be
 // started by the caller.
-func New(cfg config.Config) *http.Server {
+func New(cfg config.Config, store *transit.Store) *http.Server {
 	mux := http.NewServeMux()
+
 	mux.HandleFunc("GET /healthz", handler.Health)
+
+	mux.HandleFunc("GET /api/scenarios", handler.Scenarios(store))
+	mux.HandleFunc("GET /api/scenarios/{slug}", handler.ScenarioBySlug(store))
+	mux.HandleFunc("GET /api/scenarios/{slug}/routes", handler.ScenarioRoutes(store))
+	mux.HandleFunc("GET /api/scenarios/{slug}/services", handler.ScenarioServices(store))
+	mux.HandleFunc("GET /api/scenarios/{slug}/stations", handler.ScenarioStations(store))
+	mux.HandleFunc("GET /api/scenarios/{slug}/travel-times", handler.ScenarioTravelTimes(store))
 
 	return &http.Server{
 		Addr:              ":" + cfg.Port,

@@ -1,0 +1,58 @@
+# Adjacent segment travel times in minutes.
+# Source: CA HSR 2026 Business Plan travel-time matrix (https://hsr.ca.gov/communications-outreach/reports/business-plans/2026-business-plan/).
+# Each entry represents the time between two consecutive stops on a service.
+# Segments are ordered in the primary service direction (SF → Anaheim for Phase 1).
+# Brightline West spur segments (Palmdale → Las Vegas) are commented out for later use.
+#
+# Multi-hop origin–destination times are derived by summing consecutive segments in code
+# (see Store.TravelTimeBetween). This replaces the full NxN matrix; callers do not store
+# computed OD times — the store sums on demand.
+#
+# Station slugs match stations.yaml slug values.
+
+scenario_slug: "ca-hsr"
+segments:
+  # Phase 1: San Francisco → Anaheim (service direction)
+  - from: sf
+    to: millbrae
+    minutes: 15
+  - from: millbrae
+    to: san-jose
+    minutes: 39
+  - from: san-jose
+    to: gilroy
+    minutes: 21
+  - from: gilroy
+    to: merced
+    minutes: 56
+  - from: merced
+    to: madera
+    minutes: 20
+  - from: madera
+    to: fresno
+    minutes: 9
+  - from: fresno
+    to: kings-tulare
+    minutes: 13
+  - from: kings-tulare
+    to: bakersfield
+    minutes: 25
+  - from: bakersfield
+    to: palmdale
+    minutes: 31
+  - from: palmdale
+    to: burbank-airport
+    minutes: 46
+  - from: burbank-airport
+    to: los-angeles
+    minutes: 17
+  - from: los-angeles
+    to: anaheim
+    minutes: 32
+  # --- Brightline West (deferred) — Palmdale → Las Vegas ---
+  # - from: palmdale
+  #   to: victor-valley
+  #   minutes: 19
+  # - from: victor-valley
+  #   to: las-vegas
+  #   minutes: 90
