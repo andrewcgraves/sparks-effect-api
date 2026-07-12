@@ -172,23 +172,68 @@ func TestGetTravelTimes(t *testing.T) {
 	if tt.ScenarioSlug != "ca-hsr" {
 		t.Errorf("scenario_slug: want ca-hsr, got %s", tt.ScenarioSlug)
 	}
-	if len(tt.MinutesMatrix) == 0 {
-		t.Error("minutes_matrix is empty")
+	if len(tt.Segments) == 0 {
+		t.Error("segments is empty")
 	}
 
-	sfRow, ok := tt.MinutesMatrix["sf"]
-	if !ok {
-		t.Fatal("sf row missing from minutes_matrix")
+	found := false
+	for _, seg := range tt.Segments {
+		if seg.FromSlug == "sf" && seg.ToSlug == "millbrae" {
+			if seg.Minutes != 15 {
+				t.Errorf("sf→millbrae: want 15, got %d", seg.Minutes)
+			}
+			found = true
+		}
 	}
-	if sfRow["millbrae"] != 15 {
-		t.Errorf("sf→millbrae: want 15, got %d", sfRow["millbrae"])
-	}
-	if sfRow["los-angeles"] != 269 {
-		t.Errorf("sf→los-angeles: want 269, got %d", sfRow["los-angeles"])
+	if !found {
+		t.Error("sf→millbrae segment not found")
 	}
 
 	_, ok = store.GetTravelTimes("no-such-scenario")
 	if ok {
 		t.Error("expected false for unknown scenario slug")
+	}
+}
+
+func TestTravelTimeBetween(t *testing.T) {
+	store := mustNewStore(t)
+
+	got, ok := store.TravelTimeBetween("ca-hsr", "sf", "millbrae")
+	if !ok {
+		t.Fatal("TravelTimeBetween: sf→millbrae not found")
+	}
+	if got != 15 {
+		t.Errorf("sf→millbrae: want 15, got %d", got)
+	}
+
+	got, ok = store.TravelTimeBetween("ca-hsr", "sf", "san-jose")
+	if !ok {
+		t.Fatal("TravelTimeBetween: sf→san-jose not found")
+	}
+	if got != 54 {
+		t.Errorf("sf→san-jose: want 54 (15+39), got %d", got)
+	}
+
+	got, ok = store.TravelTimeBetween("ca-hsr", "millbrae", "sf")
+	if !ok {
+		t.Fatal("TravelTimeBetween: millbrae→sf (reverse) not found")
+	}
+	if got != 15 {
+		t.Errorf("millbrae→sf (reverse): want 15, got %d", got)
+	}
+
+	got, ok = store.TravelTimeBetween("ca-hsr", "sf", "sf")
+	if !ok || got != 0 {
+		t.Errorf("sf→sf: want (0, true), got (%d, %v)", got, ok)
+	}
+
+	_, ok = store.TravelTimeBetween("no-such-scenario", "sf", "millbrae")
+	if ok {
+		t.Error("expected false for unknown scenario slug")
+	}
+
+	_, ok = store.TravelTimeBetween("ca-hsr", "sf", "no-such-station")
+	if ok {
+		t.Error("expected false for unknown station slug")
 	}
 }

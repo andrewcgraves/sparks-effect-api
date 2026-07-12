@@ -145,10 +145,54 @@ func (s *Store) GetVehicleTypeByID(id string) (VehicleType, bool) {
 	return VehicleType{}, false
 }
 
-// GetTravelTimes returns the travel-time matrix for the given scenario slug.
+// GetTravelTimes returns the segment-based travel times for the given scenario slug.
 func (s *Store) GetTravelTimes(scenarioSlug string) (TravelTimes, bool) {
 	tt, ok := s.travelTimes[scenarioSlug]
 	return tt, ok
+}
+
+// TravelTimeBetween returns the travel time in minutes between two stations by summing
+// adjacent segments along the connecting route. Returns false if no path exists.
+func (s *Store) TravelTimeBetween(scenarioSlug, fromSlug, toSlug string) (int, bool) {
+	tt, ok := s.travelTimes[scenarioSlug]
+	if !ok {
+		return 0, false
+	}
+	if fromSlug == toSlug {
+		return 0, true
+	}
+
+	type edge struct {
+		to      string
+		minutes int
+	}
+	adj := make(map[string][]edge, len(tt.Segments)*2)
+	for _, seg := range tt.Segments {
+		adj[seg.FromSlug] = append(adj[seg.FromSlug], edge{seg.ToSlug, seg.Minutes})
+		adj[seg.ToSlug] = append(adj[seg.ToSlug], edge{seg.FromSlug, seg.Minutes})
+	}
+
+	type state struct {
+		slug    string
+		minutes int
+	}
+	visited := map[string]bool{fromSlug: true}
+	queue := []state{{fromSlug, 0}}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		for _, e := range adj[cur.slug] {
+			total := cur.minutes + e.minutes
+			if e.to == toSlug {
+				return total, true
+			}
+			if !visited[e.to] {
+				visited[e.to] = true
+				queue = append(queue, state{e.to, total})
+			}
+		}
+	}
+	return 0, false
 }
 
 func unmarshalFile(fsys embed.FS, path string, v any) error {

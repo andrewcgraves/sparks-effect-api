@@ -150,7 +150,7 @@ func ScenarioStations(store *transit.Store) http.HandlerFunc {
 	}
 }
 
-// ScenarioTravelTimes returns a handler that returns the travel-time matrix for a scenario.
+// ScenarioTravelTimes returns a handler that returns the adjacent segment travel times for a scenario.
 func ScenarioTravelTimes(store *transit.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		slug := r.PathValue("slug")

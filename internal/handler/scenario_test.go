@@ -336,9 +336,9 @@ func TestScenarioTravelTimes_found(t *testing.T) {
 	if body["scenario_slug"] != "ca-hsr" {
 		t.Errorf("scenario_slug: want ca-hsr, got %v", body["scenario_slug"])
 	}
-	matrix, ok := body["minutes_matrix"].(map[string]any)
-	if !ok || len(matrix) == 0 {
-		t.Error("expected non-empty minutes_matrix")
+	segments, ok := body["segments"].([]any)
+	if !ok || len(segments) == 0 {
+		t.Error("expected non-empty segments")
 	}
 }
 
