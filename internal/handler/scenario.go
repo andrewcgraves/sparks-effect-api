@@ -1,8 +1,6 @@
 package handler
 
 import (
-	"encoding/json"
-	"log"
 	"net/http"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
@@ -59,10 +57,6 @@ func Scenarios(store *transit.Store) http.HandlerFunc {
 		}
 		writeJSON(w, http.StatusOK, items)
 	}
-}
-
-func writeError(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
 }
 
 // ScenarioBySlug returns a handler that fetches one scenario by slug with its
@@ -160,13 +154,5 @@ func ScenarioTravelTimes(store *transit.Store) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusOK, tt)
-	}
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(v); err != nil {
-		log.Printf("scenario handler: failed to write response: %v", err)
 	}
 }

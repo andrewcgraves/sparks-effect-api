@@ -11,19 +11,27 @@ import (
 	"time"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
+	"github.com/andrewcgraves/sparks-effect-api/internal/isochrone"
 	"github.com/andrewcgraves/sparks-effect-api/internal/server"
+	"github.com/andrewcgraves/sparks-effect-api/internal/stadia"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
 func main() {
 	cfg := config.Load()
+	if cfg.StadiaAPIKey == "" {
+		log.Fatal("STADIA_API_KEY must be set")
+	}
 
 	store, err := transit.NewStore()
 	if err != nil {
 		log.Fatalf("failed to load transit data: %v", err)
 	}
 
-	srv := server.New(cfg, store)
+	stadiaClient := stadia.NewHTTPClient(cfg.StadiaAPIKey)
+	isoChainer := isochrone.New(stadiaClient, store)
+
+	srv := server.New(cfg, store, isoChainer)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

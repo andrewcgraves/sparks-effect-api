@@ -7,13 +7,16 @@ import "os"
 type Config struct {
 	// Port is the TCP port the HTTP server listens on.
 	Port string
+	// StadiaAPIKey is the Stadia Maps API key for routing calls.
+	StadiaAPIKey string
 }
 
 // Load reads configuration from environment variables, applying defaults
 // for anything unset.
 func Load() Config {
 	return Config{
-		Port: getEnv("PORT", "8080"),
+		Port:         getEnv("PORT", "8080"),
+		StadiaAPIKey: os.Getenv("STADIA_API_KEY"),
 	}
 }
 
