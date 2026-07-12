@@ -61,6 +61,10 @@ func Scenarios(store *transit.Store) http.HandlerFunc {
 	}
 }
 
+func writeError(w http.ResponseWriter, status int, msg string) {
+	writeJSON(w, status, map[string]string{"error": msg})
+}
+
 // ScenarioBySlug returns a handler that fetches one scenario by slug with its
 // routes, stations, and service summaries.
 func ScenarioBySlug(store *transit.Store) http.HandlerFunc {
@@ -68,7 +72,7 @@ func ScenarioBySlug(store *transit.Store) http.HandlerFunc {
 		slug := r.PathValue("slug")
 		sc, ok := store.GetScenarioBySlug(slug)
 		if !ok {
-			http.Error(w, `{"error":"scenario not found"}`, http.StatusNotFound)
+			writeError(w, http.StatusNotFound, "scenario not found")
 			return
 		}
 
@@ -113,7 +117,7 @@ func ScenarioRoutes(store *transit.Store) http.HandlerFunc {
 		slug := r.PathValue("slug")
 		sc, ok := store.GetScenarioBySlug(slug)
 		if !ok {
-			http.Error(w, `{"error":"scenario not found"}`, http.StatusNotFound)
+			writeError(w, http.StatusNotFound, "scenario not found")
 			return
 		}
 		writeJSON(w, http.StatusOK, store.GetRoutesByScenario(sc.ID))
@@ -126,10 +130,36 @@ func ScenarioServices(store *transit.Store) http.HandlerFunc {
 		slug := r.PathValue("slug")
 		sc, ok := store.GetScenarioBySlug(slug)
 		if !ok {
-			http.Error(w, `{"error":"scenario not found"}`, http.StatusNotFound)
+			writeError(w, http.StatusNotFound, "scenario not found")
 			return
 		}
 		writeJSON(w, http.StatusOK, store.GetServicesByScenario(sc.ID))
+	}
+}
+
+// ScenarioStations returns a handler that lists the stations for a scenario.
+func ScenarioStations(store *transit.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		slug := r.PathValue("slug")
+		sc, ok := store.GetScenarioBySlug(slug)
+		if !ok {
+			writeError(w, http.StatusNotFound, "scenario not found")
+			return
+		}
+		writeJSON(w, http.StatusOK, store.GetStationsByScenario(sc.ID))
+	}
+}
+
+// ScenarioTravelTimes returns a handler that returns the travel-time matrix for a scenario.
+func ScenarioTravelTimes(store *transit.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		slug := r.PathValue("slug")
+		tt, ok := store.GetTravelTimes(slug)
+		if !ok {
+			writeError(w, http.StatusNotFound, "scenario not found")
+			return
+		}
+		writeJSON(w, http.StatusOK, tt)
 	}
 }
 

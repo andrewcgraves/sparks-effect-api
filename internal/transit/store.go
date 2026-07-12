@@ -128,7 +128,7 @@ func (s *Store) GetStationsByScenario(scenarioID string) []Station {
 func (s *Store) GetServicesByScenario(scenarioID string) []Service {
 	var out []Service
 	for _, svc := range s.services {
-		if svc.ScenarioID == scenarioID {
+		if svc.ScenarioID == scenarioID && svc.Active {
 			out = append(out, svc)
 		}
 	}

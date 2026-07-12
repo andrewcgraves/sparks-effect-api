@@ -117,6 +117,26 @@ func TestScenarioBySlug_notFound(t *testing.T) {
 	}
 }
 
+func TestScenarioBySlug_notFound_contentType(t *testing.T) {
+	store := mustNewStore(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/scenarios/does-not-exist", nil)
+	req.SetPathValue("slug", "does-not-exist")
+	rec := httptest.NewRecorder()
+
+	ScenarioBySlug(store)(rec, req)
+
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type: want application/json, got %q", ct)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body["error"] == "" {
+		t.Error("expected non-empty error field")
+	}
+}
+
 func TestScenarioRoutes_found(t *testing.T) {
 	store := mustNewStore(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/scenarios/ca-hsr/routes", nil)
@@ -165,6 +185,26 @@ func TestScenarioRoutes_notFound(t *testing.T) {
 	}
 }
 
+func TestScenarioRoutes_notFound_contentType(t *testing.T) {
+	store := mustNewStore(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/scenarios/nope/routes", nil)
+	req.SetPathValue("slug", "nope")
+	rec := httptest.NewRecorder()
+
+	ScenarioRoutes(store)(rec, req)
+
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type: want application/json, got %q", ct)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body["error"] == "" {
+		t.Error("expected non-empty error field")
+	}
+}
+
 func TestScenarioServices_found(t *testing.T) {
 	store := mustNewStore(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/scenarios/ca-hsr/services", nil)
@@ -192,6 +232,9 @@ func TestScenarioServices_found(t *testing.T) {
 		if !ok || len(stops) == 0 {
 			t.Errorf("service %v has no stops", svc["name"])
 		}
+		if svc["active"] != true {
+			t.Errorf("service %v has active != true", svc["name"])
+		}
 	}
 }
 
@@ -205,5 +248,119 @@ func TestScenarioServices_notFound(t *testing.T) {
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", rec.Code)
+	}
+}
+
+func TestScenarioServices_notFound_contentType(t *testing.T) {
+	store := mustNewStore(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/scenarios/nope/services", nil)
+	req.SetPathValue("slug", "nope")
+	rec := httptest.NewRecorder()
+
+	ScenarioServices(store)(rec, req)
+
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type: want application/json, got %q", ct)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body["error"] == "" {
+		t.Error("expected non-empty error field")
+	}
+}
+
+func TestScenarioStations_found(t *testing.T) {
+	store := mustNewStore(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/scenarios/ca-hsr/stations", nil)
+	req.SetPathValue("slug", "ca-hsr")
+	rec := httptest.NewRecorder()
+
+	ScenarioStations(store)(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var stations []map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &stations); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(stations) < 15 {
+		t.Fatalf("expected at least 15 stations, got %d", len(stations))
+	}
+	for _, st := range stations {
+		if st["slug"] == nil || st["slug"] == "" {
+			t.Errorf("station missing slug: %v", st["id"])
+		}
+		loc, ok := st["location"].(map[string]any)
+		if !ok || loc["type"] != "Point" {
+			t.Errorf("station %v location.type: want Point, got %v", st["slug"], loc["type"])
+		}
+	}
+}
+
+func TestScenarioStations_notFound(t *testing.T) {
+	store := mustNewStore(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/scenarios/nope/stations", nil)
+	req.SetPathValue("slug", "nope")
+	rec := httptest.NewRecorder()
+
+	ScenarioStations(store)(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type: want application/json, got %q", ct)
+	}
+}
+
+func TestScenarioTravelTimes_found(t *testing.T) {
+	store := mustNewStore(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/scenarios/ca-hsr/travel-times", nil)
+	req.SetPathValue("slug", "ca-hsr")
+	rec := httptest.NewRecorder()
+
+	ScenarioTravelTimes(store)(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body["scenario_slug"] != "ca-hsr" {
+		t.Errorf("scenario_slug: want ca-hsr, got %v", body["scenario_slug"])
+	}
+	matrix, ok := body["minutes_matrix"].(map[string]any)
+	if !ok || len(matrix) == 0 {
+		t.Error("expected non-empty minutes_matrix")
+	}
+}
+
+func TestScenarioTravelTimes_notFound(t *testing.T) {
+	store := mustNewStore(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/scenarios/nope/travel-times", nil)
+	req.SetPathValue("slug", "nope")
+	rec := httptest.NewRecorder()
+
+	ScenarioTravelTimes(store)(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type: want application/json, got %q", ct)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body["error"] != "scenario not found" {
+		t.Errorf("error: want 'scenario not found', got %q", body["error"])
 	}
 }

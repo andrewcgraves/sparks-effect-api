@@ -4,6 +4,15 @@ import (
 	"testing"
 )
 
+func mustNewStore(t *testing.T) *Store {
+	t.Helper()
+	s, err := NewStore()
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	return s
+}
+
 func TestNewStore(t *testing.T) {
 	store, err := NewStore()
 	if err != nil {
@@ -15,7 +24,7 @@ func TestNewStore(t *testing.T) {
 }
 
 func TestGetScenarios(t *testing.T) {
-	store, _ := NewStore()
+	store := mustNewStore(t)
 	scenarios := store.GetScenarios()
 	if len(scenarios) == 0 {
 		t.Fatal("expected at least one scenario")
@@ -23,7 +32,7 @@ func TestGetScenarios(t *testing.T) {
 }
 
 func TestGetScenarioBySlug_found(t *testing.T) {
-	store, _ := NewStore()
+	store := mustNewStore(t)
 	sc, ok := store.GetScenarioBySlug("ca-hsr")
 	if !ok {
 		t.Fatal("ca-hsr scenario not found")
@@ -40,7 +49,7 @@ func TestGetScenarioBySlug_found(t *testing.T) {
 }
 
 func TestGetScenarioBySlug_notFound(t *testing.T) {
-	store, _ := NewStore()
+	store := mustNewStore(t)
 	_, ok := store.GetScenarioBySlug("does-not-exist")
 	if ok {
 		t.Error("expected not found for unknown slug")
@@ -48,7 +57,7 @@ func TestGetScenarioBySlug_notFound(t *testing.T) {
 }
 
 func TestGetRoutesByScenario(t *testing.T) {
-	store, _ := NewStore()
+	store := mustNewStore(t)
 	sc, _ := store.GetScenarioBySlug("ca-hsr")
 	routes := store.GetRoutesByScenario(sc.ID)
 
@@ -70,7 +79,7 @@ func TestGetRoutesByScenario(t *testing.T) {
 }
 
 func TestGetStationsByScenario(t *testing.T) {
-	store, _ := NewStore()
+	store := mustNewStore(t)
 	sc, _ := store.GetScenarioBySlug("ca-hsr")
 	stations := store.GetStationsByScenario(sc.ID)
 
@@ -106,7 +115,7 @@ func TestGetStationsByScenario(t *testing.T) {
 }
 
 func TestGetServicesByScenario(t *testing.T) {
-	store, _ := NewStore()
+	store := mustNewStore(t)
 	sc, _ := store.GetScenarioBySlug("ca-hsr")
 	services := store.GetServicesByScenario(sc.ID)
 
@@ -115,6 +124,9 @@ func TestGetServicesByScenario(t *testing.T) {
 	}
 
 	for _, svc := range services {
+		if !svc.Active {
+			t.Errorf("service %q has Active == false", svc.Name)
+		}
 		if len(svc.Stops) == 0 {
 			t.Errorf("service %q has no stops", svc.Name)
 		}
@@ -130,7 +142,7 @@ func TestGetServicesByScenario(t *testing.T) {
 }
 
 func TestGetVehicleTypeByID(t *testing.T) {
-	store, _ := NewStore()
+	store := mustNewStore(t)
 	sc, _ := store.GetScenarioBySlug("ca-hsr")
 	services := store.GetServicesByScenario(sc.ID)
 
@@ -151,7 +163,7 @@ func TestGetVehicleTypeByID(t *testing.T) {
 }
 
 func TestGetTravelTimes(t *testing.T) {
-	store, _ := NewStore()
+	store := mustNewStore(t)
 
 	tt, ok := store.GetTravelTimes("ca-hsr")
 	if !ok {

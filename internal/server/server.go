@@ -21,6 +21,8 @@ func New(cfg config.Config, store *transit.Store) *http.Server {
 	mux.HandleFunc("GET /api/scenarios/{slug}", handler.ScenarioBySlug(store))
 	mux.HandleFunc("GET /api/scenarios/{slug}/routes", handler.ScenarioRoutes(store))
 	mux.HandleFunc("GET /api/scenarios/{slug}/services", handler.ScenarioServices(store))
+	mux.HandleFunc("GET /api/scenarios/{slug}/stations", handler.ScenarioStations(store))
+	mux.HandleFunc("GET /api/scenarios/{slug}/travel-times", handler.ScenarioTravelTimes(store))
 
 	return &http.Server{
 		Addr:              ":" + cfg.Port,
