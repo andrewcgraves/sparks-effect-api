@@ -12,14 +12,18 @@ frontend can call to compute transit reach for a given route.
 
 ## Getting started
 
-Clone the repo and run the server locally:
+Clone the repo, set up your local environment, and run:
 
 ```sh
+cp .env.example .env
+# Edit .env and fill in STADIA_API_KEY
 make run
 ```
 
 This builds the binary to `bin/sparks-effect-api` and starts it, listening on
-`:8080` by default. Override the port with the `PORT` environment variable:
+`:8080` by default. The server loads `.env` automatically on startup if the
+file exists — variables already set in the shell take precedence. Override the
+port with `PORT` in `.env` or your shell:
 
 ```sh
 PORT=9090 make run

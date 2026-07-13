@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/joho/godotenv"
+
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
 	"github.com/andrewcgraves/sparks-effect-api/internal/isochrone"
 	"github.com/andrewcgraves/sparks-effect-api/internal/server"
@@ -18,6 +20,7 @@ import (
 )
 
 func main() {
+	_ = godotenv.Load()
 	cfg := config.Load()
 	if cfg.StadiaAPIKey == "" {
 		log.Fatal("STADIA_API_KEY must be set")
