@@ -27,3 +27,21 @@ func TestLoad_fromEnv(t *testing.T) {
 		t.Errorf("StadiaAPIKey: want test-key, got %q", cfg.StadiaAPIKey)
 	}
 }
+
+func TestLoad_allowLocalhostCORS_defaultsFalse(t *testing.T) {
+	t.Setenv("ALLOW_LOCALHOST_CORS", "")
+
+	cfg := Load()
+	if cfg.AllowLocalhostCORS {
+		t.Error("AllowLocalhostCORS: want false by default, got true")
+	}
+}
+
+func TestLoad_allowLocalhostCORS_enabledByEnv(t *testing.T) {
+	t.Setenv("ALLOW_LOCALHOST_CORS", "true")
+
+	cfg := Load()
+	if !cfg.AllowLocalhostCORS {
+		t.Error("AllowLocalhostCORS: want true when ALLOW_LOCALHOST_CORS=true, got false")
+	}
+}
