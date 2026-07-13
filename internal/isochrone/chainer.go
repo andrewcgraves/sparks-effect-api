@@ -15,9 +15,14 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-const stadiaMaxMatrixDests = 600
-
-const stadiaMaxIsoDistanceM = 20_000.0
+const (
+	stadiaMaxMatrixDests  = 600
+	stadiaMaxIsoDistanceM = 20_000.0
+	roadDetourFactor      = 1.4
+	walkSpeedKmH          = 5.0
+	bikeSpeedKmH          = 15.0
+	driveSpeedKmH         = 80.0
+)
 
 func haversineKm(lat1, lng1, lat2, lng2 float64) float64 {
 	const R = 6371.0
@@ -29,30 +34,27 @@ func haversineKm(lat1, lng1, lat2, lng2 float64) float64 {
 	return R * 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
 }
 
-func maxReachKm(mode Mode, budgetMins int) float64 {
-	const roadFactor = 1.4
-	var speedKmH float64
+func modeSpeedKmH(mode Mode) float64 {
 	switch mode {
 	case ModeWalk:
-		speedKmH = 5.0
+		return walkSpeedKmH
 	case ModeBike:
-		speedKmH = 15.0
+		return bikeSpeedKmH
 	case ModeDrive:
-		speedKmH = 80.0
+		return driveSpeedKmH
+	default:
+		return 0
 	}
-	return speedKmH * float64(budgetMins) / 60.0 / roadFactor
+}
+
+func approxAccessReachKm(mode Mode, budgetMins int) float64 {
+	budgetReachKm := modeSpeedKmH(mode) * float64(budgetMins) / 60.0 / roadDetourFactor
+	stadiaPathLimitKm := stadiaMaxIsoDistanceM / 1000.0
+	return math.Min(budgetReachKm, stadiaPathLimitKm)
 }
 
 func safeIsoBudgetSecs(mode Mode, budgetSecs int) int {
-	var speedMS float64
-	switch mode {
-	case ModeWalk:
-		speedMS = 5.0 * 1000 / 3600
-	case ModeBike:
-		speedMS = 15.0 * 1000 / 3600
-	case ModeDrive:
-		speedMS = 80.0 * 1000 / 3600
-	}
+	speedMS := modeSpeedKmH(mode) * 1000 / 3600
 	maxSecs := int(stadiaMaxIsoDistanceM / speedMS)
 	if budgetSecs > maxSecs {
 		return maxSecs
@@ -112,7 +114,7 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 	stations := c.store.GetStationsByScenario(scenario.ID)
 	c.log.Debugf("chain: %d stations in scenario", len(stations))
 
-	reachKm := maxReachKm(req.Mode, req.BudgetMins)
+	reachKm := approxAccessReachKm(req.Mode, req.BudgetMins)
 	var nearbyStations []transit.Station
 	for _, st := range stations {
 		if haversineKm(req.Lat, req.Lng, st.Location.Coordinates[1], st.Location.Coordinates[0]) <= reachKm {

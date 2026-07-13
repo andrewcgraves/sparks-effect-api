@@ -379,6 +379,45 @@ func TestChainer_haversineFilterExcludesFarStations(t *testing.T) {
 	}
 }
 
+func TestChainer_matrixReachClampedToStadiaPathLimit(t *testing.T) {
+	store := &fakeTransitData{
+		scenario: transit.Scenario{ID: "sc1", Slug: "test-sc"},
+		stations: []transit.Station{
+			{
+				ID: "st1", ScenarioID: "sc1", Slug: "station-near",
+				Location: transit.GeoPoint{Type: "Point", Coordinates: []float64{-122.39, 37.71}},
+			},
+			{
+				ID: "st2", ScenarioID: "sc1", Slug: "station-30km",
+				Location: transit.GeoPoint{Type: "Point", Coordinates: []float64{-122.06, 37.71}},
+			},
+		},
+	}
+	fc := &stadia.FakeClient{
+		IsochroneResp: cannedIso(),
+		MatrixResp: &stadia.MatrixResponse{
+			SourcesToTargets: [][]stadia.MatrixCell{
+				{{Time: 600, Distance: 1.0}},
+			},
+		},
+	}
+	chainer := isochrone.New(fc, store, logger.Discard())
+
+	_, err := chainer.Chain(context.Background(), isochrone.ChainRequest{
+		Lat: 37.7, Lng: -122.4, BudgetMins: 90,
+		Mode: isochrone.ModeDrive, ScenarioSlug: "test-sc",
+	})
+	if err != nil {
+		t.Fatalf("Chain: %v", err)
+	}
+	if len(fc.MatrixCalls) != 1 {
+		t.Fatalf("MatrixCalls: want 1, got %d", len(fc.MatrixCalls))
+	}
+	if got := len(fc.MatrixCalls[0].Destinations); got != 1 {
+		t.Errorf("Destinations: want 1 (30 km station beyond 20 km Stadia path limit), got %d", got)
+	}
+}
+
 func TestChainer_matrixCap600_truncated(t *testing.T) {
 	const stationCount = 620
 	stations := make([]transit.Station, stationCount)
