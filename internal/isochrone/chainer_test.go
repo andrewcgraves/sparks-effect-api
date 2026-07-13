@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/isochrone"
+	"github.com/andrewcgraves/sparks-effect-api/internal/logger"
 	"github.com/andrewcgraves/sparks-effect-api/internal/stadia"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
@@ -89,7 +90,7 @@ func TestChainer_happyPath_twoStations(t *testing.T) {
 		},
 	}
 	store := newTestData()
-	chainer := isochrone.New(fc, store)
+	chainer := isochrone.New(fc, store, logger.Discard())
 
 	resp, err := chainer.Chain(context.Background(), isochrone.ChainRequest{
 		Lat:          37.7,
@@ -126,7 +127,7 @@ func TestChainer_noStations(t *testing.T) {
 		scenario: transit.Scenario{ID: "sc1", Slug: "test-sc"},
 		stations: []transit.Station{},
 	}
-	chainer := isochrone.New(fc, store)
+	chainer := isochrone.New(fc, store, logger.Discard())
 
 	resp, err := chainer.Chain(context.Background(), isochrone.ChainRequest{
 		Lat: 37.7, Lng: -122.4, BudgetMins: 30,
@@ -160,7 +161,7 @@ func TestChainer_allUnreachable(t *testing.T) {
 			},
 		},
 	}
-	chainer := isochrone.New(fc, newTestData())
+	chainer := isochrone.New(fc, newTestData(), logger.Discard())
 
 	resp, err := chainer.Chain(context.Background(), isochrone.ChainRequest{
 		Lat: 37.7, Lng: -122.4, BudgetMins: 30,
@@ -191,7 +192,7 @@ func TestChainer_zeroRemainingExcludesStation(t *testing.T) {
 			},
 		},
 	}
-	chainer := isochrone.New(fc, newTestData())
+	chainer := isochrone.New(fc, newTestData(), logger.Discard())
 
 	resp, err := chainer.Chain(context.Background(), isochrone.ChainRequest{
 		Lat: 37.7, Lng: -122.4, BudgetMins: 30,
@@ -228,7 +229,7 @@ func TestChainer_directAccess_AequalsB(t *testing.T) {
 			},
 		},
 	}
-	chainer := isochrone.New(fc, store)
+	chainer := isochrone.New(fc, store, logger.Discard())
 
 	resp, err := chainer.Chain(context.Background(), isochrone.ChainRequest{
 		Lat: 37.7, Lng: -122.4, BudgetMins: 60,
@@ -287,7 +288,7 @@ func TestChainer_concurrentFanOut_noRace(t *testing.T) {
 		travelTimes: tt,
 	}
 
-	chainer := isochrone.New(fc, store)
+	chainer := isochrone.New(fc, store, logger.Discard())
 	_, err := chainer.Chain(context.Background(), isochrone.ChainRequest{
 		Lat: 37.7, Lng: -122.4, BudgetMins: 90,
 		Mode: isochrone.ModeWalk, ScenarioSlug: "test-sc",
@@ -300,7 +301,7 @@ func TestChainer_concurrentFanOut_noRace(t *testing.T) {
 func TestChainer_ErrScenarioNotFound(t *testing.T) {
 	fc := &stadia.FakeClient{}
 	store := newTestData()
-	chainer := isochrone.New(fc, store)
+	chainer := isochrone.New(fc, store, logger.Discard())
 
 	_, err := chainer.Chain(context.Background(), isochrone.ChainRequest{
 		Lat: 37.7, Lng: -122.4, BudgetMins: 30,
@@ -320,7 +321,7 @@ func TestChainer_ErrScenarioNotFound(t *testing.T) {
 func TestChainer_ErrInvalidMode(t *testing.T) {
 	fc := &stadia.FakeClient{}
 	store := newTestData()
-	chainer := isochrone.New(fc, store)
+	chainer := isochrone.New(fc, store, logger.Discard())
 
 	_, err := chainer.Chain(context.Background(), isochrone.ChainRequest{
 		Lat: 37.7, Lng: -122.4, BudgetMins: 30,

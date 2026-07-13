@@ -8,12 +8,13 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/isochrone"
+	"github.com/andrewcgraves/sparks-effect-api/internal/logger"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
 // New builds an *http.Server with all routes registered, ready to be
 // started by the caller.
-func New(cfg config.Config, store *transit.Store, chainer isochrone.Chainer) *http.Server {
+func New(cfg config.Config, store *transit.Store, chainer isochrone.Chainer, lg *logger.Logger) *http.Server {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", handler.Health)
@@ -25,7 +26,7 @@ func New(cfg config.Config, store *transit.Store, chainer isochrone.Chainer) *ht
 	mux.HandleFunc("GET /api/scenarios/{slug}/stations", handler.ScenarioStations(store))
 	mux.HandleFunc("GET /api/scenarios/{slug}/travel-times", handler.ScenarioTravelTimes(store))
 
-	mux.HandleFunc("POST /api/isochrone", handler.Isochrone(chainer))
+	mux.HandleFunc("POST /api/isochrone", handler.Isochrone(chainer, lg))
 
 	return &http.Server{
 		Addr:              ":" + cfg.Port,

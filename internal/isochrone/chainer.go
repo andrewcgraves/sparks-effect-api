@@ -7,6 +7,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/logger"
 	"github.com/andrewcgraves/sparks-effect-api/internal/stadia"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
@@ -14,11 +15,12 @@ import (
 type chainImpl struct {
 	stadia stadia.Client
 	store  transit.TransitData
+	log    *logger.Logger
 }
 
 // New constructs the production chainer.
-func New(stadiaClient stadia.Client, store transit.TransitData) Chainer {
-	return &chainImpl{stadia: stadiaClient, store: store}
+func New(stadiaClient stadia.Client, store transit.TransitData, log *logger.Logger) Chainer {
+	return &chainImpl{stadia: stadiaClient, store: store, log: log}
 }
 
 func modeToCosting(m Mode) (stadia.Costing, error) {
@@ -40,12 +42,16 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 		return nil, ErrInvalidMode
 	}
 
+	c.log.Debugf("chain: lat=%.6f lng=%.6f budget_mins=%d mode=%s scenario=%s",
+		req.Lat, req.Lng, req.BudgetMins, req.Mode, req.ScenarioSlug)
+
 	scenario, ok := c.store.GetScenarioBySlug(req.ScenarioSlug)
 	if !ok {
 		return nil, ErrScenarioNotFound
 	}
 
 	stations := c.store.GetStationsByScenario(scenario.ID)
+	c.log.Debugf("chain: %d stations in scenario", len(stations))
 
 	var (
 		originIso  *stadia.IsochroneResponse
@@ -90,6 +96,8 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 		return nil, err
 	}
 
+	c.log.Debugf("chain: stadia calls done (origin iso + matrix)")
+
 	accessMins := make(map[string]int)
 	if matrixResp != nil && len(matrixResp.SourcesToTargets) > 0 {
 		row := matrixResp.SourcesToTargets[0]
@@ -99,6 +107,8 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 			}
 		}
 	}
+
+	c.log.Debugf("chain: matrix done, %d/%d stations reachable", len(accessMins), len(stations))
 
 	stationBySlug := make(map[string]transit.Station, len(stations))
 	for _, st := range stations {
@@ -149,6 +159,8 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 			})
 		}
 	}
+
+	c.log.Debugf("chain: egress fan-out %d candidates", len(egressCandidates))
 
 	egressIsos := make([]*stadia.IsochroneResponse, len(egressCandidates))
 
@@ -210,6 +222,8 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 			RemainingMins: ec.remainingMins,
 		})
 	}
+
+	c.log.Debugf("chain: complete features=%d reachable_stations=%d", len(features), len(reachableStations))
 
 	return &ChainResponse{
 		Type:     "FeatureCollection",

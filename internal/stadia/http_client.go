@@ -5,8 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
+
+	"github.com/andrewcgraves/sparks-effect-api/internal/logger"
 )
 
 const (
@@ -20,6 +23,7 @@ type HTTPClient struct {
 	isochroneURL string
 	matrixURL    string
 	httpClient   *http.Client
+	log          *logger.Logger
 }
 
 func NewHTTPClient(apiKey string) *HTTPClient {
@@ -28,6 +32,7 @@ func NewHTTPClient(apiKey string) *HTTPClient {
 		isochroneURL: defaultIsochroneURL,
 		matrixURL:    defaultMatrixURL,
 		httpClient:   &http.Client{Timeout: 10 * time.Second},
+		log:          logger.Discard(),
 	}
 }
 
@@ -38,7 +43,14 @@ func NewHTTPClientWithBase(isoURL, matURL, apiKey string) *HTTPClient {
 		isochroneURL: isoURL,
 		matrixURL:    matURL,
 		httpClient:   &http.Client{Timeout: 10 * time.Second},
+		log:          logger.Discard(),
 	}
+}
+
+// WithLogger attaches a logger and returns the client for chaining.
+func (c *HTTPClient) WithLogger(l *logger.Logger) *HTTPClient {
+	c.log = l
+	return c
 }
 
 func (c *HTTPClient) Isochrone(ctx context.Context, req IsochroneRequest) (*IsochroneResponse, error) {
@@ -53,7 +65,7 @@ func (c *HTTPClient) Isochrone(ctx context.Context, req IsochroneRequest) (*Isoc
 		"polygons": true,
 	}
 	var resp IsochroneResponse
-	if err := c.post(ctx, c.isochroneURL, body, &resp); err != nil {
+	if err := c.post(ctx, "isochrone", c.isochroneURL, body, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -74,13 +86,13 @@ func (c *HTTPClient) Matrix(ctx context.Context, req MatrixRequest) (*MatrixResp
 		"costing": req.Costing,
 	}
 	var resp MatrixResponse
-	if err := c.post(ctx, c.matrixURL, body, &resp); err != nil {
+	if err := c.post(ctx, "matrix", c.matrixURL, body, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
 }
 
-func (c *HTTPClient) post(ctx context.Context, url string, body any, out any) error {
+func (c *HTTPClient) post(ctx context.Context, endpoint, url string, body any, out any) error {
 	b, err := json.Marshal(body)
 	if err != nil {
 		return fmt.Errorf("stadia: marshal request: %w", err)
@@ -92,17 +104,30 @@ func (c *HTTPClient) post(ctx context.Context, url string, body any, out any) er
 	httpReq.Header.Set("Authorization", "Stadia-Auth "+c.apiKey)
 	httpReq.Header.Set("Content-Type", "application/json")
 
+	start := time.Now()
 	resp, err := c.httpClient.Do(httpReq)
+	latency := time.Since(start)
 	if err != nil {
+		c.log.Debugf("stadia %s: request error latency=%s err=%v", endpoint, latency, err)
 		return fmt.Errorf("stadia: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
+		snippet := readBodySnippet(resp.Body, 256)
+		c.log.Debugf("stadia %s: status=%d latency=%s body=%q", endpoint, resp.StatusCode, latency, snippet)
 		return fmt.Errorf("stadia: unexpected status %d", resp.StatusCode)
 	}
+	c.log.Debugf("stadia %s: status=%d latency=%s", endpoint, resp.StatusCode, latency)
+
 	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
 		return fmt.Errorf("stadia: decode response: %w", err)
 	}
 	return nil
+}
+
+func readBodySnippet(r io.Reader, maxBytes int) string {
+	buf := make([]byte, maxBytes)
+	n, _ := r.Read(buf)
+	return string(buf[:n])
 }

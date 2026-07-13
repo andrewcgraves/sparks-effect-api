@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/isochrone"
+	"github.com/andrewcgraves/sparks-effect-api/internal/logger"
 )
 
 type fakeChainer struct {
@@ -39,7 +40,7 @@ func postIsochrone(chainer isochrone.Chainer, body string) *httptest.ResponseRec
 	req := httptest.NewRequest(http.MethodPost, "/api/isochrone", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	Isochrone(chainer)(rec, req)
+	Isochrone(chainer, logger.Discard())(rec, req)
 	return rec
 }
 

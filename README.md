@@ -35,6 +35,33 @@ Check it's up:
 curl localhost:8080/healthz
 ```
 
+## Verbose / debug logging
+
+Set `LOG_LEVEL=debug` (or `VERBOSE=true`) to enable detailed logging for local
+debugging. When enabled the server logs:
+
+- Each isochrone request's `lat`, `lng`, `budget_mins`, `mode`, and
+  `scenario_slug`
+- Every Stadia HTTP call: endpoint name, HTTP status, latency, and — on
+  failure — a snippet of the response body. The API key and `Authorization`
+  header are never logged.
+- Chain progress: station count, matrix reachable count, egress fan-out size,
+  and final GeoJSON feature count.
+- The full error value before it is mapped to a 502 or 500 response.
+
+```sh
+LOG_LEVEL=debug make run
+```
+
+Sample request for San Jose downtown, walk 90 min, ca-hsr scenario:
+
+```sh
+curl -s -X POST http://localhost:8080/api/isochrone \
+  -H 'Content-Type: application/json' \
+  -d '{"lat":37.3382,"lng":-121.8863,"budget_mins":90,"mode":"walk","scenario_slug":"ca-hsr"}' \
+  | jq .type
+```
+
 ## Development
 
 | Command             | Description                                       |
