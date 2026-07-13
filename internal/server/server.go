@@ -3,6 +3,7 @@ package server
 import (
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
@@ -28,9 +29,14 @@ func New(cfg config.Config, store *transit.Store, chainer isochrone.Chainer, lg 
 
 	mux.HandleFunc("POST /api/isochrone", handler.Isochrone(chainer, lg))
 
+	var h http.Handler = mux
+	if cfg.AllowLocalhostCORS {
+		h = localhostCORS(h)
+	}
+
 	return &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           logRequests(mux),
+		Handler:           logRequests(h),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 }
@@ -41,4 +47,33 @@ func logRequests(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 		log.Printf("%s %s %s", r.Method, r.URL.Path, time.Since(start))
 	})
+}
+
+func localhostCORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if isLocalhostOrigin(origin) {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			w.Header().Add("Vary", "Origin")
+
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func isLocalhostOrigin(origin string) bool {
+	if origin == "" {
+		return false
+	}
+	host := origin
+	if i := strings.Index(origin, "://"); i >= 0 {
+		host = origin[i+3:]
+	}
+	return strings.HasPrefix(host, "localhost") || strings.HasPrefix(host, "127.0.0.1")
 }

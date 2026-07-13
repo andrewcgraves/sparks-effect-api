@@ -35,6 +35,16 @@ Check it's up:
 curl localhost:8080/healthz
 ```
 
+## Local SPA testing (CORS)
+
+When running the Vue frontend locally (e.g. `npm run dev` on `http://localhost:5173`), the browser will block cross-origin requests unless CORS headers are present. Enable them for localhost origins only:
+
+```sh
+ALLOW_LOCALHOST_CORS=true make run
+```
+
+Or add `ALLOW_LOCALHOST_CORS=true` to `.env`. The flag is **off by default** and must never be set in production — it only allows `localhost` and `127.0.0.1` origins, never a wildcard.
+
 ## Verbose / debug logging
 
 Set `LOG_LEVEL=debug` (or `VERBOSE=true`) to enable detailed logging for local
