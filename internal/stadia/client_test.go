@@ -3,6 +3,7 @@ package stadia_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -157,6 +158,104 @@ func TestHTTPClient_nonOK_returnsError(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for non-200 status, got nil")
+	}
+}
+
+func TestHTTPClient_400_returnsErrStadiaBadRequest(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error_code":154,"error":"Path distance exceeds the max distance limit 20000 meters","status_code":400,"status":"Bad Request"}`))
+	}))
+	defer srv.Close()
+
+	c := stadia.NewHTTPClientWithBase(srv.URL+"/isochrone/v1", srv.URL+"/matrix/v1", "test-key")
+	_, err := c.Isochrone(context.Background(), stadia.IsochroneRequest{
+		Origin:     stadia.LatLng{Lat: 37.7, Lng: -122.4},
+		Costing:    stadia.CostingPedestrian,
+		BudgetSecs: 3600,
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, stadia.ErrStadiaBadRequest) {
+		t.Errorf("want ErrStadiaBadRequest, got %v", err)
+	}
+}
+
+func TestHTTPClient_429_returnsErrStadiaRateLimit(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":"Rate Limit Exceeded"}`))
+	}))
+	defer srv.Close()
+
+	c := stadia.NewHTTPClientWithBase(srv.URL+"/isochrone/v1", srv.URL+"/matrix/v1", "test-key")
+	_, err := c.Isochrone(context.Background(), stadia.IsochroneRequest{
+		Origin:     stadia.LatLng{Lat: 37.7, Lng: -122.4},
+		Costing:    stadia.CostingPedestrian,
+		BudgetSecs: 3600,
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, stadia.ErrStadiaRateLimit) {
+		t.Errorf("want ErrStadiaRateLimit, got %v", err)
+	}
+}
+
+func TestHTTPClient_503_returnsErrStadiaUpstream(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":"Service Unavailable"}`))
+	}))
+	defer srv.Close()
+
+	c := stadia.NewHTTPClientWithBase(srv.URL+"/isochrone/v1", srv.URL+"/matrix/v1", "test-key")
+	_, err := c.Isochrone(context.Background(), stadia.IsochroneRequest{
+		Origin:     stadia.LatLng{Lat: 37.7, Lng: -122.4},
+		Costing:    stadia.CostingPedestrian,
+		BudgetSecs: 3600,
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, stadia.ErrStadiaUpstream) {
+		t.Errorf("want ErrStadiaUpstream, got %v", err)
+	}
+}
+
+func TestHTTPClient_400_emptyBody_returnsErrStadiaBadRequest(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer srv.Close()
+
+	c := stadia.NewHTTPClientWithBase(srv.URL+"/isochrone/v1", srv.URL+"/matrix/v1", "test-key")
+	_, err := c.Isochrone(context.Background(), stadia.IsochroneRequest{
+		Origin:     stadia.LatLng{Lat: 37.7, Lng: -122.4},
+		Costing:    stadia.CostingPedestrian,
+		BudgetSecs: 3600,
+	})
+	if !errors.Is(err, stadia.ErrStadiaBadRequest) {
+		t.Errorf("want ErrStadiaBadRequest even with empty body, got %v", err)
+	}
+}
+
+func TestHTTPClient_Matrix_429_returnsErrStadiaRateLimit(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":"Rate Limit Exceeded"}`))
+	}))
+	defer srv.Close()
+
+	c := stadia.NewHTTPClientWithBase(srv.URL+"/isochrone/v1", srv.URL+"/matrix/v1", "test-key")
+	_, err := c.Matrix(context.Background(), stadia.MatrixRequest{
+		Origins:      []stadia.LatLng{{Lat: 37.7, Lng: -122.4}},
+		Destinations: []stadia.LatLng{{Lat: 37.8, Lng: -122.3}},
+		Costing:      stadia.CostingPedestrian,
+	})
+	if !errors.Is(err, stadia.ErrStadiaRateLimit) {
+		t.Errorf("want ErrStadiaRateLimit, got %v", err)
 	}
 }
 

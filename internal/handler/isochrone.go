@@ -55,6 +55,10 @@ func Isochrone(chainer isochrone.Chainer, log *logger.Logger) http.HandlerFunc {
 				writeError(w, http.StatusBadRequest, "invalid mode: must be walk, bike, or drive")
 			case errors.Is(err, isochrone.ErrScenarioNotFound):
 				writeError(w, http.StatusNotFound, "scenario not found")
+			case errors.Is(err, isochrone.ErrStadiaClientError):
+				writeError(w, http.StatusBadRequest, "routing request exceeded service limits")
+			case errors.Is(err, isochrone.ErrStadiaRateLimit):
+				writeError(w, http.StatusTooManyRequests, "routing service rate limit exceeded")
 			case errors.Is(err, isochrone.ErrStadiaUnavailable):
 				writeError(w, http.StatusBadGateway, "routing service unavailable")
 			default:

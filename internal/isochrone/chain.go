@@ -18,6 +18,8 @@ var (
 	ErrInvalidMode       = errors.New("invalid mode")
 	ErrScenarioNotFound  = errors.New("scenario not found")
 	ErrStadiaUnavailable = errors.New("stadia unavailable")
+	ErrStadiaClientError = errors.New("stadia request error")
+	ErrStadiaRateLimit   = errors.New("stadia rate limit exceeded")
 )
 
 type ChainRequest struct {
@@ -35,12 +37,13 @@ type ReachableStation struct {
 }
 
 type ChainMetadata struct {
-	ReachableStations []ReachableStation `json:"reachable_stations"`
-	OriginBudgetMins  int                `json:"origin_budget_mins"`
-	ScenarioSlug      string             `json:"scenario_slug"`
-	Mode              string             `json:"mode"`
-	WaitModel         string             `json:"wait_model"`
-	OriginIsoClamped  bool               `json:"origin_iso_clamped,omitempty"`
+	ReachableStations  []ReachableStation `json:"reachable_stations"`
+	OriginBudgetMins   int                `json:"origin_budget_mins"`
+	ScenarioSlug       string             `json:"scenario_slug"`
+	Mode               string             `json:"mode"`
+	WaitModel          string             `json:"wait_model"`
+	OriginIsoClamped   bool               `json:"origin_iso_clamped,omitempty"`
+	OriginIsoAvailable bool               `json:"origin_iso_available"`
 }
 
 type ChainResponse struct {

@@ -3,8 +3,10 @@ package isochrone
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
+	"sort"
 
 	"golang.org/x/sync/errgroup"
 
@@ -12,6 +14,8 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/stadia"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
+
+const stadiaMaxMatrixDests = 600
 
 const stadiaMaxIsoDistanceM = 20_000.0
 
@@ -54,6 +58,17 @@ func safeIsoBudgetSecs(mode Mode, budgetSecs int) int {
 		return maxSecs
 	}
 	return budgetSecs
+}
+
+func wrapStadiaErr(err error) error {
+	switch {
+	case errors.Is(err, stadia.ErrStadiaBadRequest):
+		return fmt.Errorf("%w: %v", ErrStadiaClientError, err)
+	case errors.Is(err, stadia.ErrStadiaRateLimit):
+		return fmt.Errorf("%w: %v", ErrStadiaRateLimit, err)
+	default:
+		return fmt.Errorf("%w: %v", ErrStadiaUnavailable, err)
+	}
 }
 
 type chainImpl struct {
@@ -106,8 +121,22 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 	}
 	c.log.Debugf("chain: %d/%d stations within haversine reach (%.1f km)", len(nearbyStations), len(stations), reachKm)
 
+	if len(nearbyStations) > stadiaMaxMatrixDests {
+		sort.Slice(nearbyStations, func(i, j int) bool {
+			di := haversineKm(req.Lat, req.Lng, nearbyStations[i].Location.Coordinates[1], nearbyStations[i].Location.Coordinates[0])
+			dj := haversineKm(req.Lat, req.Lng, nearbyStations[j].Location.Coordinates[1], nearbyStations[j].Location.Coordinates[0])
+			return di < dj
+		})
+		nearbyStations = nearbyStations[:stadiaMaxMatrixDests]
+		c.log.Debugf("chain: truncated to %d stations (matrix destination cap)", stadiaMaxMatrixDests)
+	}
+
 	clampedBudget := safeIsoBudgetSecs(req.Mode, req.BudgetMins*60)
 	originIsoClamped := clampedBudget < req.BudgetMins*60
+	// Drive-mode origin isochrone is misleading when clamped: a 15-min auto polygon
+	// captures almost no meaningful area and implies false reachability. Skip it and
+	// report origin_iso_available: false so clients can respond appropriately.
+	driveOriginUnavailable := req.Mode == ModeDrive && originIsoClamped
 
 	var (
 		originIso  *stadia.IsochroneResponse
@@ -116,18 +145,20 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 
 	g, gctx := errgroup.WithContext(ctx)
 
-	g.Go(func() error {
-		iso, isoErr := c.stadia.Isochrone(gctx, stadia.IsochroneRequest{
-			Origin:     stadia.LatLng{Lat: req.Lat, Lng: req.Lng},
-			Costing:    costing,
-			BudgetSecs: clampedBudget,
+	if !driveOriginUnavailable {
+		g.Go(func() error {
+			iso, isoErr := c.stadia.Isochrone(gctx, stadia.IsochroneRequest{
+				Origin:     stadia.LatLng{Lat: req.Lat, Lng: req.Lng},
+				Costing:    costing,
+				BudgetSecs: clampedBudget,
+			})
+			if isoErr != nil {
+				return wrapStadiaErr(isoErr)
+			}
+			originIso = iso
+			return nil
 		})
-		if isoErr != nil {
-			return fmt.Errorf("%w: %v", ErrStadiaUnavailable, isoErr)
-		}
-		originIso = iso
-		return nil
-	})
+	}
 
 	if len(nearbyStations) > 0 {
 		g.Go(func() error {
@@ -141,7 +172,7 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 				Costing:      costing,
 			})
 			if mErr != nil {
-				return fmt.Errorf("%w: %v", ErrStadiaUnavailable, mErr)
+				return wrapStadiaErr(mErr)
 			}
 			matrixResp = m
 			return nil
@@ -234,7 +265,7 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 					BudgetSecs: safeIsoBudgetSecs(req.Mode, ec.remainingMins*60),
 				})
 				if isoErr != nil {
-					return fmt.Errorf("%w: %v", ErrStadiaUnavailable, isoErr)
+					return wrapStadiaErr(isoErr)
 				}
 				egressIsos[i] = iso
 				return nil
@@ -285,12 +316,13 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 		Type:     "FeatureCollection",
 		Features: features,
 		Metadata: ChainMetadata{
-			ReachableStations: reachableStations,
-			OriginBudgetMins:  req.BudgetMins,
-			ScenarioSlug:      req.ScenarioSlug,
-			Mode:              string(req.Mode),
-			WaitModel:         "none",
-			OriginIsoClamped:  originIsoClamped,
+			ReachableStations:  reachableStations,
+			OriginBudgetMins:   req.BudgetMins,
+			ScenarioSlug:       req.ScenarioSlug,
+			Mode:               string(req.Mode),
+			WaitModel:          "none",
+			OriginIsoClamped:   originIsoClamped,
+			OriginIsoAvailable: !driveOriginUnavailable,
 		},
 	}, nil
 }

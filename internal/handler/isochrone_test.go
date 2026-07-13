@@ -136,6 +136,40 @@ func TestIsochrone_502_stadiaError(t *testing.T) {
 	}
 }
 
+func TestIsochrone_400_stadiaClientError(t *testing.T) {
+	wrappedErr := fmt.Errorf("%w: path distance exceeds limit", isochrone.ErrStadiaClientError)
+	rec := postIsochrone(&fakeChainer{err: wrappedErr},
+		`{"lat":37.7,"lng":-122.4,"budget_mins":30,"mode":"walk","scenario_slug":"ca-hsr"}`)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status: want 400, got %d", rec.Code)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body["error"] != "routing request exceeded service limits" {
+		t.Errorf("error: want 'routing request exceeded service limits', got %q", body["error"])
+	}
+}
+
+func TestIsochrone_429_stadiaRateLimit(t *testing.T) {
+	wrappedErr := fmt.Errorf("%w: credit exhausted", isochrone.ErrStadiaRateLimit)
+	rec := postIsochrone(&fakeChainer{err: wrappedErr},
+		`{"lat":37.7,"lng":-122.4,"budget_mins":30,"mode":"walk","scenario_slug":"ca-hsr"}`)
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("status: want 429, got %d", rec.Code)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body["error"] != "routing service rate limit exceeded" {
+		t.Errorf("error: want 'routing service rate limit exceeded', got %q", body["error"])
+	}
+}
+
 func TestIsochrone_contentType(t *testing.T) {
 	cases := []struct {
 		name string
@@ -144,7 +178,9 @@ func TestIsochrone_contentType(t *testing.T) {
 	}{
 		{"200", `{"lat":37.7,"lng":-122.4,"budget_mins":30,"mode":"walk","scenario_slug":"ca-hsr"}`, &fakeChainer{resp: cannedChainResp()}},
 		{"400-budget", `{"lat":37.7,"lng":-122.4,"budget_mins":0,"mode":"walk","scenario_slug":"ca-hsr"}`, &fakeChainer{}},
+		{"400-client-error", `{"lat":37.7,"lng":-122.4,"budget_mins":30,"mode":"walk","scenario_slug":"ca-hsr"}`, &fakeChainer{err: isochrone.ErrStadiaClientError}},
 		{"404", `{"lat":37.7,"lng":-122.4,"budget_mins":30,"mode":"walk","scenario_slug":"nope"}`, &fakeChainer{err: isochrone.ErrScenarioNotFound}},
+		{"429", `{"lat":37.7,"lng":-122.4,"budget_mins":30,"mode":"walk","scenario_slug":"ca-hsr"}`, &fakeChainer{err: isochrone.ErrStadiaRateLimit}},
 		{"502", `{"lat":37.7,"lng":-122.4,"budget_mins":30,"mode":"walk","scenario_slug":"ca-hsr"}`, &fakeChainer{err: isochrone.ErrStadiaUnavailable}},
 	}
 	for _, tc := range cases {

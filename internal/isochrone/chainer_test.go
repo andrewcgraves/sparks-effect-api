@@ -3,6 +3,8 @@ package isochrone_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/isochrone"
@@ -374,6 +376,200 @@ func TestChainer_haversineFilterExcludesFarStations(t *testing.T) {
 	}
 	if len(fc.MatrixCalls[0].Destinations) != 1 {
 		t.Errorf("Destinations: want 1 (far station excluded), got %d", len(fc.MatrixCalls[0].Destinations))
+	}
+}
+
+func TestChainer_matrixCap600_truncated(t *testing.T) {
+	const stationCount = 620
+	stations := make([]transit.Station, stationCount)
+	matrixCells := make([]stadia.MatrixCell, stationCount)
+	for i := range stationCount {
+		stations[i] = transit.Station{
+			ID:         fmt.Sprintf("st%d", i),
+			ScenarioID: "sc1",
+			Slug:       fmt.Sprintf("station-%d", i),
+			// All within ~1 km of origin — well within walk budget haversine reach.
+			Location: transit.GeoPoint{
+				Type:        "Point",
+				Coordinates: []float64{-122.40 + 0.001*float64(i%30), 37.70 + 0.001*float64(i/30)},
+			},
+		}
+		matrixCells[i] = stadia.MatrixCell{Time: -1, Distance: 0}
+	}
+	store := &fakeTransitData{
+		scenario: transit.Scenario{ID: "sc1", Slug: "test-sc"},
+		stations: stations,
+	}
+	fc := &stadia.FakeClient{
+		IsochroneResp: cannedIso(),
+		MatrixResp:    &stadia.MatrixResponse{SourcesToTargets: [][]stadia.MatrixCell{matrixCells[:600]}},
+	}
+	chainer := isochrone.New(fc, store, logger.Discard())
+
+	_, err := chainer.Chain(context.Background(), isochrone.ChainRequest{
+		Lat: 37.7, Lng: -122.4, BudgetMins: 9999,
+		Mode: isochrone.ModeWalk, ScenarioSlug: "test-sc",
+	})
+	if err != nil {
+		t.Fatalf("Chain: %v", err)
+	}
+	if len(fc.MatrixCalls) != 1 {
+		t.Fatalf("MatrixCalls: want 1, got %d", len(fc.MatrixCalls))
+	}
+	if got := len(fc.MatrixCalls[0].Destinations); got > 600 {
+		t.Errorf("Matrix destinations: want ≤600, got %d (Standard plan limit is 625)", got)
+	}
+}
+
+func TestChainer_drive_largeBudget_noOriginFeature(t *testing.T) {
+	store := &fakeTransitData{
+		scenario: transit.Scenario{ID: "sc1", Slug: "test-sc"},
+		stations: []transit.Station{},
+	}
+	fc := &stadia.FakeClient{IsochroneResp: cannedIso()}
+	chainer := isochrone.New(fc, store, logger.Discard())
+
+	resp, err := chainer.Chain(context.Background(), isochrone.ChainRequest{
+		Lat: 37.7, Lng: -122.4, BudgetMins: 60,
+		Mode: isochrone.ModeDrive, ScenarioSlug: "test-sc",
+	})
+	if err != nil {
+		t.Fatalf("Chain: %v", err)
+	}
+	if resp.Metadata.OriginIsoAvailable {
+		t.Error("OriginIsoAvailable: want false for drive+large budget")
+	}
+	if !resp.Metadata.OriginIsoClamped {
+		t.Error("OriginIsoClamped: want true for drive+large budget")
+	}
+	for _, f := range resp.Features {
+		var feat map[string]any
+		if err := json.Unmarshal(f, &feat); err != nil {
+			t.Fatalf("unmarshal feature: %v", err)
+		}
+		props, _ := feat["properties"].(map[string]any)
+		if props["source"] == "origin" {
+			t.Error("found origin feature in response: drive+clamped should omit origin polygon")
+		}
+	}
+	if len(fc.IsochoneCalls) != 0 {
+		t.Errorf("IsochoneCalls: want 0 (origin iso skipped for drive+clamped), got %d", len(fc.IsochoneCalls))
+	}
+}
+
+func TestChainer_drive_smallBudget_hasOriginFeature(t *testing.T) {
+	// budget_mins=10 → budgetSecs=600 < driveMaxSecs=900 → not clamped → origin iso included
+	store := &fakeTransitData{
+		scenario: transit.Scenario{ID: "sc1", Slug: "test-sc"},
+		stations: []transit.Station{},
+	}
+	fc := &stadia.FakeClient{IsochroneResp: cannedIso()}
+	chainer := isochrone.New(fc, store, logger.Discard())
+
+	resp, err := chainer.Chain(context.Background(), isochrone.ChainRequest{
+		Lat: 37.7, Lng: -122.4, BudgetMins: 10,
+		Mode: isochrone.ModeDrive, ScenarioSlug: "test-sc",
+	})
+	if err != nil {
+		t.Fatalf("Chain: %v", err)
+	}
+	if !resp.Metadata.OriginIsoAvailable {
+		t.Error("OriginIsoAvailable: want true for drive+small budget (not clamped)")
+	}
+	if len(fc.IsochoneCalls) != 1 {
+		t.Errorf("IsochoneCalls: want 1, got %d", len(fc.IsochoneCalls))
+	}
+}
+
+func TestChainer_stadiaClientError_propagatesAsErrStadiaClientError(t *testing.T) {
+	fc := &stadia.FakeClient{IsochroneErr: stadia.ErrStadiaBadRequest}
+	chainer := isochrone.New(fc, newTestData(), logger.Discard())
+
+	_, err := chainer.Chain(context.Background(), isochrone.ChainRequest{
+		Lat: 37.7, Lng: -122.4, BudgetMins: 30,
+		Mode: isochrone.ModeWalk, ScenarioSlug: "test-sc",
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, isochrone.ErrStadiaClientError) {
+		t.Errorf("want ErrStadiaClientError, got %v", err)
+	}
+}
+
+func TestChainer_stadiaRateLimit_propagatesAsErrStadiaRateLimit(t *testing.T) {
+	fc := &stadia.FakeClient{IsochroneErr: stadia.ErrStadiaRateLimit}
+	chainer := isochrone.New(fc, newTestData(), logger.Discard())
+
+	_, err := chainer.Chain(context.Background(), isochrone.ChainRequest{
+		Lat: 37.7, Lng: -122.4, BudgetMins: 30,
+		Mode: isochrone.ModeWalk, ScenarioSlug: "test-sc",
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, isochrone.ErrStadiaRateLimit) {
+		t.Errorf("want ErrStadiaRateLimit, got %v", err)
+	}
+}
+
+func TestChainer_stadiaUpstream_propagatesAsErrStadiaUnavailable(t *testing.T) {
+	fc := &stadia.FakeClient{IsochroneErr: stadia.ErrStadiaUpstream}
+	chainer := isochrone.New(fc, newTestData(), logger.Discard())
+
+	_, err := chainer.Chain(context.Background(), isochrone.ChainRequest{
+		Lat: 37.7, Lng: -122.4, BudgetMins: 30,
+		Mode: isochrone.ModeWalk, ScenarioSlug: "test-sc",
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, isochrone.ErrStadiaUnavailable) {
+		t.Errorf("want ErrStadiaUnavailable, got %v", err)
+	}
+}
+
+func TestChainer_matrixRateLimit_propagatesAsErrStadiaRateLimit(t *testing.T) {
+	fc := &stadia.FakeClient{
+		IsochroneResp: cannedIso(),
+		MatrixErr:     stadia.ErrStadiaRateLimit,
+	}
+	chainer := isochrone.New(fc, newTestData(), logger.Discard())
+
+	_, err := chainer.Chain(context.Background(), isochrone.ChainRequest{
+		Lat: 37.7, Lng: -122.4, BudgetMins: 90,
+		Mode: isochrone.ModeWalk, ScenarioSlug: "test-sc",
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, isochrone.ErrStadiaRateLimit) {
+		t.Errorf("want ErrStadiaRateLimit, got %v", err)
+	}
+}
+
+func TestChainer_isochroneBudgetAboveModeClamp_neverSentUnclamped(t *testing.T) {
+	// Verifies that BudgetSecs sent to Stadia never exceeds the per-mode max.
+	// bike clamp = 20000m / (15km/h in m/s) = 4800s
+	const bikeMaxSecs = 4800
+	store := &fakeTransitData{
+		scenario: transit.Scenario{ID: "sc1", Slug: "test-sc"},
+		stations: []transit.Station{},
+	}
+	fc := &stadia.FakeClient{IsochroneResp: cannedIso()}
+	chainer := isochrone.New(fc, store, logger.Discard())
+
+	_, err := chainer.Chain(context.Background(), isochrone.ChainRequest{
+		Lat: 37.7, Lng: -122.4, BudgetMins: 120,
+		Mode: isochrone.ModeBike, ScenarioSlug: "test-sc",
+	})
+	if err != nil {
+		t.Fatalf("Chain: %v", err)
+	}
+	for _, call := range fc.IsochoneCalls {
+		if call.BudgetSecs > bikeMaxSecs {
+			t.Errorf("IsochoneCalls BudgetSecs=%d exceeds bike max %d — would trigger Stadia 400", call.BudgetSecs, bikeMaxSecs)
+		}
 	}
 }
 

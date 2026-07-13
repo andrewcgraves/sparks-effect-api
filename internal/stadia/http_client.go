@@ -92,6 +92,11 @@ func (c *HTTPClient) Matrix(ctx context.Context, req MatrixRequest) (*MatrixResp
 	return &resp, nil
 }
 
+type stadiaErrorBody struct {
+	ErrorCode int    `json:"error_code"`
+	Error     string `json:"error"`
+}
+
 func (c *HTTPClient) post(ctx context.Context, endpoint, url string, body any, out any) error {
 	b, err := json.Marshal(body)
 	if err != nil {
@@ -114,9 +119,22 @@ func (c *HTTPClient) post(ctx context.Context, endpoint, url string, body any, o
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		snippet := readBodySnippet(resp.Body, 256)
-		c.log.Debugf("stadia %s: status=%d latency=%s body=%q", endpoint, resp.StatusCode, latency, snippet)
-		return fmt.Errorf("stadia: unexpected status %d", resp.StatusCode)
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		c.log.Debugf("stadia %s: status=%d latency=%s body=%q", endpoint, resp.StatusCode, latency, string(raw))
+		var errBody stadiaErrorBody
+		_ = json.Unmarshal(raw, &errBody)
+		msg := errBody.Error
+		if msg == "" {
+			msg = fmt.Sprintf("status %d", resp.StatusCode)
+		}
+		switch resp.StatusCode {
+		case http.StatusBadRequest:
+			return fmt.Errorf("%w: %s", ErrStadiaBadRequest, msg)
+		case http.StatusTooManyRequests:
+			return fmt.Errorf("%w: %s", ErrStadiaRateLimit, msg)
+		default:
+			return fmt.Errorf("%w: status %d: %s", ErrStadiaUpstream, resp.StatusCode, msg)
+		}
 	}
 	c.log.Debugf("stadia %s: status=%d latency=%s", endpoint, resp.StatusCode, latency)
 
@@ -124,10 +142,4 @@ func (c *HTTPClient) post(ctx context.Context, endpoint, url string, body any, o
 		return fmt.Errorf("stadia: decode response: %w", err)
 	}
 	return nil
-}
-
-func readBodySnippet(r io.Reader, maxBytes int) string {
-	buf := make([]byte, maxBytes)
-	n, _ := r.Read(buf)
-	return string(buf[:n])
 }

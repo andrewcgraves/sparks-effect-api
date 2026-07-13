@@ -3,6 +3,13 @@ package stadia
 import (
 	"context"
 	"encoding/json"
+	"errors"
+)
+
+var (
+	ErrStadiaBadRequest = errors.New("stadia: bad request")
+	ErrStadiaRateLimit  = errors.New("stadia: rate limit exceeded")
+	ErrStadiaUpstream   = errors.New("stadia: upstream error")
 )
 
 type Costing string
