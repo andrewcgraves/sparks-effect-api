@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 
 	"golang.org/x/sync/errgroup"
 
@@ -11,6 +12,49 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/stadia"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
+
+const stadiaMaxIsoDistanceM = 20_000.0
+
+func haversineKm(lat1, lng1, lat2, lng2 float64) float64 {
+	const R = 6371.0
+	dLat := (lat2 - lat1) * math.Pi / 180
+	dLng := (lng2 - lng1) * math.Pi / 180
+	a := math.Sin(dLat/2)*math.Sin(dLat/2) +
+		math.Cos(lat1*math.Pi/180)*math.Cos(lat2*math.Pi/180)*
+			math.Sin(dLng/2)*math.Sin(dLng/2)
+	return R * 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
+}
+
+func maxReachKm(mode Mode, budgetMins int) float64 {
+	const roadFactor = 1.4
+	var speedKmH float64
+	switch mode {
+	case ModeWalk:
+		speedKmH = 5.0
+	case ModeBike:
+		speedKmH = 15.0
+	case ModeDrive:
+		speedKmH = 80.0
+	}
+	return speedKmH * float64(budgetMins) / 60.0 / roadFactor
+}
+
+func safeIsoBudgetSecs(mode Mode, budgetSecs int) int {
+	var speedMS float64
+	switch mode {
+	case ModeWalk:
+		speedMS = 5.0 * 1000 / 3600
+	case ModeBike:
+		speedMS = 15.0 * 1000 / 3600
+	case ModeDrive:
+		speedMS = 80.0 * 1000 / 3600
+	}
+	maxSecs := int(stadiaMaxIsoDistanceM / speedMS)
+	if budgetSecs > maxSecs {
+		return maxSecs
+	}
+	return budgetSecs
+}
 
 type chainImpl struct {
 	stadia stadia.Client
@@ -53,6 +97,18 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 	stations := c.store.GetStationsByScenario(scenario.ID)
 	c.log.Debugf("chain: %d stations in scenario", len(stations))
 
+	reachKm := maxReachKm(req.Mode, req.BudgetMins)
+	var nearbyStations []transit.Station
+	for _, st := range stations {
+		if haversineKm(req.Lat, req.Lng, st.Location.Coordinates[1], st.Location.Coordinates[0]) <= reachKm {
+			nearbyStations = append(nearbyStations, st)
+		}
+	}
+	c.log.Debugf("chain: %d/%d stations within haversine reach (%.1f km)", len(nearbyStations), len(stations), reachKm)
+
+	clampedBudget := safeIsoBudgetSecs(req.Mode, req.BudgetMins*60)
+	originIsoClamped := clampedBudget < req.BudgetMins*60
+
 	var (
 		originIso  *stadia.IsochroneResponse
 		matrixResp *stadia.MatrixResponse
@@ -64,7 +120,7 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 		iso, isoErr := c.stadia.Isochrone(gctx, stadia.IsochroneRequest{
 			Origin:     stadia.LatLng{Lat: req.Lat, Lng: req.Lng},
 			Costing:    costing,
-			BudgetSecs: req.BudgetMins * 60,
+			BudgetSecs: clampedBudget,
 		})
 		if isoErr != nil {
 			return fmt.Errorf("%w: %v", ErrStadiaUnavailable, isoErr)
@@ -73,10 +129,10 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 		return nil
 	})
 
-	if len(stations) > 0 {
+	if len(nearbyStations) > 0 {
 		g.Go(func() error {
-			dests := make([]stadia.LatLng, len(stations))
-			for i, st := range stations {
+			dests := make([]stadia.LatLng, len(nearbyStations))
+			for i, st := range nearbyStations {
 				dests[i] = stadia.LatLng{Lat: st.Location.Coordinates[1], Lng: st.Location.Coordinates[0]}
 			}
 			m, mErr := c.stadia.Matrix(gctx, stadia.MatrixRequest{
@@ -101,7 +157,7 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 	accessMins := make(map[string]int)
 	if matrixResp != nil && len(matrixResp.SourcesToTargets) > 0 {
 		row := matrixResp.SourcesToTargets[0]
-		for i, st := range stations {
+		for i, st := range nearbyStations {
 			if i < len(row) && row[i].Time >= 0 {
 				accessMins[st.Slug] = row[i].Time / 60
 			}
@@ -175,7 +231,7 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 				iso, isoErr := c.stadia.Isochrone(gctx2, stadia.IsochroneRequest{
 					Origin:     stadia.LatLng{Lat: ec.station.Location.Coordinates[1], Lng: ec.station.Location.Coordinates[0]},
 					Costing:    costing,
-					BudgetSecs: ec.remainingMins * 60,
+					BudgetSecs: safeIsoBudgetSecs(req.Mode, ec.remainingMins*60),
 				})
 				if isoErr != nil {
 					return fmt.Errorf("%w: %v", ErrStadiaUnavailable, isoErr)
@@ -234,6 +290,7 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 			ScenarioSlug:      req.ScenarioSlug,
 			Mode:              string(req.Mode),
 			WaitModel:         "none",
+			OriginIsoClamped:  originIsoClamped,
 		},
 	}, nil
 }

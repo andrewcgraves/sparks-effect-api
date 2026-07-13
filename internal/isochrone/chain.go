@@ -40,6 +40,7 @@ type ChainMetadata struct {
 	ScenarioSlug      string             `json:"scenario_slug"`
 	Mode              string             `json:"mode"`
 	WaitModel         string             `json:"wait_model"`
+	OriginIsoClamped  bool               `json:"origin_iso_clamped,omitempty"`
 }
 
 type ChainResponse struct {

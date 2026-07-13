@@ -55,11 +55,11 @@ func newTestData() *fakeTransitData {
 		stations: []transit.Station{
 			{
 				ID: "st1", ScenarioID: "sc1", Slug: "station-a",
-				Location: transit.GeoPoint{Type: "Point", Coordinates: []float64{-122.0, 37.0}},
+				Location: transit.GeoPoint{Type: "Point", Coordinates: []float64{-122.39, 37.71}},
 			},
 			{
 				ID: "st2", ScenarioID: "sc1", Slug: "station-b",
-				Location: transit.GeoPoint{Type: "Point", Coordinates: []float64{-122.5, 37.5}},
+				Location: transit.GeoPoint{Type: "Point", Coordinates: []float64{-122.41, 37.69}},
 			},
 		},
 		travelTimes: map[[2]string]int{
@@ -217,7 +217,7 @@ func TestChainer_directAccess_AequalsB(t *testing.T) {
 		stations: []transit.Station{
 			{
 				ID: "st1", ScenarioID: "sc1", Slug: "station-a",
-				Location: transit.GeoPoint{Type: "Point", Coordinates: []float64{-122.0, 37.0}},
+				Location: transit.GeoPoint{Type: "Point", Coordinates: []float64{-122.39, 37.71}},
 			},
 		},
 	}
@@ -265,7 +265,7 @@ func TestChainer_concurrentFanOut_noRace(t *testing.T) {
 			ID:         slug,
 			ScenarioID: "sc1",
 			Slug:       "st-" + slug,
-			Location:   transit.GeoPoint{Type: "Point", Coordinates: []float64{float64(-122 - i), float64(37 + i)}},
+			Location:   transit.GeoPoint{Type: "Point", Coordinates: []float64{-122.40 + 0.005*float64(i), 37.70 + 0.005*float64(i)}},
 		}
 		matrixCells[i] = stadia.MatrixCell{Time: 600, Distance: 1.0}
 		for j := range 5 {
@@ -335,5 +335,68 @@ func TestChainer_ErrInvalidMode(t *testing.T) {
 	}
 	if len(fc.IsochoneCalls) != 0 {
 		t.Error("expected no Stadia calls on invalid mode")
+	}
+}
+
+func TestChainer_haversineFilterExcludesFarStations(t *testing.T) {
+	store := &fakeTransitData{
+		scenario: transit.Scenario{ID: "sc1", Slug: "test-sc"},
+		stations: []transit.Station{
+			{
+				ID: "st1", ScenarioID: "sc1", Slug: "station-near",
+				Location: transit.GeoPoint{Type: "Point", Coordinates: []float64{-122.39, 37.71}},
+			},
+			{
+				ID: "st2", ScenarioID: "sc1", Slug: "station-far",
+				Location: transit.GeoPoint{Type: "Point", Coordinates: []float64{-121.0, 38.5}},
+			},
+		},
+	}
+	fc := &stadia.FakeClient{
+		IsochroneResp: cannedIso(),
+		MatrixResp: &stadia.MatrixResponse{
+			SourcesToTargets: [][]stadia.MatrixCell{
+				{{Time: 600, Distance: 1.0}},
+			},
+		},
+	}
+	chainer := isochrone.New(fc, store, logger.Discard())
+
+	_, err := chainer.Chain(context.Background(), isochrone.ChainRequest{
+		Lat: 37.7, Lng: -122.4, BudgetMins: 90,
+		Mode: isochrone.ModeWalk, ScenarioSlug: "test-sc",
+	})
+	if err != nil {
+		t.Fatalf("Chain: %v", err)
+	}
+	if len(fc.MatrixCalls) != 1 {
+		t.Fatalf("MatrixCalls: want 1, got %d", len(fc.MatrixCalls))
+	}
+	if len(fc.MatrixCalls[0].Destinations) != 1 {
+		t.Errorf("Destinations: want 1 (far station excluded), got %d", len(fc.MatrixCalls[0].Destinations))
+	}
+}
+
+func TestChainer_bikeIsoBudgetClamped(t *testing.T) {
+	store := &fakeTransitData{
+		scenario: transit.Scenario{ID: "sc1", Slug: "test-sc"},
+		stations: []transit.Station{},
+	}
+	fc := &stadia.FakeClient{IsochroneResp: cannedIso()}
+	chainer := isochrone.New(fc, store, logger.Discard())
+
+	_, err := chainer.Chain(context.Background(), isochrone.ChainRequest{
+		Lat: 37.7, Lng: -122.4, BudgetMins: 90,
+		Mode: isochrone.ModeBike, ScenarioSlug: "test-sc",
+	})
+	if err != nil {
+		t.Fatalf("Chain: %v", err)
+	}
+	if len(fc.IsochoneCalls) != 1 {
+		t.Fatalf("IsochoneCalls: want 1, got %d", len(fc.IsochoneCalls))
+	}
+	const wantBudget = 4800 // 20000m / (15km/h in m/s) = 4800s
+	if fc.IsochoneCalls[0].BudgetSecs != wantBudget {
+		t.Errorf("BudgetSecs: want %d (clamped), got %d", wantBudget, fc.IsochoneCalls[0].BudgetSecs)
 	}
 }
