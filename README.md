@@ -6,20 +6,24 @@ frontend can call to compute transit reach for a given route.
 
 ## Requirements
 
-- [Go](https://go.dev/dl/) 1.23+
+- [Go](https://go.dev/dl/) 1.25+
 - [Docker](https://www.docker.com/) (optional, for containerized runs)
 - `golangci-lint` (installed automatically by `make lint` if missing)
 
 ## Getting started
 
-Clone the repo and run the server locally:
+Clone the repo, set up your local environment, and run:
 
 ```sh
+cp .env.example .env
+# Edit .env and fill in STADIA_API_KEY
 make run
 ```
 
 This builds the binary to `bin/sparks-effect-api` and starts it, listening on
-`:8080` by default. Override the port with the `PORT` environment variable:
+`:8080` by default. The server loads `.env` automatically on startup if the
+file exists — variables already set in the shell take precedence. Override the
+port with `PORT` in `.env` or your shell:
 
 ```sh
 PORT=9090 make run
@@ -29,6 +33,33 @@ Check it's up:
 
 ```sh
 curl localhost:8080/healthz
+```
+
+## Verbose / debug logging
+
+Set `LOG_LEVEL=debug` (or `VERBOSE=true`) to enable detailed logging for local
+debugging. When enabled the server logs:
+
+- Each isochrone request's `lat`, `lng`, `budget_mins`, `mode`, and
+  `scenario_slug`
+- Every Stadia HTTP call: endpoint name, HTTP status, latency, and — on
+  failure — a snippet of the response body. The API key and `Authorization`
+  header are never logged.
+- Chain progress: station count, matrix reachable count, egress fan-out size,
+  and final GeoJSON feature count.
+- The full error value before it is mapped to a 502 or 500 response.
+
+```sh
+LOG_LEVEL=debug make run
+```
+
+Sample request for San Jose downtown, walk 90 min, ca-hsr scenario:
+
+```sh
+curl -s -X POST http://localhost:8080/api/isochrone \
+  -H 'Content-Type: application/json' \
+  -d '{"lat":37.3382,"lng":-121.8863,"budget_mins":90,"mode":"walk","scenario_slug":"ca-hsr"}' \
+  | jq .type
 ```
 
 ## Development

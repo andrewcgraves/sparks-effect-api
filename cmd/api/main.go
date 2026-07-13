@@ -10,20 +10,37 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/joho/godotenv"
+
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
+	"github.com/andrewcgraves/sparks-effect-api/internal/isochrone"
+	internlog "github.com/andrewcgraves/sparks-effect-api/internal/logger"
 	"github.com/andrewcgraves/sparks-effect-api/internal/server"
+	"github.com/andrewcgraves/sparks-effect-api/internal/stadia"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
 func main() {
+	_ = godotenv.Load()
 	cfg := config.Load()
+	if cfg.StadiaAPIKey == "" {
+		log.Fatal("STADIA_API_KEY must be set")
+	}
+
+	lg := internlog.Default(cfg.Debug)
+	if cfg.Debug {
+		lg.Printf("debug logging enabled")
+	}
 
 	store, err := transit.NewStore()
 	if err != nil {
 		log.Fatalf("failed to load transit data: %v", err)
 	}
 
-	srv := server.New(cfg, store)
+	stadiaClient := stadia.NewHTTPClient(cfg.StadiaAPIKey).WithLogger(lg)
+	isoChainer := isochrone.New(stadiaClient, store, lg)
+
+	srv := server.New(cfg, store, isoChainer, lg)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
