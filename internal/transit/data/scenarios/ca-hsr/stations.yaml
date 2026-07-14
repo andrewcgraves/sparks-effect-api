@@ -1,5 +1,8 @@
-# Station coordinates are approximate point locations for the planned HSR stops.
-# Source: CA GIS stations layer + official HSR Business Plan station maps.
+# Station coordinates are the planned HSR stop locations per official CAHSR/Wikipedia sources.
+# Source: Wikipedia station articles (citing CAHSR EIR/EIS filings, CEQA notices, and
+# official CAHSR Business Plan station maps). Coordinates cross-checked against
+# CEQA project notices (e.g. 36°56′11″N 119°59′11″W for Madera per ceqanet.lci.ca.gov/2023110616)
+# and Wikipedia infobox coordinates for each station.
 # Phase 1 stations (SF–Anaheim) are active. Brightline West stations (Victor Valley,
 # Las Vegas) are commented out below for later reactivation; they share Palmdale.
 # platform_height: high = level boarding with Siemens Venture EMU trainsets.
@@ -11,7 +14,7 @@
   platform_height: "high"
   location:
     type: Point
-    coordinates: [-122.389, 37.789]
+    coordinates: [-122.397, 37.790]
 
 - id: "00000000-0000-4005-8001-000000000002"
   scenario_id: "00000000-0000-4001-8001-000000000001"
@@ -20,7 +23,7 @@
   platform_height: "high"
   location:
     type: Point
-    coordinates: [-122.387, 37.599]
+    coordinates: [-122.387, 37.600]
 
 - id: "00000000-0000-4005-8001-000000000003"
   scenario_id: "00000000-0000-4001-8001-000000000001"
@@ -38,7 +41,7 @@
   platform_height: "high"
   location:
     type: Point
-    coordinates: [-121.568, 37.006]
+    coordinates: [-121.567, 37.004]
 
 - id: "00000000-0000-4005-8001-000000000005"
   scenario_id: "00000000-0000-4001-8001-000000000001"
@@ -47,7 +50,7 @@
   platform_height: "high"
   location:
     type: Point
-    coordinates: [-120.483, 37.302]
+    coordinates: [-120.491, 37.302]
 
 - id: "00000000-0000-4005-8001-000000000006"
   scenario_id: "00000000-0000-4001-8001-000000000001"
@@ -56,7 +59,7 @@
   platform_height: "high"
   location:
     type: Point
-    coordinates: [-120.062, 36.961]
+    coordinates: [-119.986, 36.936]
 
 - id: "00000000-0000-4005-8001-000000000007"
   scenario_id: "00000000-0000-4001-8001-000000000001"
@@ -65,7 +68,7 @@
   platform_height: "high"
   location:
     type: Point
-    coordinates: [-119.784, 36.738]
+    coordinates: [-119.794, 36.733]
 
 - id: "00000000-0000-4005-8001-000000000008"
   scenario_id: "00000000-0000-4001-8001-000000000001"
@@ -74,7 +77,7 @@
   platform_height: "high"
   location:
     type: Point
-    coordinates: [-119.645, 36.330]
+    coordinates: [-119.592, 36.335]
 
 - id: "00000000-0000-4005-8001-000000000009"
   scenario_id: "00000000-0000-4001-8001-000000000001"
@@ -83,7 +86,7 @@
   platform_height: "high"
   location:
     type: Point
-    coordinates: [-119.019, 35.373]
+    coordinates: [-119.022, 35.391]
 
 - id: "00000000-0000-4005-8001-00000000000a"
   scenario_id: "00000000-0000-4001-8001-000000000001"
@@ -92,7 +95,7 @@
   platform_height: "high"
   location:
     type: Point
-    coordinates: [-118.116, 34.578]
+    coordinates: [-118.119, 34.591]
 
 # --- Brightline West (deferred) ---
 # - id: "00000000-0000-4005-8001-00000000000b"
@@ -111,7 +114,7 @@
   platform_height: "high"
   location:
     type: Point
-    coordinates: [-118.358, 34.200]
+    coordinates: [-118.353, 34.202]
 
 - id: "00000000-0000-4005-8001-00000000000d"
   scenario_id: "00000000-0000-4001-8001-000000000001"
@@ -120,7 +123,7 @@
   platform_height: "high"
   location:
     type: Point
-    coordinates: [-118.236, 34.056]
+    coordinates: [-118.235, 34.055]
 
 - id: "00000000-0000-4005-8001-00000000000e"
   scenario_id: "00000000-0000-4001-8001-000000000001"
@@ -129,7 +132,7 @@
   platform_height: "high"
   location:
     type: Point
-    coordinates: [-117.876, 33.800]
+    coordinates: [-117.878, 33.803]
 
 # --- Brightline West (deferred) ---
 # - id: "00000000-0000-4005-8001-00000000000f"
