@@ -29,10 +29,7 @@ func New(cfg config.Config, store *transit.Store, chainer isochrone.Chainer, lg 
 
 	mux.HandleFunc("POST /api/isochrone", handler.Isochrone(chainer, lg))
 
-	var h http.Handler = mux
-	if cfg.AllowLocalhostCORS {
-		h = localhostCORS(h)
-	}
+	h := cors(mux, cfg.AllowLocalhostCORS)
 
 	return &http.Server{
 		Addr:              ":" + cfg.Port,
@@ -49,10 +46,16 @@ func logRequests(next http.Handler) http.Handler {
 	})
 }
 
-func localhostCORS(next http.Handler) http.Handler {
+// allowedOrigins are always permitted for CORS, regardless of the
+// ALLOW_LOCALHOST_CORS testing flag.
+var allowedOrigins = map[string]bool{
+	"https://sparks-effect-website.vercel.app": true,
+}
+
+func cors(next http.Handler, allowLocalhost bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		if isLocalhostOrigin(origin) {
+		if allowedOrigins[origin] || (allowLocalhost && isLocalhostOrigin(origin)) {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")

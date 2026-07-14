@@ -90,6 +90,25 @@ func TestCORS_flagOn_nonLocalhostOrigin(t *testing.T) {
 	}
 }
 
+func TestCORS_productionOrigin_allowedRegardlessOfFlag(t *testing.T) {
+	store, err := transit.NewStore()
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	chainer := isochrone.New(&stadia.FakeClient{}, store, logger.Discard())
+	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: false}, store, chainer, logger.Discard())
+
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req.Header.Set("Origin", "https://sparks-effect-website.vercel.app")
+	rec := httptest.NewRecorder()
+	srv.Handler.ServeHTTP(rec, req)
+
+	got := rec.Header().Get("Access-Control-Allow-Origin")
+	if got != "https://sparks-effect-website.vercel.app" {
+		t.Errorf("Access-Control-Allow-Origin: want %q, got %q", "https://sparks-effect-website.vercel.app", got)
+	}
+}
+
 func TestCORS_flagOff_localhostOrigin(t *testing.T) {
 	store, err := transit.NewStore()
 	if err != nil {
