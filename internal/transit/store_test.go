@@ -130,19 +130,19 @@ func TestStationCoordinates(t *testing.T) {
 	}
 
 	want := map[string][2]float64{
-		"sf":             {-122.397, 37.790},
-		"millbrae":       {-122.387, 37.600},
-		"san-jose":       {-121.903, 37.330},
-		"gilroy":         {-121.567, 37.004},
-		"merced":         {-120.491, 37.302},
-		"madera":         {-119.986, 36.936},
-		"fresno":         {-119.794, 36.733},
-		"kings-tulare":   {-119.592, 36.335},
-		"bakersfield":    {-119.022, 35.391},
-		"palmdale":       {-118.119, 34.591},
+		"sf":              {-122.397, 37.790},
+		"millbrae":        {-122.387, 37.600},
+		"san-jose":        {-121.903, 37.330},
+		"gilroy":          {-121.567, 37.004},
+		"merced":          {-120.491, 37.302},
+		"madera":          {-119.986, 36.936},
+		"fresno":          {-119.794, 36.733},
+		"kings-tulare":    {-119.592, 36.335},
+		"bakersfield":     {-119.022, 35.391},
+		"palmdale":        {-118.119, 34.591},
 		"burbank-airport": {-118.353, 34.202},
-		"los-angeles":    {-118.235, 34.055},
-		"anaheim":        {-117.878, 33.803},
+		"los-angeles":     {-118.235, 34.055},
+		"anaheim":         {-117.878, 33.803},
 	}
 
 	for slug, wantCoords := range want {
