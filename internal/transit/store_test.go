@@ -119,6 +119,45 @@ func TestGetStationsByScenario(t *testing.T) {
 	}
 }
 
+func TestStationCoordinates(t *testing.T) {
+	store := mustNewStore(t)
+	sc, _ := store.GetScenarioBySlug("ca-hsr")
+	stations := store.GetStationsByScenario(sc.ID)
+
+	bySlug := make(map[string][2]float64, len(stations))
+	for _, st := range stations {
+		bySlug[st.Slug] = [2]float64{st.Location.Coordinates[0], st.Location.Coordinates[1]}
+	}
+
+	want := map[string][2]float64{
+		"sf":             {-122.397, 37.790},
+		"millbrae":       {-122.387, 37.600},
+		"san-jose":       {-121.903, 37.330},
+		"gilroy":         {-121.567, 37.004},
+		"merced":         {-120.491, 37.302},
+		"madera":         {-119.986, 36.936},
+		"fresno":         {-119.794, 36.733},
+		"kings-tulare":   {-119.592, 36.335},
+		"bakersfield":    {-119.022, 35.391},
+		"palmdale":       {-118.119, 34.591},
+		"burbank-airport": {-118.353, 34.202},
+		"los-angeles":    {-118.235, 34.055},
+		"anaheim":        {-117.878, 33.803},
+	}
+
+	for slug, wantCoords := range want {
+		got, ok := bySlug[slug]
+		if !ok {
+			t.Errorf("station %q not found", slug)
+			continue
+		}
+		if got[0] != wantCoords[0] || got[1] != wantCoords[1] {
+			t.Errorf("station %q coordinates: want [%v, %v], got [%v, %v]",
+				slug, wantCoords[0], wantCoords[1], got[0], got[1])
+		}
+	}
+}
+
 func TestGetServicesByScenario(t *testing.T) {
 	store := mustNewStore(t)
 	sc, _ := store.GetScenarioBySlug("ca-hsr")
