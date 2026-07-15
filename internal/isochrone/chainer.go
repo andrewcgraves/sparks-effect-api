@@ -22,6 +22,12 @@ const (
 	walkSpeedKmH          = 5.0
 	bikeSpeedKmH          = 15.0
 	driveSpeedKmH         = 80.0
+
+	// caHSRScenarioSlug identifies the California High-Speed Rail scenario. For
+	// this scenario boarding wait is omitted from the isochrone budget so the
+	// map reflects optimistic, wait-free connectivity. WaitModel is reported as
+	// "none" to match.
+	caHSRScenarioSlug = "ca-hsr"
 )
 
 func haversineKm(lat1, lng1, lat2, lng2 float64) float64 {
@@ -187,17 +193,17 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 
 	c.log.Debugf("chain: stadia calls done (origin iso + matrix)")
 
-	accessMins := make(map[string]int)
+	accessSecs := make(map[string]int)
 	if matrixResp != nil && len(matrixResp.SourcesToTargets) > 0 {
 		row := matrixResp.SourcesToTargets[0]
 		for i, st := range nearbyStations {
 			if i < len(row) && row[i].Time >= 0 {
-				accessMins[st.Slug] = row[i].Time / 60
+				accessSecs[st.Slug] = row[i].Time
 			}
 		}
 	}
 
-	c.log.Debugf("chain: matrix done, %d/%d stations reachable", len(accessMins), len(stations))
+	c.log.Debugf("chain: matrix done, %d/%d stations reachable", len(accessSecs), len(stations))
 
 	stationBySlug := make(map[string]transit.Station, len(stations))
 	for _, st := range stations {
@@ -207,24 +213,35 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 	type pathResult struct {
 		accessMins    int
 		remainingMins int
+		serviceID     string
 	}
 
+	budgetSecs := req.BudgetMins * 60
+	skipWait := req.ScenarioSlug == caHSRScenarioSlug
 	bestPaths := make(map[string]pathResult)
 	for egressSlug := range stationBySlug {
 		var best *pathResult
-		for accessSlug, aMins := range accessMins {
-			var r int
+		bestRSecs := 0
+		for accessSlug, aSecs := range accessSecs {
+			var rSecs int
+			var serviceID string
 			if accessSlug == egressSlug {
-				r = req.BudgetMins - aMins
+				rSecs = budgetSecs - aSecs
 			} else {
-				hsrMins, hsrOK := c.store.TravelTimeBetween(req.ScenarioSlug, accessSlug, egressSlug)
-				if !hsrOK {
+				transitSecs, transitWait, transitService, transitOK := c.store.TravelTimeBetween(req.ScenarioSlug, accessSlug, egressSlug)
+				if !transitOK {
 					continue
 				}
-				r = req.BudgetMins - aMins - hsrMins
+				effectiveWait := transitWait
+				if skipWait {
+					effectiveWait = 0
+				}
+				rSecs = budgetSecs - aSecs - transitSecs - effectiveWait
+				serviceID = transitService
 			}
-			if r > 0 && (best == nil || r > best.remainingMins) {
-				p := pathResult{accessMins: aMins, remainingMins: r}
+			if rSecs > 0 && (best == nil || rSecs > bestRSecs) {
+				bestRSecs = rSecs
+				p := pathResult{accessMins: aSecs / 60, remainingMins: rSecs / 60, serviceID: serviceID}
 				best = &p
 			}
 		}
@@ -237,6 +254,7 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 		station       transit.Station
 		remainingMins int
 		accessMins    int
+		serviceID     string
 	}
 	var egressCandidates []egressCandidate
 	for _, st := range stations {
@@ -245,6 +263,7 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 				station:       st,
 				remainingMins: p.remainingMins,
 				accessMins:    p.accessMins,
+				serviceID:     p.serviceID,
 			})
 		}
 	}
@@ -309,10 +328,16 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 			StationSlug:   ec.station.Slug,
 			AccessMins:    ec.accessMins,
 			RemainingMins: ec.remainingMins,
+			ViaService:    ec.serviceID,
 		})
 	}
 
 	c.log.Debugf("chain: complete features=%d reachable_stations=%d", len(features), len(reachableStations))
+
+	waitModel := "headway_over_2_peak"
+	if skipWait {
+		waitModel = "none"
+	}
 
 	return &ChainResponse{
 		Type:     "FeatureCollection",
@@ -322,7 +347,7 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 			OriginBudgetMins:   req.BudgetMins,
 			ScenarioSlug:       req.ScenarioSlug,
 			Mode:               string(req.Mode),
-			WaitModel:          "none",
+			WaitModel:          waitModel,
 			OriginIsoClamped:   originIsoClamped,
 			OriginIsoAvailable: !driveOriginUnavailable,
 		},

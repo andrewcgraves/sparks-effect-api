@@ -1,6 +1,7 @@
 package transit
 
 import (
+	"container/heap"
 	"embed"
 	"fmt"
 	"io/fs"
@@ -20,12 +21,14 @@ type Store struct {
 	vehicleTypes []VehicleType
 	services     []Service
 	travelTimes  map[string]TravelTimes
+	graphs       map[string]*TransitGraph
 }
 
 // NewStore loads all embedded seed data and returns a ready Store.
 func NewStore() (*Store, error) {
 	s := &Store{
 		travelTimes: make(map[string]TravelTimes),
+		graphs:      make(map[string]*TransitGraph),
 	}
 
 	entries, err := fs.ReadDir(dataFS, "data/scenarios")
@@ -84,7 +87,19 @@ func (s *Store) loadScenario(slug string) error {
 	}
 	s.travelTimes[slug] = tt
 
+	g, err := Compile(sc, routes, stations, services, vts, tt)
+	if err != nil {
+		return err
+	}
+	s.graphs[slug] = g
+
 	return nil
+}
+
+// Graph returns the compiled TransitGraph for a scenario slug.
+func (s *Store) Graph(scenarioSlug string) (*TransitGraph, bool) {
+	g, ok := s.graphs[scenarioSlug]
+	return g, ok
 }
 
 // GetScenarios returns all scenarios.
@@ -151,48 +166,92 @@ func (s *Store) GetTravelTimes(scenarioSlug string) (TravelTimes, bool) {
 	return tt, ok
 }
 
-// TravelTimeBetween returns the travel time in minutes between two stations by summing
-// adjacent segments along the connecting route. Returns false if no path exists.
-func (s *Store) TravelTimeBetween(scenarioSlug, fromSlug, toSlug string) (int, bool) {
-	tt, ok := s.travelTimes[scenarioSlug]
-	if !ok {
-		return 0, false
+// TravelTimeBetween returns the Dijkstra travel time in seconds, the boarding wait seconds,
+// the boarding service ID, and reachability over the compiled TransitGraph. Returns false
+// if the scenario is missing or no path exists between the stations.
+func (s *Store) TravelTimeBetween(scenarioSlug, fromSlug, toSlug string) (seconds, waitSecs int, serviceID string, ok bool) {
+	g, gOK := s.graphs[scenarioSlug]
+	if !gOK {
+		return 0, 0, "", false
 	}
 	if fromSlug == toSlug {
-		return 0, true
+		return 0, 0, "", true
+	}
+	return graphDijkstra(g, fromSlug, toSlug)
+}
+
+type dijkNode struct {
+	slug string
+	secs int
+}
+
+type dijkHeap []dijkNode
+
+func (h dijkHeap) Len() int           { return len(h) }
+func (h dijkHeap) Less(i, j int) bool { return h[i].secs < h[j].secs }
+func (h dijkHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h *dijkHeap) Push(x any)        { *h = append(*h, x.(dijkNode)) }
+func (h *dijkHeap) Pop() any {
+	old := *h
+	n := len(old)
+	x := old[n-1]
+	*h = old[:n-1]
+	return x
+}
+
+func graphDijkstra(g *TransitGraph, from, to string) (int, int, string, bool) {
+	type neighbor struct {
+		slug      string
+		secs      int
+		serviceID string
+		waitSecs  int
+	}
+	adj := make(map[string][]neighbor)
+	for _, sg := range g.Services {
+		for _, e := range sg.Edges {
+			adj[e.FromSlug] = append(adj[e.FromSlug], neighbor{
+				slug:      e.ToSlug,
+				secs:      e.Seconds,
+				serviceID: sg.ServiceID,
+				waitSecs:  sg.WaitSecs,
+			})
+		}
 	}
 
-	type edge struct {
-		to      string
-		minutes int
+	type pathState struct {
+		vehicleSecs int
+		waitSecs    int
+		serviceID   string
 	}
-	adj := make(map[string][]edge, len(tt.Segments)*2)
-	for _, seg := range tt.Segments {
-		adj[seg.FromSlug] = append(adj[seg.FromSlug], edge{seg.ToSlug, seg.Minutes})
-		adj[seg.ToSlug] = append(adj[seg.ToSlug], edge{seg.FromSlug, seg.Minutes})
-	}
+	best := map[string]pathState{from: {}}
+	h := &dijkHeap{{from, 0}}
+	heap.Init(h)
 
-	type state struct {
-		slug    string
-		minutes int
-	}
-	visited := map[string]bool{fromSlug: true}
-	queue := []state{{fromSlug, 0}}
-	for len(queue) > 0 {
-		cur := queue[0]
-		queue = queue[1:]
-		for _, e := range adj[cur.slug] {
-			total := cur.minutes + e.minutes
-			if e.to == toSlug {
-				return total, true
+	for h.Len() > 0 {
+		cur := heap.Pop(h).(dijkNode)
+		curState := best[cur.slug]
+		if cur.secs > curState.vehicleSecs+curState.waitSecs {
+			continue
+		}
+		if cur.slug == to {
+			return curState.vehicleSecs, curState.waitSecs, curState.serviceID, true
+		}
+		for _, nb := range adj[cur.slug] {
+			nextVehicle := curState.vehicleSecs + nb.secs
+			nextWait := curState.waitSecs
+			nextService := curState.serviceID
+			if cur.slug == from {
+				nextWait = nb.waitSecs
+				nextService = nb.serviceID
 			}
-			if !visited[e.to] {
-				visited[e.to] = true
-				queue = append(queue, state{e.to, total})
+			nextTotal := nextVehicle + nextWait
+			if prev, seen := best[nb.slug]; !seen || nextTotal < prev.vehicleSecs+prev.waitSecs {
+				best[nb.slug] = pathState{nextVehicle, nextWait, nextService}
+				heap.Push(h, dijkNode{nb.slug, nextTotal})
 			}
 		}
 	}
-	return 0, false
+	return 0, 0, "", false
 }
 
 func unmarshalFile(fsys embed.FS, path string, v any) error {

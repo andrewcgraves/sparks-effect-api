@@ -18,6 +18,7 @@ type fakeTransitData struct {
 	scenario    transit.Scenario
 	stations    []transit.Station
 	travelTimes map[[2]string]int
+	waitTimes   map[[2]string]int // per-pair boarding wait in seconds (default 0)
 }
 
 func (f *fakeTransitData) GetScenarioBySlug(slug string) (transit.Scenario, bool) {
@@ -41,14 +42,16 @@ func (f *fakeTransitData) GetServicesByScenario(scenarioID string) []transit.Ser
 	return nil
 }
 
-func (f *fakeTransitData) TravelTimeBetween(_ string, fromSlug, toSlug string) (int, bool) {
-	if v, ok := f.travelTimes[[2]string{fromSlug, toSlug}]; ok {
-		return v, true
+func (f *fakeTransitData) TravelTimeBetween(_ string, fromSlug, toSlug string) (int, int, string, bool) {
+	key := [2]string{fromSlug, toSlug}
+	rev := [2]string{toSlug, fromSlug}
+	if v, ok := f.travelTimes[key]; ok {
+		return v, f.waitTimes[key], "", true
 	}
-	if v, ok := f.travelTimes[[2]string{toSlug, fromSlug}]; ok {
-		return v, true
+	if v, ok := f.travelTimes[rev]; ok {
+		return v, f.waitTimes[rev], "", true
 	}
-	return 0, false
+	return 0, 0, "", false
 }
 
 func newTestData() *fakeTransitData {
@@ -65,7 +68,7 @@ func newTestData() *fakeTransitData {
 			},
 		},
 		travelTimes: map[[2]string]int{
-			{"station-a", "station-b"}: 30,
+			{"station-a", "station-b"}: 1800,
 		},
 	}
 }
@@ -115,8 +118,8 @@ func TestChainer_happyPath_twoStations(t *testing.T) {
 	if len(resp.Metadata.ReachableStations) != 2 {
 		t.Errorf("ReachableStations len: want 2, got %d", len(resp.Metadata.ReachableStations))
 	}
-	if resp.Metadata.WaitModel != "none" {
-		t.Errorf("WaitModel: want none, got %q", resp.Metadata.WaitModel)
+	if resp.Metadata.WaitModel != "headway_over_2_peak" {
+		t.Errorf("WaitModel: want headway_over_2_peak, got %q", resp.Metadata.WaitModel)
 	}
 	if resp.Metadata.OriginBudgetMins != 90 {
 		t.Errorf("OriginBudgetMins: want 90, got %d", resp.Metadata.OriginBudgetMins)
@@ -181,7 +184,7 @@ func TestChainer_allUnreachable(t *testing.T) {
 }
 
 func TestChainer_zeroRemainingExcludesStation(t *testing.T) {
-	// budget=30, station-a in 10 mins (remaining=20), station-b only via HSR: 10+30=40 > budget
+	// budget=30 min=1800s, station-a access=600s, HSR a→b=1800s: 600+1800=2400 > 1800 budget
 	// station-b direct: unreachable (-1)
 	fc := &stadia.FakeClient{
 		IsochroneResp: cannedIso(),
@@ -203,7 +206,7 @@ func TestChainer_zeroRemainingExcludesStation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Chain: %v", err)
 	}
-	// origin + station-a egress only; station-b excluded (30-10-30 = -10 ≤ 0)
+	// origin + station-a egress only; station-b excluded (1800-600-1800 = -600s ≤ 0)
 	if len(resp.Metadata.ReachableStations) != 1 {
 		t.Errorf("ReachableStations: want 1, got %d", len(resp.Metadata.ReachableStations))
 	}
@@ -273,7 +276,7 @@ func TestChainer_concurrentFanOut_noRace(t *testing.T) {
 		for j := range 5 {
 			if i != j {
 				slugJ := string(rune('a' + j))
-				tt[[2]string{"st-" + slug, "st-" + slugJ}] = 10
+				tt[[2]string{"st-" + slug, "st-" + slugJ}] = 600
 			}
 		}
 	}
@@ -633,5 +636,136 @@ func TestChainer_bikeIsoBudgetClamped(t *testing.T) {
 	const wantBudget = 4800 // 20000m / (15km/h in m/s) = 4800s
 	if fc.IsochoneCalls[0].BudgetSecs != wantBudget {
 		t.Errorf("BudgetSecs: want %d (clamped), got %d", wantBudget, fc.IsochoneCalls[0].BudgetSecs)
+	}
+}
+
+// TestChainer_caHSR_zeroWait_waitModelNone verifies that the ca-hsr scenario
+// ignores boarding wait when computing remaining budget and reports wait_model "none".
+func TestChainer_caHSR_zeroWait_waitModelNone(t *testing.T) {
+	// budget=90min=5400s, access to station-a=600s, transit a→b=1800s, wait=900s.
+	// ca-hsr: remaining = 5400 - 600 - 1800 - 0 = 3000s = 50min (wait skipped).
+	// non-ca-hsr would yield: 5400 - 600 - 1800 - 900 = 2100s = 35min.
+	store := &fakeTransitData{
+		scenario: transit.Scenario{ID: "cahsr", Slug: "ca-hsr"},
+		stations: []transit.Station{
+			{
+				ID: "st1", ScenarioID: "cahsr", Slug: "hsr-a",
+				Location: transit.GeoPoint{Type: "Point", Coordinates: []float64{-122.39, 37.71}},
+			},
+			{
+				ID: "st2", ScenarioID: "cahsr", Slug: "hsr-b",
+				Location: transit.GeoPoint{Type: "Point", Coordinates: []float64{-122.41, 37.69}},
+			},
+		},
+		travelTimes: map[[2]string]int{
+			{"hsr-a", "hsr-b"}: 1800,
+		},
+		waitTimes: map[[2]string]int{
+			{"hsr-a", "hsr-b"}: 900, // 15-min headway/2 — would consume 900s if applied
+		},
+	}
+	fc := &stadia.FakeClient{
+		IsochroneResp: cannedIso(),
+		MatrixResp: &stadia.MatrixResponse{
+			SourcesToTargets: [][]stadia.MatrixCell{
+				{
+					{Time: 600, Distance: 1.0},  // hsr-a: 10 min
+					{Time: 3000, Distance: 5.0}, // hsr-b: 50 min (beyond budget after transit)
+				},
+			},
+		},
+	}
+	chainer := isochrone.New(fc, store, logger.Discard())
+
+	resp, err := chainer.Chain(context.Background(), isochrone.ChainRequest{
+		Lat: 37.7, Lng: -122.4, BudgetMins: 90,
+		Mode: isochrone.ModeWalk, ScenarioSlug: "ca-hsr",
+	})
+	if err != nil {
+		t.Fatalf("Chain: %v", err)
+	}
+
+	if resp.Metadata.WaitModel != "none" {
+		t.Errorf("WaitModel: want %q, got %q", "none", resp.Metadata.WaitModel)
+	}
+
+	// hsr-b reachable via hsr-a: remaining = 90*60 - 600 - 1800 - 0(wait skipped) = 3000s = 50min
+	var hb *isochrone.ReachableStation
+	for i := range resp.Metadata.ReachableStations {
+		if resp.Metadata.ReachableStations[i].StationSlug == "hsr-b" {
+			hb = &resp.Metadata.ReachableStations[i]
+		}
+	}
+	if hb == nil {
+		t.Fatal("hsr-b not in ReachableStations; expected it reachable with wait skipped")
+	}
+	if hb.RemainingMins != 50 {
+		t.Errorf("hsr-b RemainingMins: want 50 (wait excluded), got %d", hb.RemainingMins)
+	}
+}
+
+// TestChainer_nonCaHSR_waitApplied_waitModelHeadway verifies that non-ca-hsr
+// scenarios subtract boarding wait and report wait_model "headway_over_2_peak".
+func TestChainer_nonCaHSR_waitApplied_waitModelHeadway(t *testing.T) {
+	// budget=90min=5400s, access=600s, transit=1800s, wait=900s.
+	// remaining = 5400 - 600 - 1800 - 900 = 2100s = 35min.
+	store := &fakeTransitData{
+		scenario: transit.Scenario{ID: "sc1", Slug: "test-sc"},
+		stations: []transit.Station{
+			{
+				ID: "st1", ScenarioID: "sc1", Slug: "station-a",
+				Location: transit.GeoPoint{Type: "Point", Coordinates: []float64{-122.39, 37.71}},
+			},
+			{
+				ID: "st2", ScenarioID: "sc1", Slug: "station-b",
+				Location: transit.GeoPoint{Type: "Point", Coordinates: []float64{-122.41, 37.69}},
+			},
+		},
+		travelTimes: map[[2]string]int{
+			{"station-a", "station-b"}: 1800,
+		},
+		waitTimes: map[[2]string]int{
+			{"station-a", "station-b"}: 900,
+		},
+	}
+	// station-b is not directly reachable from origin (-1); the only path is
+	// via station-a. With wait applied: 5400 - 600 - 1800 - 900 = 2100s = 35min.
+	fc := &stadia.FakeClient{
+		IsochroneResp: cannedIso(),
+		MatrixResp: &stadia.MatrixResponse{
+			SourcesToTargets: [][]stadia.MatrixCell{
+				{
+					{Time: 600, Distance: 1.0}, // station-a: 10 min
+					{Time: -1, Distance: 0},    // station-b: not directly reachable
+				},
+			},
+		},
+	}
+	chainer := isochrone.New(fc, store, logger.Discard())
+
+	resp, err := chainer.Chain(context.Background(), isochrone.ChainRequest{
+		Lat: 37.7, Lng: -122.4, BudgetMins: 90,
+		Mode: isochrone.ModeWalk, ScenarioSlug: "test-sc",
+	})
+	if err != nil {
+		t.Fatalf("Chain: %v", err)
+	}
+
+	if resp.Metadata.WaitModel != "headway_over_2_peak" {
+		t.Errorf("WaitModel: want %q, got %q", "headway_over_2_peak", resp.Metadata.WaitModel)
+	}
+
+	// station-b via station-a: remaining = 5400 - 600 - 1800 - 900 = 2100s = 35min
+	var sb *isochrone.ReachableStation
+	for i := range resp.Metadata.ReachableStations {
+		if resp.Metadata.ReachableStations[i].StationSlug == "station-b" {
+			sb = &resp.Metadata.ReachableStations[i]
+		}
+	}
+	if sb == nil {
+		t.Fatal("station-b not in ReachableStations")
+	}
+	if sb.RemainingMins != 35 {
+		t.Errorf("station-b RemainingMins: want 35 (wait applied), got %d", sb.RemainingMins)
 	}
 }
