@@ -83,21 +83,24 @@ type Service struct {
 	FrequencyWindows []FrequencyWindow `yaml:"frequency_windows" json:"frequency_windows"`
 }
 
-// SegmentTime is the travel time in minutes for one adjacent station pair along a service.
+// SegmentTime is the run-time-only seconds for one adjacent station pair along a service.
+// Values are run time only (train in motion); dwell is added at compile time.
 // Segments are stored in service direction (northernmost terminus first for Phase 1).
 // For bidirectional services the reverse direction uses the same time.
 // Multi-hop origin–destination times are derived by summing consecutive segments;
 // see Store.TravelTimeBetween.
 type SegmentTime struct {
-	FromSlug string `yaml:"from"    json:"from"`
-	ToSlug   string `yaml:"to"      json:"to"`
-	Minutes  int    `yaml:"minutes" json:"minutes"`
+	FromSlug   string `yaml:"from"        json:"from"`
+	ToSlug     string `yaml:"to"          json:"to"`
+	RunSeconds int    `yaml:"run_seconds" json:"run_seconds"`
 }
 
-// TravelTimes holds adjacent segment travel times for a scenario.
+// TravelTimes holds adjacent segment run times for a scenario.
 // The full OD matrix is intentionally not stored; callers derive it by summing segments
 // via Store.TravelTimeBetween, keeping physics-compiler independence behind a seam.
 type TravelTimes struct {
 	ScenarioSlug string        `yaml:"scenario_slug" json:"scenario_slug"`
+	Provenance   string        `yaml:"provenance"    json:"provenance"`
+	Source       string        `yaml:"source"        json:"source"`
 	Segments     []SegmentTime `yaml:"segments"      json:"segments"`
 }

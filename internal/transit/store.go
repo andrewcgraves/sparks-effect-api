@@ -82,7 +82,7 @@ func (s *Store) loadScenario(slug string) error {
 	s.services = append(s.services, services...)
 
 	var tt TravelTimes
-	if err := unmarshalFile(dataFS, base+"/travel_times.yaml", &tt); err != nil {
+	if err := unmarshalFile(dataFS, base+"/segment_run_times.yaml", &tt); err != nil {
 		return err
 	}
 	s.travelTimes[slug] = tt
