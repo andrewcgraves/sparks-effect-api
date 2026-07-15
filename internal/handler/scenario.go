@@ -26,6 +26,7 @@ type serviceSummary struct {
 	Name             string                    `json:"name"`
 	VehicleType      vehicleTypeSummary        `json:"vehicle_type"`
 	Direction        string                    `json:"direction"`
+	Provenance       string                    `json:"provenance"`
 	StopCount        int                       `json:"stop_count"`
 	FrequencyWindows []transit.FrequencyWindow `json:"frequency_windows"`
 }
@@ -87,6 +88,7 @@ func ScenarioBySlug(store *transit.Store) http.HandlerFunc {
 					MaxSpeedKMH: vt.MaxSpeedKMH,
 				},
 				Direction:        svc.Direction,
+				Provenance:       svc.Provenance,
 				StopCount:        len(svc.Stops),
 				FrequencyWindows: svc.FrequencyWindows,
 			})
