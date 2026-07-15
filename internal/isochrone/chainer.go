@@ -221,12 +221,12 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 			if accessSlug == egressSlug {
 				rSecs = budgetSecs - aSecs
 			} else {
-				hsrSecs, hsrWait, hsrService, hsrOK := c.store.TravelTimeBetween(req.ScenarioSlug, accessSlug, egressSlug)
-				if !hsrOK {
+				transitSecs, transitWait, transitService, transitOK := c.store.TravelTimeBetween(req.ScenarioSlug, accessSlug, egressSlug)
+				if !transitOK {
 					continue
 				}
-				rSecs = budgetSecs - aSecs - hsrSecs - hsrWait
-				serviceID = hsrService
+				rSecs = budgetSecs - aSecs - transitSecs - transitWait
+				serviceID = transitService
 			}
 			if rSecs > 0 && (best == nil || rSecs > bestRSecs) {
 				bestRSecs = rSecs
