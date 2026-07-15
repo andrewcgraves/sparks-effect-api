@@ -70,6 +70,16 @@ type FrequencyWindow struct {
 	HeadwayS  int    `yaml:"headway_s"  json:"headway_s"`
 }
 
+// Provenance tiers classify who owns a service's parameter values.
+// computed: derived entirely by the physics compiler — editor should grey out levers.
+// calibrated: seeded from real-world data; levers are editable but flagged.
+// frozen: locked by policy; compiler will assert geometry is unchanged.
+const (
+	ProvenanceComputed   = "computed"
+	ProvenanceCalibrated = "calibrated"
+	ProvenanceFrozen     = "frozen"
+)
+
 // Service is an operating pattern: one route + vehicle type + stop list + schedule.
 type Service struct {
 	ID               string            `yaml:"id"               json:"id"`
@@ -79,6 +89,7 @@ type Service struct {
 	Name             string            `yaml:"name"             json:"name"`
 	Direction        string            `yaml:"direction"        json:"direction"`
 	Active           bool              `yaml:"active"           json:"active"`
+	Provenance       string            `yaml:"provenance"       json:"provenance"`
 	Stops            []ServiceStop     `yaml:"stops"            json:"stops"`
 	FrequencyWindows []FrequencyWindow `yaml:"frequency_windows" json:"frequency_windows"`
 }

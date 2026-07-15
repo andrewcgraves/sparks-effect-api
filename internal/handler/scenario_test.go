@@ -101,6 +101,9 @@ func TestScenarioBySlug_found(t *testing.T) {
 		} else if vt["propulsion"] == nil {
 			t.Errorf("vehicle_type for %v missing propulsion", svc["name"])
 		}
+		if svc["provenance"] != "calibrated" {
+			t.Errorf("service %v provenance: want calibrated, got %v", svc["name"], svc["provenance"])
+		}
 	}
 }
 
@@ -234,6 +237,9 @@ func TestScenarioServices_found(t *testing.T) {
 		}
 		if svc["active"] != true {
 			t.Errorf("service %v has active != true", svc["name"])
+		}
+		if svc["provenance"] != "calibrated" {
+			t.Errorf("service %v provenance: want calibrated, got %v", svc["name"], svc["provenance"])
 		}
 	}
 }
