@@ -22,6 +22,12 @@ const (
 	walkSpeedKmH          = 5.0
 	bikeSpeedKmH          = 15.0
 	driveSpeedKmH         = 80.0
+
+	// caHSRScenarioSlug identifies the California High-Speed Rail scenario. For
+	// this scenario boarding wait is omitted from the isochrone budget so the
+	// map reflects optimistic, wait-free connectivity. WaitModel is reported as
+	// "none" to match.
+	caHSRScenarioSlug = "ca-hsr"
 )
 
 func haversineKm(lat1, lng1, lat2, lng2 float64) float64 {
@@ -211,6 +217,7 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 	}
 
 	budgetSecs := req.BudgetMins * 60
+	skipWait := req.ScenarioSlug == caHSRScenarioSlug
 	bestPaths := make(map[string]pathResult)
 	for egressSlug := range stationBySlug {
 		var best *pathResult
@@ -225,7 +232,11 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 				if !transitOK {
 					continue
 				}
-				rSecs = budgetSecs - aSecs - transitSecs - transitWait
+				effectiveWait := transitWait
+				if skipWait {
+					effectiveWait = 0
+				}
+				rSecs = budgetSecs - aSecs - transitSecs - effectiveWait
 				serviceID = transitService
 			}
 			if rSecs > 0 && (best == nil || rSecs > bestRSecs) {
@@ -323,6 +334,11 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 
 	c.log.Debugf("chain: complete features=%d reachable_stations=%d", len(features), len(reachableStations))
 
+	waitModel := "headway_over_2_peak"
+	if skipWait {
+		waitModel = "none"
+	}
+
 	return &ChainResponse{
 		Type:     "FeatureCollection",
 		Features: features,
@@ -331,7 +347,7 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 			OriginBudgetMins:   req.BudgetMins,
 			ScenarioSlug:       req.ScenarioSlug,
 			Mode:               string(req.Mode),
-			WaitModel:          "headway_over_2_peak",
+			WaitModel:          waitModel,
 			OriginIsoClamped:   originIsoClamped,
 			OriginIsoAvailable: !driveOriginUnavailable,
 		},
