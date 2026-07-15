@@ -187,17 +187,17 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 
 	c.log.Debugf("chain: stadia calls done (origin iso + matrix)")
 
-	accessMins := make(map[string]int)
+	accessSecs := make(map[string]int)
 	if matrixResp != nil && len(matrixResp.SourcesToTargets) > 0 {
 		row := matrixResp.SourcesToTargets[0]
 		for i, st := range nearbyStations {
 			if i < len(row) && row[i].Time >= 0 {
-				accessMins[st.Slug] = row[i].Time / 60
+				accessSecs[st.Slug] = row[i].Time
 			}
 		}
 	}
 
-	c.log.Debugf("chain: matrix done, %d/%d stations reachable", len(accessMins), len(stations))
+	c.log.Debugf("chain: matrix done, %d/%d stations reachable", len(accessSecs), len(stations))
 
 	stationBySlug := make(map[string]transit.Station, len(stations))
 	for _, st := range stations {
@@ -207,24 +207,30 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 	type pathResult struct {
 		accessMins    int
 		remainingMins int
+		serviceID     string
 	}
 
+	budgetSecs := req.BudgetMins * 60
 	bestPaths := make(map[string]pathResult)
 	for egressSlug := range stationBySlug {
 		var best *pathResult
-		for accessSlug, aMins := range accessMins {
-			var r int
+		bestRSecs := 0
+		for accessSlug, aSecs := range accessSecs {
+			var rSecs int
+			var serviceID string
 			if accessSlug == egressSlug {
-				r = req.BudgetMins - aMins
+				rSecs = budgetSecs - aSecs
 			} else {
-				hsrMins, hsrOK := c.store.TravelTimeBetween(req.ScenarioSlug, accessSlug, egressSlug)
+				hsrSecs, hsrWait, hsrService, hsrOK := c.store.TravelTimeBetween(req.ScenarioSlug, accessSlug, egressSlug)
 				if !hsrOK {
 					continue
 				}
-				r = req.BudgetMins - aMins - hsrMins
+				rSecs = budgetSecs - aSecs - hsrSecs - hsrWait
+				serviceID = hsrService
 			}
-			if r > 0 && (best == nil || r > best.remainingMins) {
-				p := pathResult{accessMins: aMins, remainingMins: r}
+			if rSecs > 0 && (best == nil || rSecs > bestRSecs) {
+				bestRSecs = rSecs
+				p := pathResult{accessMins: aSecs / 60, remainingMins: rSecs / 60, serviceID: serviceID}
 				best = &p
 			}
 		}
@@ -237,6 +243,7 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 		station       transit.Station
 		remainingMins int
 		accessMins    int
+		serviceID     string
 	}
 	var egressCandidates []egressCandidate
 	for _, st := range stations {
@@ -245,6 +252,7 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 				station:       st,
 				remainingMins: p.remainingMins,
 				accessMins:    p.accessMins,
+				serviceID:     p.serviceID,
 			})
 		}
 	}
@@ -309,6 +317,7 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 			StationSlug:   ec.station.Slug,
 			AccessMins:    ec.accessMins,
 			RemainingMins: ec.remainingMins,
+			ViaService:    ec.serviceID,
 		})
 	}
 
@@ -322,7 +331,7 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 			OriginBudgetMins:   req.BudgetMins,
 			ScenarioSlug:       req.ScenarioSlug,
 			Mode:               string(req.Mode),
-			WaitModel:          "none",
+			WaitModel:          "headway_over_2_peak",
 			OriginIsoClamped:   originIsoClamped,
 			OriginIsoAvailable: !driveOriginUnavailable,
 		},

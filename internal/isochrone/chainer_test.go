@@ -41,14 +41,14 @@ func (f *fakeTransitData) GetServicesByScenario(scenarioID string) []transit.Ser
 	return nil
 }
 
-func (f *fakeTransitData) TravelTimeBetween(_ string, fromSlug, toSlug string) (int, bool) {
+func (f *fakeTransitData) TravelTimeBetween(_ string, fromSlug, toSlug string) (int, int, string, bool) {
 	if v, ok := f.travelTimes[[2]string{fromSlug, toSlug}]; ok {
-		return v, true
+		return v, 0, "", true
 	}
 	if v, ok := f.travelTimes[[2]string{toSlug, fromSlug}]; ok {
-		return v, true
+		return v, 0, "", true
 	}
-	return 0, false
+	return 0, 0, "", false
 }
 
 func newTestData() *fakeTransitData {
@@ -65,7 +65,7 @@ func newTestData() *fakeTransitData {
 			},
 		},
 		travelTimes: map[[2]string]int{
-			{"station-a", "station-b"}: 30,
+			{"station-a", "station-b"}: 1800,
 		},
 	}
 }
@@ -115,8 +115,8 @@ func TestChainer_happyPath_twoStations(t *testing.T) {
 	if len(resp.Metadata.ReachableStations) != 2 {
 		t.Errorf("ReachableStations len: want 2, got %d", len(resp.Metadata.ReachableStations))
 	}
-	if resp.Metadata.WaitModel != "none" {
-		t.Errorf("WaitModel: want none, got %q", resp.Metadata.WaitModel)
+	if resp.Metadata.WaitModel != "headway_over_2_peak" {
+		t.Errorf("WaitModel: want headway_over_2_peak, got %q", resp.Metadata.WaitModel)
 	}
 	if resp.Metadata.OriginBudgetMins != 90 {
 		t.Errorf("OriginBudgetMins: want 90, got %d", resp.Metadata.OriginBudgetMins)
@@ -181,7 +181,7 @@ func TestChainer_allUnreachable(t *testing.T) {
 }
 
 func TestChainer_zeroRemainingExcludesStation(t *testing.T) {
-	// budget=30, station-a in 10 mins (remaining=20), station-b only via HSR: 10+30=40 > budget
+	// budget=30 min=1800s, station-a access=600s, HSR a→b=1800s: 600+1800=2400 > 1800 budget
 	// station-b direct: unreachable (-1)
 	fc := &stadia.FakeClient{
 		IsochroneResp: cannedIso(),
@@ -203,7 +203,7 @@ func TestChainer_zeroRemainingExcludesStation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Chain: %v", err)
 	}
-	// origin + station-a egress only; station-b excluded (30-10-30 = -10 ≤ 0)
+	// origin + station-a egress only; station-b excluded (1800-600-1800 = -600s ≤ 0)
 	if len(resp.Metadata.ReachableStations) != 1 {
 		t.Errorf("ReachableStations: want 1, got %d", len(resp.Metadata.ReachableStations))
 	}
@@ -273,7 +273,7 @@ func TestChainer_concurrentFanOut_noRace(t *testing.T) {
 		for j := range 5 {
 			if i != j {
 				slugJ := string(rune('a' + j))
-				tt[[2]string{"st-" + slug, "st-" + slugJ}] = 10
+				tt[[2]string{"st-" + slug, "st-" + slugJ}] = 600
 			}
 		}
 	}

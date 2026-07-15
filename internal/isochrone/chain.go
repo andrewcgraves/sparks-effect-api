@@ -34,6 +34,7 @@ type ReachableStation struct {
 	StationSlug   string `json:"station_slug"`
 	AccessMins    int    `json:"access_mins"`
 	RemainingMins int    `json:"remaining_mins"`
+	ViaService    string `json:"via_service,omitempty"`
 }
 
 type ChainMetadata struct {
