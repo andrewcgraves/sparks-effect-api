@@ -223,8 +223,8 @@ func TestGetTravelTimes(t *testing.T) {
 	found := false
 	for _, seg := range tt.Segments {
 		if seg.FromSlug == "sf" && seg.ToSlug == "millbrae" {
-			if seg.Minutes != 15 {
-				t.Errorf("sf→millbrae: want 15, got %d", seg.Minutes)
+			if seg.RunSeconds != 760 {
+				t.Errorf("sf→millbrae: want 760 run_seconds, got %d", seg.RunSeconds)
 			}
 			found = true
 		}
@@ -246,8 +246,8 @@ func TestTravelTimeBetween(t *testing.T) {
 	if !ok {
 		t.Fatal("TravelTimeBetween: sf→millbrae not found")
 	}
-	if got != 990 {
-		t.Errorf("sf→millbrae: want 990 (15*60+dwell90), got %d", got)
+	if got != 850 {
+		t.Errorf("sf→millbrae: want 850 (run_seconds 760 + dwell 90), got %d", got)
 	}
 	if svcID == "" {
 		t.Error("sf→millbrae: serviceID must be non-empty")
@@ -257,16 +257,16 @@ func TestTravelTimeBetween(t *testing.T) {
 	if !ok {
 		t.Fatal("TravelTimeBetween: sf→san-jose not found")
 	}
-	if got != 3420 {
-		t.Errorf("sf→san-jose: want 3420 (15*60+90 + 39*60+90), got %d", got)
+	if got != 3050 {
+		t.Errorf("sf→san-jose: want 3050 (run_seconds 760+2110 + 2×dwell 90), got %d", got)
 	}
 
-	got, _, _, ok = store.TravelTimeBetween("ca-hsr", "millbrae", "sf")
+	got, _, _, ok = store.TravelTimeBetween("ca-hsr", "san-jose", "sf")
 	if !ok {
-		t.Fatal("TravelTimeBetween: millbrae→sf (reverse) not found")
+		t.Fatal("TravelTimeBetween: san-jose→sf (reverse) not found")
 	}
-	if got != 990 {
-		t.Errorf("millbrae→sf (reverse): want 990, got %d", got)
+	if got != 3050 {
+		t.Errorf("san-jose→sf (reverse): want 3050 (symmetry), got %d", got)
 	}
 
 	got, _, _, ok = store.TravelTimeBetween("ca-hsr", "sf", "sf")
@@ -282,5 +282,56 @@ func TestTravelTimeBetween(t *testing.T) {
 	_, _, _, ok = store.TravelTimeBetween("ca-hsr", "sf", "no-such-station")
 	if ok {
 		t.Error("expected false for unknown station slug")
+	}
+}
+
+func TestLocalSFToAnaheim_compiledTime_approx306min(t *testing.T) {
+	// Table 3-4, 2026 Business Plan: all-stop SF→Anaheim = 306 min.
+	// Compiled Local = run sum 17280 s + 12×90 s dwell = 18360 s = 306.0 min exactly.
+	store := mustNewStore(t)
+	g, ok := store.Graph("ca-hsr")
+	if !ok {
+		t.Fatal("ca-hsr graph not found")
+	}
+
+	const localSvcID = "00000000-0000-4004-8001-000000000002"
+	var localSG *ServiceGraph
+	for i := range g.Services {
+		if g.Services[i].ServiceID == localSvcID {
+			localSG = &g.Services[i]
+			break
+		}
+	}
+	if localSG == nil {
+		t.Fatal("HSR Local service graph not found")
+	}
+
+	adj := map[string]int{}
+	for _, e := range localSG.Edges {
+		adj[e.FromSlug+"→"+e.ToSlug] = e.Seconds
+	}
+
+	allStops := []string{
+		"sf", "millbrae", "san-jose", "gilroy", "merced", "madera",
+		"fresno", "kings-tulare", "bakersfield", "palmdale",
+		"burbank-airport", "los-angeles", "anaheim",
+	}
+	total := 0
+	for i := 0; i+1 < len(allStops); i++ {
+		key := allStops[i] + "→" + allStops[i+1]
+		secs, found := adj[key]
+		if !found {
+			t.Fatalf("edge %q not in HSR Local graph", key)
+		}
+		total += secs
+	}
+
+	const (
+		wantMin = 18240
+		wantMax = 18480
+	)
+	if total < wantMin || total > wantMax {
+		t.Errorf("Local SF→Anaheim: got %d s (%d min), want %d–%d s (306 min ±120 s)",
+			total, total/60, wantMin, wantMax)
 	}
 }

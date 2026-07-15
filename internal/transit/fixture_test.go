@@ -116,7 +116,7 @@ func TestFixture_CompileFailuresDescriptive(t *testing.T) {
 	vt := testVehicle()
 
 	_, err := Compile(sc, nil, stations, nil, nil, TravelTimes{
-		Segments: []SegmentTime{{FromSlug: "a", ToSlug: "ghost", Minutes: 1}},
+		Segments: []SegmentTime{{FromSlug: "a", ToSlug: "ghost", RunSeconds: 60}},
 	})
 	if err == nil || !strings.Contains(err.Error(), "ghost") {
 		t.Fatalf("unknown slug: want error mentioning ghost, got %v", err)

@@ -18,8 +18,8 @@ func testSegments() TravelTimes {
 	return TravelTimes{
 		ScenarioSlug: "test",
 		Segments: []SegmentTime{
-			{FromSlug: "a", ToSlug: "b", Minutes: 10},
-			{FromSlug: "b", ToSlug: "c", Minutes: 20},
+			{FromSlug: "a", ToSlug: "b", RunSeconds: 600},
+			{FromSlug: "b", ToSlug: "c", RunSeconds: 1200},
 		},
 	}
 }
@@ -186,8 +186,8 @@ func TestCompile_dwellResolution(t *testing.T) {
 		{ID: "st-c", Slug: "c", PlatformHeight: "high"},
 	}
 	segments := TravelTimes{Segments: []SegmentTime{
-		{FromSlug: "a", ToSlug: "b", Minutes: 1},
-		{FromSlug: "b", ToSlug: "c", Minutes: 1},
+		{FromSlug: "a", ToSlug: "b", RunSeconds: 60},
+		{FromSlug: "b", ToSlug: "c", RunSeconds: 60},
 	}}
 	vt := testVehicle()
 	services := []Service{{
@@ -222,7 +222,7 @@ func TestCompile_dwellResolution(t *testing.T) {
 func TestCompile_unknownStationSlugInSegments(t *testing.T) {
 	sc := Scenario{ID: "sc-1", Slug: "test"}
 	tt := TravelTimes{
-		Segments: []SegmentTime{{FromSlug: "a", ToSlug: "missing", Minutes: 5}},
+		Segments: []SegmentTime{{FromSlug: "a", ToSlug: "missing", RunSeconds: 300}},
 	}
 	_, err := Compile(sc, nil, testStations(), nil, nil, tt)
 	if err == nil {

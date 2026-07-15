@@ -107,7 +107,7 @@ func buildSegmentAdj(tt TravelTimes, stationsBySlug map[string]Station) (map[str
 		if _, ok := stationsBySlug[seg.ToSlug]; !ok {
 			return nil, nil, fmt.Errorf("compile: unknown station slug %q in segment times", seg.ToSlug)
 		}
-		secs := seg.Minutes * 60
+		secs := seg.RunSeconds
 		adj[seg.FromSlug] = append(adj[seg.FromSlug], segEdge{seg.ToSlug, secs})
 		adj[seg.ToSlug] = append(adj[seg.ToSlug], segEdge{seg.FromSlug, secs})
 		onPath[seg.FromSlug] = true
@@ -169,7 +169,6 @@ func pathDwellSecs(path []string, stationsBySlug map[string]Station, stopByStati
 		if !calls {
 			continue
 		}
-		// TODO(M2): segment times still include schedule dwell; adding resolved dwell double-counts until run/dwell split.
 		dwellSecs += resolveDwell(stop, st, vt)
 	}
 	return dwellSecs
