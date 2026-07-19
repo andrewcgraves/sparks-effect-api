@@ -103,9 +103,6 @@ func SpeedLimit(in SpeedLimitInputs) float64 {
 	// Stage 3: descending-grade derate.
 	speed *= gradeFactor(in.Grade)
 
-	// Final clamp: guarantee the result never exceeds the vehicle max (AC #2)
-	// and is a sane, non-negative number.
-	speed = math.Min(speed, in.VehicleMaxKMH)
 	if math.IsNaN(speed) || speed < 0 {
 		return 0
 	}
