@@ -206,7 +206,7 @@ func TestJobsRoundTrip(t *testing.T) {
 	if got.Status != transit.JobStatusFailed || got.Error != "boom" {
 		t.Errorf("GetJobByID: want failed/boom, got %s/%q", got.Status, got.Error)
 	}
-	if !got.UpdatedAt.After(got.CreatedAt) && got.UpdatedAt.Before(got.CreatedAt) {
+	if got.UpdatedAt.Before(got.CreatedAt) {
 		t.Error("GetJobByID: updated_at should be >= created_at")
 	}
 

@@ -59,7 +59,11 @@ func (r *Repo) Close() { r.pool.Close() }
 // database/sql) and closes it before returning; the app itself uses the pgx
 // pool. Safe to run on every boot — already-applied migrations are skipped.
 func Migrate(ctx context.Context, databaseURL string) error {
-	db := stdlib.OpenDB(mustParseConfig(databaseURL))
+	cfg, err := pgx.ParseConfig(databaseURL)
+	if err != nil {
+		return fmt.Errorf("postgres: parsing DATABASE_URL for migrations: %w", err)
+	}
+	db := stdlib.OpenDB(*cfg)
 	defer func() { _ = db.Close() }()
 
 	goose.SetBaseFS(migrationsFS)
@@ -70,16 +74,6 @@ func Migrate(ctx context.Context, databaseURL string) error {
 		return fmt.Errorf("postgres: running migrations: %w", err)
 	}
 	return nil
-}
-
-func mustParseConfig(databaseURL string) pgx.ConnConfig {
-	cfg, err := pgx.ParseConfig(databaseURL)
-	if err != nil {
-		// ParseConfig only fails on a malformed URL; the pool's ParseConfig will
-		// have surfaced the same error to the caller first in normal flows.
-		panic(fmt.Sprintf("postgres: parsing DATABASE_URL for migrations: %v", err))
-	}
-	return *cfg
 }
 
 // --- Scenarios ---
@@ -460,31 +454,30 @@ func (r *Repo) CreateUser(ctx context.Context, u transit.User) error {
 	return wrap("CreateUser", err)
 }
 
+const userColumns = `id, email, name, is_admin, created_at, updated_at`
+
 func (r *Repo) GetUserByID(ctx context.Context, id string) (transit.User, bool, error) {
-	return r.getUser(ctx, `WHERE id = $1`, id)
+	return scanUser(r.pool.QueryRow(ctx, `SELECT `+userColumns+` FROM users WHERE id = $1`, id))
 }
 
 func (r *Repo) GetUserByEmail(ctx context.Context, email string) (transit.User, bool, error) {
-	return r.getUser(ctx, `WHERE email = $1`, email)
+	return scanUser(r.pool.QueryRow(ctx, `SELECT `+userColumns+` FROM users WHERE email = $1`, email))
 }
 
-func (r *Repo) getUser(ctx context.Context, where string, arg any) (transit.User, bool, error) {
+func scanUser(row pgx.Row) (transit.User, bool, error) {
 	var u transit.User
-	err := r.pool.QueryRow(ctx,
-		`SELECT id, email, name, is_admin, created_at, updated_at FROM users `+where, arg).
-		Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin, &u.CreatedAt, &u.UpdatedAt)
+	err := row.Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin, &u.CreatedAt, &u.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return transit.User{}, false, nil
 	}
 	if err != nil {
-		return transit.User{}, false, wrap("getUser", err)
+		return transit.User{}, false, wrap("scanUser", err)
 	}
 	return u, true, nil
 }
 
 func (r *Repo) ListUsers(ctx context.Context) ([]transit.User, error) {
-	rows, err := r.pool.Query(ctx,
-		`SELECT id, email, name, is_admin, created_at, updated_at FROM users ORDER BY email`)
+	rows, err := r.pool.Query(ctx, `SELECT `+userColumns+` FROM users ORDER BY email`)
 	if err != nil {
 		return nil, wrap("ListUsers", err)
 	}
