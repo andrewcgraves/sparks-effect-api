@@ -19,8 +19,11 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - name: Test
-        run: make test
+      # `make itest` brings up a throwaway Postgres (via the same Makefile
+      # targets used locally), runs the full suite with the DB integration tests
+      # enabled, then tears the container down — DRY across local and CI.
+      - name: Test (with Postgres integration)
+        run: make itest
 
       - name: Vet
         run: make vet

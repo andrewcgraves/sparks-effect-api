@@ -2,6 +2,7 @@ package transit
 
 import (
 	"container/heap"
+	"context"
 	"embed"
 	"fmt"
 	"io/fs"
@@ -43,6 +44,61 @@ func NewStore() (*Store, error) {
 		if err := s.loadScenario(e.Name()); err != nil {
 			return nil, fmt.Errorf("transit: loading scenario %q: %w", e.Name(), err)
 		}
+	}
+
+	return s, nil
+}
+
+// LoadStore builds a read-optimized, compiled Store from a Repository. It reads
+// every scenario's rows (routes, stations, services, travel-time segments) plus
+// the global vehicle types, then compiles each scenario's in-memory TransitGraph.
+// This is the persisted read path: rows in, isochrone-ready graph out.
+func LoadStore(ctx context.Context, repo Repository) (*Store, error) {
+	s := &Store{
+		travelTimes: make(map[string]TravelTimes),
+		graphs:      make(map[string]*TransitGraph),
+	}
+
+	vts, err := repo.ListVehicleTypes(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("transit: loading vehicle types: %w", err)
+	}
+	s.vehicleTypes = vts
+
+	scenarios, err := repo.ListScenarios(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("transit: listing scenarios: %w", err)
+	}
+
+	for _, sc := range scenarios {
+		routes, err := repo.ListRoutesByScenario(ctx, sc.ID)
+		if err != nil {
+			return nil, fmt.Errorf("transit: loading routes for %q: %w", sc.Slug, err)
+		}
+		stations, err := repo.ListStationsByScenario(ctx, sc.ID)
+		if err != nil {
+			return nil, fmt.Errorf("transit: loading stations for %q: %w", sc.Slug, err)
+		}
+		services, err := repo.ListServicesByScenario(ctx, sc.ID)
+		if err != nil {
+			return nil, fmt.Errorf("transit: loading services for %q: %w", sc.Slug, err)
+		}
+		tt, _, err := repo.GetTravelTimes(ctx, sc.Slug)
+		if err != nil {
+			return nil, fmt.Errorf("transit: loading travel times for %q: %w", sc.Slug, err)
+		}
+
+		s.scenarios = append(s.scenarios, sc)
+		s.routes = append(s.routes, routes...)
+		s.stations = append(s.stations, stations...)
+		s.services = append(s.services, services...)
+		s.travelTimes[sc.Slug] = tt
+
+		g, err := Compile(sc, routes, stations, services, vts, tt)
+		if err != nil {
+			return nil, fmt.Errorf("transit: compiling %q: %w", sc.Slug, err)
+		}
+		s.graphs[sc.Slug] = g
 	}
 
 	return s, nil

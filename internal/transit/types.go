@@ -1,5 +1,7 @@
 package transit
 
+import "time"
+
 // GeoPoint is a GeoJSON Point geometry (WGS84, [longitude, latitude]).
 type GeoPoint struct {
 	Type        string    `yaml:"type"        json:"type"`
@@ -14,11 +16,12 @@ type GeoLineString struct {
 
 // Scenario is the top-level container for a transit scenario.
 type Scenario struct {
-	ID          string `yaml:"id"          json:"id"`
-	Slug        string `yaml:"slug"        json:"slug"`
-	Name        string `yaml:"name"        json:"name"`
-	Description string `yaml:"description" json:"description"`
-	Status      string `yaml:"status"      json:"status"`
+	ID          string  `yaml:"id"          json:"id"`
+	Slug        string  `yaml:"slug"        json:"slug"`
+	Name        string  `yaml:"name"        json:"name"`
+	Description string  `yaml:"description" json:"description"`
+	Status      string  `yaml:"status"      json:"status"`
+	OwnerID     *string `yaml:"owner_id,omitempty" json:"owner_id,omitempty"`
 }
 
 // Route is a physical alignment — geometry and mode only; no stops or schedule.
@@ -90,6 +93,7 @@ type Service struct {
 	Direction        string            `yaml:"direction"        json:"direction"`
 	Active           bool              `yaml:"active"           json:"active"`
 	Provenance       string            `yaml:"provenance"       json:"provenance"`
+	OwnerID          *string           `yaml:"owner_id,omitempty" json:"owner_id,omitempty"`
 	Stops            []ServiceStop     `yaml:"stops"            json:"stops"`
 	FrequencyWindows []FrequencyWindow `yaml:"frequency_windows" json:"frequency_windows"`
 }
@@ -114,4 +118,38 @@ type TravelTimes struct {
 	Provenance   string        `yaml:"provenance"    json:"provenance"`
 	Source       string        `yaml:"source"        json:"source"`
 	Segments     []SegmentTime `yaml:"segments"      json:"segments"`
+}
+
+// User is an invite-only account that can own scenarios and services.
+// The auth flow (invites, sessions) is built out in a later issue; this is the
+// persisted identity that ownership FKs and job attribution point at.
+type User struct {
+	ID        string    `json:"id"`
+	Email     string    `json:"email"`
+	Name      string    `json:"name"`
+	IsAdmin   bool      `json:"is_admin"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// Job status values track an async compile/compute unit of work through its lifecycle.
+const (
+	JobStatusQueued    = "queued"
+	JobStatusRunning   = "running"
+	JobStatusSucceeded = "succeeded"
+	JobStatusFailed    = "failed"
+)
+
+// Job is a unit of async work (e.g. compile or compute) whose status survives
+// restarts so callers can poll by job_id. The richer job model lands in a later
+// issue; this persists the identity, kind, status, and result/error envelope.
+type Job struct {
+	ID         string    `json:"id"`
+	Kind       string    `json:"kind"`
+	Status     string    `json:"status"`
+	ScenarioID *string   `json:"scenario_id,omitempty"`
+	OwnerID    *string   `json:"owner_id,omitempty"`
+	Error      string    `json:"error,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }

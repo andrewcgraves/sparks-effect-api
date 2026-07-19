@@ -70,7 +70,8 @@ via the scenario API as that contract lands.
 ## Requirements
 
 - [Go](https://go.dev/dl/) 1.25+
-- [Docker](https://www.docker.com/) (optional, for containerized runs)
+- [Docker](https://www.docker.com/) (optional; for containerized runs and the
+  database integration tests — podman also works)
 - `golangci-lint` (installed automatically by `make lint` if missing)
 
 ## Getting started
@@ -135,18 +136,63 @@ curl -s -X POST http://localhost:8080/api/isochrone \
   | jq .type
 ```
 
+## Persistence
+
+Domain data (scenarios, routes, stations, vehicle types, services, jobs, users)
+is read and written through a storage-agnostic `transit.Repository`. The concrete
+implementation is Postgres via `pgx/v5` (pure Go — the `CGO_ENABLED=0` static
+build is preserved), with geometry stored as GeoJSON in `jsonb` columns and
+native `uuid`/`timestamptz`/`boolean` types throughout.
+
+- **Connection:** set `DATABASE_URL` (Railway injects this via its private
+  network). Cap the pool with `DATABASE_MAX_CONNS`. When `DATABASE_URL` is unset,
+  the server falls back to the read-only embedded YAML store so local dev works
+  without a database.
+- **Migrations:** plain-SQL [`goose`](https://github.com/pressly/goose)
+  migrations in `internal/persistence/postgres/migrations/`, embedded into the
+  binary and run automatically on boot.
+- **Seed:** on first boot against an empty database, the embedded `ca-hsr` seed
+  data is written through the repository. The compiled-`TransitGraph` read path
+  then loads those rows and produces isochrones as before.
+
+### Database integration tests
+
+Integration tests need a throwaway Postgres. They skip automatically when
+`TEST_DATABASE_URL` (or `DATABASE_URL`) is unset, so `make test` stays green
+without a database; in CI a missing URL is a hard failure instead of a silent
+skip. Run them locally with one command (starts a container, runs the suite,
+tears it down):
+
+```sh
+make itest
+```
+
+Or manage the container yourself:
+
+```sh
+make db-up            # start throwaway Postgres (postgres:16)
+make test-integration # run the full suite against it
+make db-down          # remove the container
+```
+
+Both the Makefile targets and CI use the same `postgres:16` image and settings,
+so local and CI databases match. Use `make db-up DOCKER=podman` to use podman.
+
 ## Development
 
-| Command             | Description                                       |
-| ------------------- | ------------------------------------------------- |
-| `make test`         | Run unit tests                                    |
-| `make build`        | Build the binary to `bin/`                        |
-| `make run`          | Build and run the API locally                     |
-| `make lint`         | Run `golangci-lint`                               |
-| `make vet`          | Run `go vet`                                      |
-| `make dev-workflow` | Run test, vet, lint, and build — full verification |
-| `make tidy`         | Sync `go.mod`/`go.sum` with imports               |
-| `make clean`        | Remove build output                               |
+| Command                 | Description                                          |
+| ----------------------- | ---------------------------------------------------- |
+| `make test`             | Run the suite (DB integration tests skip without a DB) |
+| `make itest`            | Start Postgres, run the full suite, tear it down     |
+| `make test-integration` | Run the suite against `TEST_DATABASE_URL`            |
+| `make db-up`/`db-down`  | Start / remove the throwaway Postgres container      |
+| `make build`            | Build the binary to `bin/`                           |
+| `make run`              | Build and run the API locally                        |
+| `make lint`             | Run `golangci-lint`                                  |
+| `make vet`              | Run `go vet`                                         |
+| `make dev-workflow`     | Run test, vet, lint, and build — full verification   |
+| `make tidy`             | Sync `go.mod`/`go.sum` with imports                  |
+| `make clean`            | Remove build output                                  |
 
 ## Docker
 
@@ -160,13 +206,14 @@ docker run -p 8080:8080 sparks-effect-api
 ## Project layout
 
 ```
-cmd/api/             entrypoint (main.go)
-internal/config/     environment-based configuration
-internal/server/     HTTP server and route registration
-internal/handler/    HTTP handlers
-internal/transit/    seed load, TransitGraph compile, travel times
-internal/isochrone/  Stadia + transit chainer
-internal/stadia/     Stadia Maps client
+cmd/api/                     entrypoint (main.go)
+internal/config/             environment-based configuration
+internal/server/             HTTP server and route registration
+internal/handler/            HTTP handlers
+internal/transit/            domain types, Repository seam, TransitGraph compile, seed
+internal/persistence/postgres/  Postgres repository + goose migrations
+internal/isochrone/          Stadia + transit chainer
+internal/stadia/             Stadia Maps client
 ```
 
 ## CI
