@@ -53,19 +53,19 @@ func Compile(ctx context.Context, store Store, jobID, scenarioID string) error {
 func compileScenario(ctx context.Context, store Store, scenarioID string) (transit.TransitGraph, error) {
 	routes, err := store.ListRoutesByScenario(ctx, scenarioID)
 	if err != nil {
-		return transit.TransitGraph{}, fmt.Errorf("loading routes: %w", err)
+		return transit.TransitGraph{}, fmt.Errorf("worker: loading routes: %w", err)
 	}
 	stations, err := store.ListStationsByScenario(ctx, scenarioID)
 	if err != nil {
-		return transit.TransitGraph{}, fmt.Errorf("loading stations: %w", err)
+		return transit.TransitGraph{}, fmt.Errorf("worker: loading stations: %w", err)
 	}
 	services, err := store.ListServicesByScenario(ctx, scenarioID)
 	if err != nil {
-		return transit.TransitGraph{}, fmt.Errorf("loading services: %w", err)
+		return transit.TransitGraph{}, fmt.Errorf("worker: loading services: %w", err)
 	}
 	vehicleTypes, err := store.ListVehicleTypes(ctx)
 	if err != nil {
-		return transit.TransitGraph{}, fmt.Errorf("loading vehicle types: %w", err)
+		return transit.TransitGraph{}, fmt.Errorf("worker: loading vehicle types: %w", err)
 	}
 	return transit.CompileScenario(routes, stations, services, vehicleTypes)
 }
