@@ -8,6 +8,7 @@
 
 - id: "00000000-0000-4002-8001-000000000001"
   scenario_id: "00000000-0000-4001-8001-000000000001"
+  slug: "ca-hsr-phase-1-san-francisco-to-anaheim"
   name: "CA HSR Phase 1 — San Francisco to Anaheim"
   mode: "rail"
   bidirectional: true

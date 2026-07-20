@@ -213,7 +213,7 @@ func TestOwnerScopedReads(t *testing.T) {
 		t.Fatalf("CreateVehicleType: %v", err)
 	}
 	if err := repo.CreateRoute(ctx, transit.Route{
-		ID: routeA, ScenarioID: scenarioA, Name: "Main", Mode: "rail",
+		ID: routeA, ScenarioID: ptr(scenarioA), Slug: "main-a", Name: "Main", Mode: "rail",
 		Geometry: transit.GeoLineString{Type: "LineString", Coordinates: [][]float64{{-122, 37}, {-121, 37}}},
 	}); err != nil {
 		t.Fatalf("CreateRoute: %v", err)

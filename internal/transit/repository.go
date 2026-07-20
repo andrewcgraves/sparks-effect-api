@@ -17,8 +17,11 @@ type Repository interface {
 	GetScenarioBySlug(ctx context.Context, slug string) (Scenario, bool, error)
 	ListScenarios(ctx context.Context) ([]Scenario, error)
 
-	// Routes.
+	// Routes. A route is addressed globally by slug, since an admin-ingested
+	// alignment belongs to no scenario; ListRoutesByScenario covers the seeded
+	// routes that do.
 	CreateRoute(ctx context.Context, r Route) error
+	GetRouteBySlug(ctx context.Context, slug string) (Route, bool, error)
 	ListRoutesByScenario(ctx context.Context, scenarioID string) ([]Route, error)
 
 	// Stations.

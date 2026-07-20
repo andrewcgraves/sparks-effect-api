@@ -174,10 +174,12 @@ func (s *Store) GetScenarioBySlug(slug string) (Scenario, bool) {
 }
 
 // GetRoutesByScenario returns all routes belonging to the given scenario ID.
+// Standalone routes — those ingested by an admin, which have no scenario — are
+// never returned here; they are read by slug instead.
 func (s *Store) GetRoutesByScenario(scenarioID string) []Route {
 	var out []Route
 	for _, r := range s.routes {
-		if r.ScenarioID == scenarioID {
+		if r.ScenarioID != nil && *r.ScenarioID == scenarioID {
 			out = append(out, r)
 		}
 	}
