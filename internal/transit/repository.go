@@ -43,11 +43,31 @@ type Repository interface {
 	UpsertTravelTimes(ctx context.Context, tt TravelTimes) error
 	GetTravelTimes(ctx context.Context, scenarioSlug string) (TravelTimes, bool, error)
 
-	// Users.
-	CreateUser(ctx context.Context, u User) error
+	// Owner-scoped reads back "my services / my scenarios". Ownership is
+	// resolved in SQL rather than by filtering in the handler, so a row the
+	// caller does not own is never loaded in the first place.
+	ListScenariosByOwner(ctx context.Context, ownerID string) ([]Scenario, error)
+	ListServicesByOwner(ctx context.Context, ownerID string) ([]Service, error)
+
+	// Users. Accounts are admin-provisioned; passwordHash is the bcrypt hash
+	// from the auth package (empty means the account cannot authenticate).
+	CreateUser(ctx context.Context, u User, passwordHash string) error
 	GetUserByID(ctx context.Context, id string) (User, bool, error)
 	GetUserByEmail(ctx context.Context, email string) (User, bool, error)
+	// GetUserCredentialsByEmail is the login path's only reader of the password
+	// hash, keeping the credential off the User struct everywhere else.
+	GetUserCredentialsByEmail(ctx context.Context, email string) (User, string, bool, error)
 	ListUsers(ctx context.Context) ([]User, error)
+
+	// Sessions are addressed by token hash; the bearer token is never stored.
+	CreateSession(ctx context.Context, s Session) error
+	// GetSessionUser resolves a token hash to its user, reporting ok=false when
+	// the session is unknown, revoked, or expired — expiry is enforced here in
+	// SQL so no caller can forget to check it.
+	GetSessionUser(ctx context.Context, tokenHash string) (User, bool, error)
+	DeleteSession(ctx context.Context, tokenHash string) error
+	// DeleteExpiredSessions prunes lapsed rows; returns the number removed.
+	DeleteExpiredSessions(ctx context.Context) (int64, error)
 
 	// Jobs.
 	CreateJob(ctx context.Context, j Job) error

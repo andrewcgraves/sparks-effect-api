@@ -4,6 +4,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"time"
 )
 
 // Config holds the settings needed to run the API server.
@@ -23,7 +24,21 @@ type Config struct {
 	// AllowLocalhostCORS enables CORS headers for localhost origins.
 	// Set ALLOW_LOCALHOST_CORS=true for local SPA testing only. Off by default.
 	AllowLocalhostCORS bool
+	// SessionTTL is how long a session token stays valid after login. Set
+	// SESSION_TTL_HOURS to override the 24-hour default.
+	SessionTTL time.Duration
+	// BootstrapAdminEmail and BootstrapAdminPassword provision the first admin
+	// account on boot. An invite-only API has no signup path, so without this
+	// there would be no way to create the account that creates the accounts.
+	// Applied only when the email does not already exist; leave unset once the
+	// admin is established.
+	BootstrapAdminEmail    string
+	BootstrapAdminPassword string
 }
+
+// defaultSessionTTL bounds how long a stolen token stays useful. A day is short
+// enough to limit exposure and long enough not to interrupt a working session.
+const defaultSessionTTL = 24 * time.Hour
 
 // Load reads configuration from environment variables, applying defaults
 // for anything unset.
@@ -34,13 +49,23 @@ func Load() Config {
 			maxConns = n
 		}
 	}
+	sessionTTL := defaultSessionTTL
+	if v := os.Getenv("SESSION_TTL_HOURS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			sessionTTL = time.Duration(n) * time.Hour
+		}
+	}
+
 	return Config{
-		Port:               getEnv("PORT", "8080"),
-		StadiaAPIKey:       os.Getenv("STADIA_API_KEY"),
-		DatabaseURL:        os.Getenv("DATABASE_URL"),
-		DBMaxConns:         maxConns,
-		Debug:              os.Getenv("LOG_LEVEL") == "debug" || os.Getenv("VERBOSE") == "true",
-		AllowLocalhostCORS: os.Getenv("ALLOW_LOCALHOST_CORS") == "true",
+		Port:                   getEnv("PORT", "8080"),
+		StadiaAPIKey:           os.Getenv("STADIA_API_KEY"),
+		DatabaseURL:            os.Getenv("DATABASE_URL"),
+		DBMaxConns:             maxConns,
+		Debug:                  os.Getenv("LOG_LEVEL") == "debug" || os.Getenv("VERBOSE") == "true",
+		AllowLocalhostCORS:     os.Getenv("ALLOW_LOCALHOST_CORS") == "true",
+		SessionTTL:             sessionTTL,
+		BootstrapAdminEmail:    os.Getenv("BOOTSTRAP_ADMIN_EMAIL"),
+		BootstrapAdminPassword: os.Getenv("BOOTSTRAP_ADMIN_PASSWORD"),
 	}
 }
 

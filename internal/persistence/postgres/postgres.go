@@ -102,21 +102,38 @@ func (r *Repo) GetScenarioBySlug(ctx context.Context, slug string) (transit.Scen
 
 func (r *Repo) ListScenarios(ctx context.Context) ([]transit.Scenario, error) {
 	rows, err := r.pool.Query(ctx,
-		`SELECT id, slug, name, description, status, owner_id FROM scenarios ORDER BY slug`)
+		`SELECT `+scenarioColumns+` FROM scenarios ORDER BY slug`)
 	if err != nil {
 		return nil, wrap("ListScenarios", err)
 	}
+	return scanScenarios(rows, "ListScenarios")
+}
+
+// ListScenariosByOwner backs "my scenarios". As with services, ownership is
+// enforced in SQL so unowned rows are never loaded.
+func (r *Repo) ListScenariosByOwner(ctx context.Context, ownerID string) ([]transit.Scenario, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT `+scenarioColumns+` FROM scenarios WHERE owner_id = $1 ORDER BY slug`, ownerID)
+	if err != nil {
+		return nil, wrap("ListScenariosByOwner", err)
+	}
+	return scanScenarios(rows, "ListScenariosByOwner")
+}
+
+const scenarioColumns = `id, slug, name, description, status, owner_id`
+
+func scanScenarios(rows pgx.Rows, op string) ([]transit.Scenario, error) {
 	defer rows.Close()
 
 	var out []transit.Scenario
 	for rows.Next() {
 		var sc transit.Scenario
 		if err := rows.Scan(&sc.ID, &sc.Slug, &sc.Name, &sc.Description, &sc.Status, &sc.OwnerID); err != nil {
-			return nil, wrap("ListScenarios scan", err)
+			return nil, wrap(op+" scan", err)
 		}
 		out = append(out, sc)
 	}
-	return out, wrap("ListScenarios rows", rows.Err())
+	return out, wrap(op+" rows", rows.Err())
 }
 
 // --- Routes ---
@@ -258,11 +275,25 @@ func (r *Repo) CreateService(ctx context.Context, svc transit.Service) error {
 }
 
 func (r *Repo) ListServicesByScenario(ctx context.Context, scenarioID string) ([]transit.Service, error) {
+	return r.listServicesBy(ctx, "ListServicesByScenario", "scenario_id", scenarioID)
+}
+
+// ListServicesByOwner backs "my services". Ownership is a WHERE clause, not a
+// post-query filter, so services the caller does not own never leave the
+// database.
+func (r *Repo) ListServicesByOwner(ctx context.Context, ownerID string) ([]transit.Service, error) {
+	return r.listServicesBy(ctx, "ListServicesByOwner", "owner_id", ownerID)
+}
+
+// listServicesBy loads services matching a single equality predicate and
+// hydrates each one's embedded stops and frequency windows. column is a
+// trusted internal identifier, never caller input.
+func (r *Repo) listServicesBy(ctx context.Context, op, column, value string) ([]transit.Service, error) {
 	rows, err := r.pool.Query(ctx,
 		`SELECT id, scenario_id, route_id, vehicle_type_id, name, direction, active, provenance, owner_id
-		 FROM services WHERE scenario_id = $1 ORDER BY id`, scenarioID)
+		 FROM services WHERE `+column+` = $1 ORDER BY id`, value)
 	if err != nil {
-		return nil, wrap("ListServicesByScenario", err)
+		return nil, wrap(op, err)
 	}
 	defer rows.Close()
 
@@ -271,12 +302,12 @@ func (r *Repo) ListServicesByScenario(ctx context.Context, scenarioID string) ([
 		var svc transit.Service
 		if err := rows.Scan(&svc.ID, &svc.ScenarioID, &svc.RouteID, &svc.VehicleTypeID,
 			&svc.Name, &svc.Direction, &svc.Active, &svc.Provenance, &svc.OwnerID); err != nil {
-			return nil, wrap("ListServicesByScenario scan", err)
+			return nil, wrap(op+" scan", err)
 		}
 		out = append(out, svc)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, wrap("ListServicesByScenario rows", err)
+		return nil, wrap(op+" rows", err)
 	}
 
 	for i := range out {
@@ -447,14 +478,36 @@ func (r *Repo) GetTravelTimes(ctx context.Context, scenarioSlug string) (transit
 
 // --- Users ---
 
-func (r *Repo) CreateUser(ctx context.Context, u transit.User) error {
+func (r *Repo) CreateUser(ctx context.Context, u transit.User, passwordHash string) error {
 	_, err := r.pool.Exec(ctx,
-		`INSERT INTO users (id, email, name, is_admin) VALUES ($1, $2, $3, $4)`,
-		u.ID, u.Email, u.Name, u.IsAdmin)
+		`INSERT INTO users (id, email, name, is_admin, password_hash) VALUES ($1, $2, $3, $4, $5)`,
+		u.ID, u.Email, u.Name, u.IsAdmin, passwordHash)
 	return wrap("CreateUser", err)
 }
 
+// GetUserCredentialsByEmail returns the user together with their stored
+// password hash. Only the login handler should call it.
+func (r *Repo) GetUserCredentialsByEmail(ctx context.Context, email string) (transit.User, string, bool, error) {
+	var u transit.User
+	var hash string
+	err := r.pool.QueryRow(ctx,
+		`SELECT `+userColumns+`, password_hash FROM users WHERE email = $1`, email).
+		Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin, &u.CreatedAt, &u.UpdatedAt, &hash)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return transit.User{}, "", false, nil
+	}
+	if err != nil {
+		return transit.User{}, "", false, wrap("GetUserCredentialsByEmail", err)
+	}
+	return u, hash, true, nil
+}
+
 const userColumns = `id, email, name, is_admin, created_at, updated_at`
+
+// userColumnsU is the same list qualified for joins against sessions, where a
+// bare `id` would be ambiguous. Kept in step with userColumns by hand — both
+// feed the same scanUser, so a mismatch fails loudly at the first query.
+const userColumnsU = `u.id, u.email, u.name, u.is_admin, u.created_at, u.updated_at`
 
 func (r *Repo) GetUserByID(ctx context.Context, id string) (transit.User, bool, error) {
 	return scanUser(r.pool.QueryRow(ctx, `SELECT `+userColumns+` FROM users WHERE id = $1`, id))
@@ -492,6 +545,39 @@ func (r *Repo) ListUsers(ctx context.Context) ([]transit.User, error) {
 		out = append(out, u)
 	}
 	return out, wrap("ListUsers rows", rows.Err())
+}
+
+// --- Sessions ---
+
+func (r *Repo) CreateSession(ctx context.Context, s transit.Session) error {
+	_, err := r.pool.Exec(ctx,
+		`INSERT INTO sessions (token_hash, user_id, expires_at) VALUES ($1, $2, $3)`,
+		s.TokenHash, s.UserID, s.ExpiresAt)
+	return wrap("CreateSession", err)
+}
+
+// GetSessionUser resolves a token hash to the user it authenticates. Expiry is
+// part of the WHERE clause rather than a follow-up check in Go, so an expired
+// session is indistinguishable from a missing one and no caller can skip the
+// comparison.
+func (r *Repo) GetSessionUser(ctx context.Context, tokenHash string) (transit.User, bool, error) {
+	return scanUser(r.pool.QueryRow(ctx,
+		`SELECT `+userColumnsU+`
+		 FROM sessions s JOIN users u ON u.id = s.user_id
+		 WHERE s.token_hash = $1 AND s.expires_at > now()`, tokenHash))
+}
+
+func (r *Repo) DeleteSession(ctx context.Context, tokenHash string) error {
+	_, err := r.pool.Exec(ctx, `DELETE FROM sessions WHERE token_hash = $1`, tokenHash)
+	return wrap("DeleteSession", err)
+}
+
+func (r *Repo) DeleteExpiredSessions(ctx context.Context) (int64, error) {
+	tag, err := r.pool.Exec(ctx, `DELETE FROM sessions WHERE expires_at <= now()`)
+	if err != nil {
+		return 0, wrap("DeleteExpiredSessions", err)
+	}
+	return tag.RowsAffected(), nil
 }
 
 // --- Jobs ---

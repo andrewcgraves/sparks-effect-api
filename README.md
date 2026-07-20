@@ -155,6 +155,59 @@ native `uuid`/`timestamptz`/`boolean` types throughout.
   data is written through the repository. The compiled-`TransitGraph` read path
   then loads those rows and produces isochrones as before.
 
+## Authentication
+
+The API is **invite-only**: there is no signup route. Accounts exist only
+because an admin created them, and the first admin comes from the environment.
+
+Authentication is bearer-token based. `POST /api/auth/login` returns a token
+that clients send as `Authorization: Bearer <token>`. Tokens are opaque and
+stored server-side (only as a SHA-256 hash) rather than being JWTs, so logout
+genuinely revokes them and there is no signing key to manage. Passwords are
+bcrypt-hashed. Sessions expire after `SESSION_TTL_HOURS` (default 24).
+
+Authentication requires `DATABASE_URL`; with the read-only embedded store the
+auth endpoints answer `503` rather than pretending to work.
+
+### Endpoints
+
+| Endpoint | Access | Purpose |
+| --- | --- | --- |
+| `POST /api/auth/login` | public | Exchange email + password for a token |
+| `POST /api/auth/logout` | authenticated | Revoke the presented token |
+| `GET /api/auth/me` | authenticated | The caller's identity and admin flag |
+| `GET /api/me/scenarios` | authenticated | Scenarios the caller owns |
+| `GET /api/me/services` | authenticated | Services the caller owns |
+| `POST /api/admin/users` | admin | Provision an account |
+
+The existing `GET /api/scenarios/...` reads stay public — they serve curated
+data and are unauthenticated by design.
+
+### Bootstrapping the first admin
+
+Set both variables and boot once; the account is created if that email does not
+already exist, and is never overwritten on later boots (so leaving the variables
+in place cannot silently reset a password).
+
+```sh
+BOOTSTRAP_ADMIN_EMAIL=you@example.com
+BOOTSTRAP_ADMIN_PASSWORD=<a strong password>
+```
+
+Everyone else is then provisioned through `POST /api/admin/users`.
+
+### Authorization
+
+Two rules, both enforced server-side:
+
+- **Admin gating** — `RequireAdmin` protects account provisioning and is the
+  gate route-write endpoints register behind.
+- **Ownership** — `auth.CanAccess` is the single ownership predicate: admins
+  reach everything, other users reach only rows they own, and unowned rows (the
+  curated seed data) are admin-only. Owner-scoped reads resolve ownership in
+  SQL, so rows the caller does not own are never loaded — and scoping always
+  comes from the token's identity, never from a client-supplied parameter.
+
 ### Database integration tests
 
 Integration tests need a throwaway Postgres. They skip automatically when
@@ -210,6 +263,8 @@ cmd/api/                     entrypoint (main.go)
 internal/config/             environment-based configuration
 internal/server/             HTTP server and route registration
 internal/handler/            HTTP handlers
+internal/auth/               password hashing, session tokens, middleware, ownership rule
+internal/ids/                UUID generation for runtime-created rows
 internal/transit/            domain types, Repository seam, TransitGraph compile, seed
 internal/persistence/postgres/  Postgres repository + goose migrations
 internal/isochrone/          Stadia + transit chainer

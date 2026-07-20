@@ -120,9 +120,13 @@ type TravelTimes struct {
 	Segments     []SegmentTime `yaml:"segments"      json:"segments"`
 }
 
-// User is an invite-only account that can own scenarios and services.
-// The auth flow (invites, sessions) is built out in a later issue; this is the
-// persisted identity that ownership FKs and job attribution point at.
+// User is an invite-only account that can own scenarios and services. Accounts
+// are provisioned by an admin — there is no self-serve signup path.
+//
+// The password hash is deliberately not a field here: User is serialized
+// straight to JSON by the auth endpoints, so keeping the credential out of the
+// struct means it cannot leak through a response by accident. Credentials are
+// read explicitly via Repository.GetUserCredentialsByEmail.
 type User struct {
 	ID        string    `json:"id"`
 	Email     string    `json:"email"`
@@ -130,6 +134,16 @@ type User struct {
 	IsAdmin   bool      `json:"is_admin"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// Session is an authenticated login, addressed by the SHA-256 hash of the
+// bearer token handed to the client. The token itself is never persisted, so
+// the stored row cannot be replayed as a credential.
+type Session struct {
+	TokenHash string
+	UserID    string
+	CreatedAt time.Time
+	ExpiresAt time.Time
 }
 
 // Job status values track an async compile/compute unit of work through its lifecycle.
