@@ -31,19 +31,19 @@ type VehicleLimits struct {
 // or a triangular accelerate/decelerate peak if there is not.
 func SpanRunSeconds(span InterStopSpan, vehicle VehicleLimits) (float64, error) {
 	if !(vehicle.MaxSpeedKMH > 0) {
-		return 0, fmt.Errorf("physics: vehicle max speed must be > 0, got %v", vehicle.MaxSpeedKMH)
+		return 0, fmt.Errorf("vehicle max speed must be > 0, got %v", vehicle.MaxSpeedKMH)
 	}
 	if !(vehicle.AccelerationMS2 > 0) {
-		return 0, fmt.Errorf("physics: vehicle acceleration must be > 0, got %v", vehicle.AccelerationMS2)
+		return 0, fmt.Errorf("vehicle acceleration must be > 0, got %v", vehicle.AccelerationMS2)
 	}
 	if !(vehicle.DecelerationMS2 > 0) {
-		return 0, fmt.Errorf("physics: vehicle deceleration must be > 0, got %v", vehicle.DecelerationMS2)
+		return 0, fmt.Errorf("vehicle deceleration must be > 0, got %v", vehicle.DecelerationMS2)
 	}
 	if span.DistanceM <= 0 {
 		return 0, nil
 	}
 	if len(span.Segments) == 0 {
-		return 0, fmt.Errorf("physics: span has positive distance %v but no segments", span.DistanceM)
+		return 0, fmt.Errorf("span has positive distance %v but no segments", span.DistanceM)
 	}
 
 	n := len(span.Segments)
@@ -56,6 +56,14 @@ func SpanRunSeconds(span InterStopSpan, vehicle VehicleLimits) (float64, error) 
 			Grade:         seg.Physics.GradePct / 100,
 			VehicleMaxKMH: vehicle.MaxSpeedKMH,
 		}))
+		// A non-positive or non-finite cap would divide by zero (or worse)
+		// in segmentSeconds' cruise-time term below. SpeedLimit cannot
+		// produce one given the VehicleMaxKMH > 0 already checked above, but
+		// this keeps that invariant explicit rather than relying on a caller
+		// three functions away.
+		if !(capsMS[i] > 0) || math.IsInf(capsMS[i], 0) {
+			return 0, fmt.Errorf("segment %d has a non-positive or infinite speed cap (%v m/s)", i, capsMS[i])
+		}
 		distsM[i] = seg.DistanceM
 	}
 

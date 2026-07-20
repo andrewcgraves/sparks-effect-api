@@ -25,11 +25,11 @@ import (
 func CompileServicePhysics(route Route, stations []Station, svc Service, vt VehicleType) (ServiceGraph, error) {
 	line, err := toPhysicsLine(route.Geometry)
 	if err != nil {
-		return ServiceGraph{}, fmt.Errorf("compile physics: service %q: %w", svc.ID, err)
+		return ServiceGraph{}, fmt.Errorf("compile: service %q: %w", svc.ID, err)
 	}
 	physicsSegs, err := toPhysicsSegments(route.Segments, len(line))
 	if err != nil {
-		return ServiceGraph{}, fmt.Errorf("compile physics: service %q: %w", svc.ID, err)
+		return ServiceGraph{}, fmt.Errorf("compile: service %q: %w", svc.ID, err)
 	}
 
 	stationsByID := make(map[string]Station, len(stations))
@@ -40,25 +40,23 @@ func CompileServicePhysics(route Route, stations []Station, svc Service, vt Vehi
 	stops := append([]ServiceStop(nil), svc.Stops...)
 	sort.Slice(stops, func(i, j int) bool { return stops[i].Sequence < stops[j].Sequence })
 
+	// physics.Stop.ID is keyed by station ID (not slug) so the span results
+	// below can look stations and stops back up in stationsByID /
+	// stopByStationID directly, with no reverse slug->ID map in between.
 	stopByStationID := make(map[string]ServiceStop, len(stops))
 	physicsStops := make([]physics.Stop, len(stops))
 	for i, stop := range stops {
 		st, ok := stationsByID[stop.StationID]
 		if !ok {
-			return ServiceGraph{}, fmt.Errorf("compile physics: service %q references unknown station id %q", svc.ID, stop.StationID)
+			return ServiceGraph{}, fmt.Errorf("compile: service %q references unknown station id %q", svc.ID, stop.StationID)
 		}
 		stopByStationID[stop.StationID] = stop
-		physicsStops[i] = physics.Stop{ID: st.Slug, Location: toPhysicsPoint(st.Location)}
+		physicsStops[i] = physics.Stop{ID: st.ID, Location: toPhysicsPoint(st.Location)}
 	}
 
 	spans, err := physics.ProjectStops(line, physicsSegs, physicsStops)
 	if err != nil {
-		return ServiceGraph{}, fmt.Errorf("compile physics: service %q: %w", svc.ID, err)
-	}
-
-	slugToStationID := make(map[string]string, len(stations))
-	for _, st := range stations {
-		slugToStationID[st.Slug] = st.ID
+		return ServiceGraph{}, fmt.Errorf("compile: service %q: %w", svc.ID, err)
 	}
 
 	vehicle := physics.VehicleLimits{
@@ -71,19 +69,17 @@ func CompileServicePhysics(route Route, stations []Station, svc Service, vt Vehi
 	for _, span := range spans {
 		runSecsF, err := physics.SpanRunSeconds(span, vehicle)
 		if err != nil {
-			return ServiceGraph{}, fmt.Errorf("compile physics: service %q span %s->%s: %w",
+			return ServiceGraph{}, fmt.Errorf("compile: service %q span %s->%s: %w",
 				svc.ID, span.FromStopID, span.ToStopID, err)
 		}
 		runSecs := int(math.Round(runSecsF))
 
-		fromStop := stopByStationID[slugToStationID[span.FromStopID]]
-		toStop := stopByStationID[slugToStationID[span.ToStopID]]
-		fromStation := stationsByID[slugToStationID[span.FromStopID]]
-		toStation := stationsByID[slugToStationID[span.ToStopID]]
+		fromStop, toStop := stopByStationID[span.FromStopID], stopByStationID[span.ToStopID]
+		fromStation, toStation := stationsByID[span.FromStopID], stationsByID[span.ToStopID]
 
 		sg.Edges = append(sg.Edges,
-			Edge{FromSlug: span.FromStopID, ToSlug: span.ToStopID, Seconds: runSecs + resolveDwell(toStop, toStation, vt)},
-			Edge{FromSlug: span.ToStopID, ToSlug: span.FromStopID, Seconds: runSecs + resolveDwell(fromStop, fromStation, vt)},
+			Edge{FromSlug: fromStation.Slug, ToSlug: toStation.Slug, Seconds: runSecs + resolveDwell(toStop, toStation, vt)},
+			Edge{FromSlug: toStation.Slug, ToSlug: fromStation.Slug, Seconds: runSecs + resolveDwell(fromStop, fromStation, vt)},
 		)
 	}
 	return sg, nil
