@@ -138,18 +138,41 @@ func scanScenarios(rows pgx.Rows, op string) ([]transit.Scenario, error) {
 
 // --- Routes ---
 
+const routeColumns = `id, scenario_id, slug, name, mode, geometry, bidirectional, segments`
+
 func (r *Repo) CreateRoute(ctx context.Context, rt transit.Route) error {
+	// segments is NOT NULL, so a route with no authored physics stores an empty
+	// array rather than NULL — the two would otherwise read back differently.
+	segments := rt.Segments
+	if segments == nil {
+		segments = []transit.RouteSegment{}
+	}
 	_, err := r.pool.Exec(ctx,
-		`INSERT INTO routes (id, scenario_id, name, mode, geometry, bidirectional)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
-		rt.ID, rt.ScenarioID, rt.Name, rt.Mode, rt.Geometry, rt.Bidirectional)
+		`INSERT INTO routes (id, scenario_id, slug, name, mode, geometry, bidirectional, segments)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		rt.ID, rt.ScenarioID, rt.Slug, rt.Name, rt.Mode, rt.Geometry, rt.Bidirectional, segments)
 	return wrap("CreateRoute", err)
+}
+
+// GetRouteBySlug reads a single route by its globally unique slug, which is how
+// an ingested route is addressed — it need not belong to any scenario.
+func (r *Repo) GetRouteBySlug(ctx context.Context, slug string) (transit.Route, bool, error) {
+	row := r.pool.QueryRow(ctx,
+		`SELECT `+routeColumns+` FROM routes WHERE slug = $1`, slug)
+
+	rt, err := scanRoute(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return transit.Route{}, false, nil
+	}
+	if err != nil {
+		return transit.Route{}, false, wrap("GetRouteBySlug", err)
+	}
+	return rt, true, nil
 }
 
 func (r *Repo) ListRoutesByScenario(ctx context.Context, scenarioID string) ([]transit.Route, error) {
 	rows, err := r.pool.Query(ctx,
-		`SELECT id, scenario_id, name, mode, geometry, bidirectional
-		 FROM routes WHERE scenario_id = $1 ORDER BY id`, scenarioID)
+		`SELECT `+routeColumns+` FROM routes WHERE scenario_id = $1 ORDER BY id`, scenarioID)
 	if err != nil {
 		return nil, wrap("ListRoutesByScenario", err)
 	}
@@ -157,13 +180,22 @@ func (r *Repo) ListRoutesByScenario(ctx context.Context, scenarioID string) ([]t
 
 	var out []transit.Route
 	for rows.Next() {
-		var rt transit.Route
-		if err := rows.Scan(&rt.ID, &rt.ScenarioID, &rt.Name, &rt.Mode, &rt.Geometry, &rt.Bidirectional); err != nil {
+		rt, err := scanRoute(rows)
+		if err != nil {
 			return nil, wrap("ListRoutesByScenario scan", err)
 		}
 		out = append(out, rt)
 	}
 	return out, wrap("ListRoutesByScenario rows", rows.Err())
+}
+
+// scanRoute reads one row of routeColumns. It takes a pgx.Row so both the
+// single-row and multi-row readers share one column order.
+func scanRoute(row pgx.Row) (transit.Route, error) {
+	var rt transit.Route
+	err := row.Scan(&rt.ID, &rt.ScenarioID, &rt.Slug, &rt.Name, &rt.Mode,
+		&rt.Geometry, &rt.Bidirectional, &rt.Segments)
+	return rt, err
 }
 
 // --- Stations ---

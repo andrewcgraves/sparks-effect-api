@@ -11,6 +11,10 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
+// ptr returns the address of v, for the optional (pointer) fields on the
+// domain types — scenario ids on routes, owner ids on services.
+func ptr[T any](v T) *T { return &v }
+
 // testDBURL resolves the throwaway Postgres connection string. It reads
 // TEST_DATABASE_URL (falling back to DATABASE_URL). When neither is set the
 // integration tests skip locally so `go test ./...` stays green without a DB —
@@ -253,7 +257,7 @@ func TestWritableDomainRoundTrip(t *testing.T) {
 		t.Fatalf("CreateVehicleType: %v", err)
 	}
 	if err := repo.CreateRoute(ctx, transit.Route{
-		ID: routeID, ScenarioID: scenarioID, Name: "Main", Mode: "rail", Bidirectional: true,
+		ID: routeID, ScenarioID: ptr(scenarioID), Slug: "main", Name: "Main", Mode: "rail", Bidirectional: true,
 		Geometry: transit.GeoLineString{Type: "LineString", Coordinates: [][]float64{{-122, 37}, {-121, 37}}},
 	}); err != nil {
 		t.Fatalf("CreateRoute: %v", err)
@@ -310,5 +314,92 @@ func TestWritableDomainRoundTrip(t *testing.T) {
 	}
 	if len(rs.FrequencyWindows) != 1 || rs.FrequencyWindows[0].HeadwayS != 600 {
 		t.Errorf("frequency windows did not round-trip: %+v", rs.FrequencyWindows)
+	}
+}
+
+// An admin-ingested route is standalone: no scenario, addressed by slug, with
+// per-segment physics stored alongside its geometry. This is the persistence
+// half of SPA-75's "geometry + per-segment physics persists and can be read
+// back" — the jsonb segment array and the nullable scenario_id are both things
+// the in-memory handler tests cannot prove.
+func TestIngestedRouteRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := freshRepo(t)
+
+	const routeID = "00000000-0000-4002-8004-000000000001"
+	want := transit.Route{
+		ID:            routeID,
+		Slug:          "ingested-alignment",
+		Name:          "Ingested Alignment",
+		Mode:          "rail",
+		Bidirectional: true,
+		Geometry: transit.GeoLineString{
+			Type:        "LineString",
+			Coordinates: [][]float64{{-122.4, 37.79}, {-122.3, 37.70}, {-122.2, 37.60}},
+		},
+		Segments: []transit.RouteSegment{
+			{CantMM: 150, CurveRadiusM: 1200, GradePct: 1.2},
+			{CantMM: 0, CurveRadiusM: 0, GradePct: -0.8},
+		},
+	}
+	if err := repo.CreateRoute(ctx, want); err != nil {
+		t.Fatalf("CreateRoute: %v", err)
+	}
+
+	got, ok, err := repo.GetRouteBySlug(ctx, want.Slug)
+	if err != nil || !ok {
+		t.Fatalf("GetRouteBySlug: ok=%v err=%v", ok, err)
+	}
+	if got.ScenarioID != nil {
+		t.Errorf("scenario_id = %v, want NULL for a standalone route", *got.ScenarioID)
+	}
+	if got.Name != want.Name || got.Mode != want.Mode || !got.Bidirectional {
+		t.Errorf("route metadata did not round-trip: %+v", got)
+	}
+	if len(got.Geometry.Coordinates) != 3 {
+		t.Fatalf("geometry did not round-trip: %+v", got.Geometry)
+	}
+	if len(got.Segments) != len(want.Segments) {
+		t.Fatalf("segments: want %d, got %d", len(want.Segments), len(got.Segments))
+	}
+	for i := range want.Segments {
+		if got.Segments[i] != want.Segments[i] {
+			t.Errorf("segment %d = %+v, want %+v", i, got.Segments[i], want.Segments[i])
+		}
+	}
+
+	// A slug is globally unique, so a second route cannot claim it.
+	dup := want
+	dup.ID = "00000000-0000-4002-8004-000000000002"
+	if err := repo.CreateRoute(ctx, dup); err == nil {
+		t.Error("CreateRoute with a duplicate slug: want error, got nil")
+	}
+
+	if _, ok, err := repo.GetRouteBySlug(ctx, "no-such-route"); ok || err != nil {
+		t.Errorf("unknown slug: ok=%v err=%v, want false/nil", ok, err)
+	}
+}
+
+// A route with no authored physics must read back as an empty segment list
+// rather than a NULL that breaks decoding.
+func TestRouteWithoutSegmentsRoundTrips(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := freshRepo(t)
+
+	if err := repo.CreateRoute(ctx, transit.Route{
+		ID:       "00000000-0000-4002-8005-000000000001",
+		Slug:     "no-physics",
+		Name:     "No Physics",
+		Geometry: transit.GeoLineString{Type: "LineString", Coordinates: [][]float64{{-122, 37}, {-121, 37}}},
+	}); err != nil {
+		t.Fatalf("CreateRoute: %v", err)
+	}
+
+	got, ok, err := repo.GetRouteBySlug(ctx, "no-physics")
+	if err != nil || !ok {
+		t.Fatalf("GetRouteBySlug: ok=%v err=%v", ok, err)
+	}
+	if len(got.Segments) != 0 {
+		t.Errorf("segments = %+v, want empty", got.Segments)
 	}
 }

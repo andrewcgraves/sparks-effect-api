@@ -26,6 +26,8 @@ type AuthDeps interface {
 	handler.AuthStore
 	handler.UserStore
 	handler.OwnerStore
+	// RouteStore backs admin route ingestion.
+	handler.RouteStore
 	// GetSessionUser backs the middleware's auth.SessionLookup.
 	GetSessionUser(ctx context.Context, tokenHash string) (transit.User, bool, error)
 }
@@ -65,10 +67,11 @@ func New(cfg config.Config, store *transit.Store, deps AuthDeps, chainer isochro
 //
 //   - public:        login only — the way in.
 //   - authenticated: identity and the caller's own scenarios/services.
-//   - admin:         account provisioning. SPA-75's route-write endpoints
-//     register here too, by wrapping them in adminOnly — whatever path they
-//     take. Note the database-less 503 list below is matched by path, so a new
-//     path must be added there as well or it will 404 in that build.
+//   - admin:         account provisioning and route ingestion. Further
+//     admin-only writes register here too, by wrapping them in adminOnly. Note
+//     the database-less 503 list below is matched by path, so a new path must
+//     be added there as well or it will 404 in that build — anything under
+//     /api/admin/ is already covered by the prefix entry.
 //
 // With no database configured there is nothing to authenticate against, so
 // every route answers 503 rather than 404 — a client can tell "not deployed
@@ -99,6 +102,7 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps) {
 
 	// Admin-only.
 	mux.Handle("POST /api/admin/users", adminOnly(handler.CreateUser(deps)))
+	mux.Handle("POST /api/admin/routes", adminOnly(handler.CreateRoute(deps)))
 }
 
 func authUnavailable(w http.ResponseWriter, _ *http.Request) {

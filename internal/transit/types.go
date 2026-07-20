@@ -24,14 +24,39 @@ type Scenario struct {
 	OwnerID     *string `yaml:"owner_id,omitempty" json:"owner_id,omitempty"`
 }
 
-// Route is a physical alignment — geometry and mode only; no stops or schedule.
+// RouteSegment is the authored track physics for one span of a route — the
+// stretch between two consecutive geometry coordinates. A route of n
+// coordinates therefore has n-1 segments.
+//
+// The zero value describes tangent, level, uncanted track, so a route may omit
+// its physics entirely and still be meaningful. Grade is stored as a percent
+// (the unit routes are authored in); internal/physics consumes it as a ratio,
+// so callers divide by 100 at that boundary.
+type RouteSegment struct {
+	CantMM       float64 `yaml:"cant_mm"        json:"cant_mm"`
+	CurveRadiusM float64 `yaml:"curve_radius_m" json:"curve_radius_m"` // 0 means tangent track
+	GradePct     float64 `yaml:"grade_pct"      json:"grade_pct"`
+}
+
+// Route is a physical alignment — geometry, mode, and per-segment track
+// physics. A route never carries stops or a schedule; those belong to the
+// services that run over it.
+//
+// ScenarioID is optional. Seeded routes belong to the scenario they were
+// authored for, but a route ingested through the admin endpoint is a standalone
+// alignment addressed by its slug, so it has no scenario until one adopts it.
 type Route struct {
-	ID            string        `yaml:"id"            json:"id"`
-	ScenarioID    string        `yaml:"scenario_id"   json:"scenario_id"`
-	Name          string        `yaml:"name"          json:"name"`
-	Mode          string        `yaml:"mode"          json:"mode"`
-	Geometry      GeoLineString `yaml:"geometry"      json:"geometry"`
-	Bidirectional bool          `yaml:"bidirectional" json:"bidirectional"`
+	ID            string        `yaml:"id"                     json:"id"`
+	ScenarioID    *string       `yaml:"scenario_id,omitempty"  json:"scenario_id,omitempty"`
+	Slug          string        `yaml:"slug"                   json:"slug"`
+	Name          string        `yaml:"name"                   json:"name"`
+	Mode          string        `yaml:"mode"                   json:"mode"`
+	Geometry      GeoLineString `yaml:"geometry"               json:"geometry"`
+	Bidirectional bool          `yaml:"bidirectional"          json:"bidirectional"`
+	// Segments is always emitted, even when empty: a client reading a route
+	// back should see an explicit empty list rather than a missing key it has
+	// to interpret.
+	Segments []RouteSegment `yaml:"segments,omitempty"     json:"segments"`
 }
 
 // Station is a named boarding point owned by a scenario.

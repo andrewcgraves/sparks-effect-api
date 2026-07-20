@@ -43,6 +43,13 @@ func (s *stubAuthDeps) ListScenariosByOwner(context.Context, string) ([]transit.
 func (s *stubAuthDeps) ListServicesByOwner(context.Context, string) ([]transit.Service, error) {
 	return nil, nil
 }
+func (s *stubAuthDeps) CreateRoute(context.Context, transit.Route) error { return nil }
+func (s *stubAuthDeps) GetRouteBySlug(context.Context, string) (transit.Route, bool, error) {
+	return transit.Route{}, false, nil
+}
+func (s *stubAuthDeps) GetScenarioBySlug(context.Context, string) (transit.Scenario, bool, error) {
+	return transit.Scenario{}, false, nil
+}
 
 const (
 	adminToken = "admin-token"
@@ -89,6 +96,7 @@ func TestProtectedRoutesRejectAnonymousCallers(t *testing.T) {
 		{http.MethodGet, "/api/me/scenarios"},
 		{http.MethodGet, "/api/me/services"},
 		{http.MethodPost, "/api/admin/users"},
+		{http.MethodPost, "/api/admin/routes"},
 	}
 
 	for _, p := range protected {
@@ -101,21 +109,25 @@ func TestProtectedRoutesRejectAnonymousCallers(t *testing.T) {
 	}
 }
 
-// Admin-gated routes must reject an authenticated non-admin with 403. This is
-// the gate SPA-75's route-write endpoints will register behind.
+// Admin-gated routes must reject an authenticated non-admin with 403. Route
+// ingestion sits behind this same gate, which is what keeps it admin-only.
 func TestAdminRoutesRejectNonAdmins(t *testing.T) {
 	h := newTestServer(t, newStubDeps())
 
-	rec := request(t, h, http.MethodPost, "/api/admin/users", userToken)
-	if rec.Code != http.StatusForbidden {
-		t.Errorf("status = %d, want 403 for a non-admin", rec.Code)
-	}
+	for _, path := range []string{"/api/admin/users", "/api/admin/routes"} {
+		t.Run(path, func(t *testing.T) {
+			rec := request(t, h, http.MethodPost, path, userToken)
+			if rec.Code != http.StatusForbidden {
+				t.Errorf("status = %d, want 403 for a non-admin", rec.Code)
+			}
 
-	// The same route admits an admin — proving the 403 was the gate and not a
-	// misrouted request.
-	rec = request(t, h, http.MethodPost, "/api/admin/users", adminToken)
-	if rec.Code == http.StatusForbidden || rec.Code == http.StatusNotFound {
-		t.Errorf("admin was blocked from an admin route: status %d", rec.Code)
+			// The same route admits an admin — proving the 403 was the gate and
+			// not a misrouted request.
+			rec = request(t, h, http.MethodPost, path, adminToken)
+			if rec.Code == http.StatusForbidden || rec.Code == http.StatusNotFound {
+				t.Errorf("admin was blocked from an admin route: status %d", rec.Code)
+			}
+		})
 	}
 }
 
