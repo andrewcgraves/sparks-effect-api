@@ -115,6 +115,28 @@ func CreateRoute(store RouteStore) http.HandlerFunc {
 	}
 }
 
+// RouteBySlug returns a handler that fetches one route by its globally unique
+// slug — geometry, per-segment physics, and metadata — for the public
+// /routes/:slug preview. Unlike scenario reads, it is backed by RouteStore
+// (Postgres) rather than the embedded scenario store, since ingested routes
+// are addressed independently of any scenario.
+func RouteBySlug(store RouteStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		slug := r.PathValue("slug")
+		rt, ok, err := store.GetRouteBySlug(r.Context(), slug)
+		if err != nil {
+			log.Printf("handler: looking up route failed: %v", err)
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		if !ok {
+			writeError(w, http.StatusNotFound, "route not found")
+			return
+		}
+		writeJSON(w, http.StatusOK, rt)
+	}
+}
+
 // resolveScenarioOrFail turns an optional scenario slug into a scenario ID, writing
 // the error response itself and reporting ok=false when the caller should stop.
 // An empty slug is not an error — it yields a nil (standalone) scenario.

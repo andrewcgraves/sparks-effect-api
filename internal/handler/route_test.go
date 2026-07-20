@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -19,6 +20,7 @@ type fakeRouteStore struct {
 	routes    map[string]transit.Route // by slug
 	scenarios map[string]transit.Scenario
 	createErr error
+	getErr    error
 }
 
 func newFakeRouteStore() *fakeRouteStore {
@@ -42,6 +44,9 @@ func (f *fakeRouteStore) CreateRoute(_ context.Context, rt transit.Route) error 
 }
 
 func (f *fakeRouteStore) GetRouteBySlug(_ context.Context, slug string) (transit.Route, bool, error) {
+	if f.getErr != nil {
+		return transit.Route{}, false, f.getErr
+	}
 	rt, ok := f.routes[slug]
 	return rt, ok, nil
 }
@@ -248,5 +253,73 @@ func TestCreateRouteAcceptsGeoJSONBBox(t *testing.T) {
 	rec := postJSON(t, handler.CreateRoute(store), "/api/admin/routes", body)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201; body %s", rec.Code, rec.Body.String())
+	}
+}
+
+func getRoute(t *testing.T, h http.Handler, slug string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/api/routes/"+slug, nil)
+	req.SetPathValue("slug", slug)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+// The headline acceptance criterion: geometry, per-segment physics, and
+// metadata all come back for a known slug.
+func TestRouteBySlugReturnsGeometryPhysicsAndMetadata(t *testing.T) {
+	store := newFakeRouteStore()
+	if rec := postJSON(t, handler.CreateRoute(store), "/api/admin/routes", validRoute); rec.Code != http.StatusCreated {
+		t.Fatalf("seed create: status %d", rec.Code)
+	}
+
+	rec := getRoute(t, handler.RouteBySlug(store), "test-alignment")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body.String())
+	}
+
+	var got transit.Route
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Slug != "test-alignment" || got.Name != "Test Alignment" || got.Mode != "rail" {
+		t.Errorf("metadata = %+v, want slug/name/mode from the ingested route", got)
+	}
+	if !got.Bidirectional {
+		t.Error("bidirectional should default to true")
+	}
+	if len(got.Geometry.Coordinates) != 3 {
+		t.Fatalf("geometry did not round-trip: %+v", got.Geometry)
+	}
+	if len(got.Segments) != 2 {
+		t.Fatalf("segments = %d, want 2", len(got.Segments))
+	}
+	if want := (transit.RouteSegment{CantMM: 150, CurveRadiusM: 1200, GradePct: 1.2}); got.Segments[0] != want {
+		t.Errorf("segment 0 = %+v, want %+v", got.Segments[0], want)
+	}
+}
+
+// The second acceptance criterion: an unknown slug is a 404, not a 200 with an
+// empty body or a 500.
+func TestRouteBySlugUnknownSlugIsNotFound(t *testing.T) {
+	store := newFakeRouteStore()
+	rec := getRoute(t, handler.RouteBySlug(store), "no-such-route")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404; body %s", rec.Code, rec.Body.String())
+	}
+}
+
+// A storage failure must surface as a 500, not a misleading 404 or a leaked
+// database error.
+func TestRouteBySlugReportsStorageFailure(t *testing.T) {
+	store := newFakeRouteStore()
+	store.getErr = errors.New("database is down")
+
+	rec := getRoute(t, handler.RouteBySlug(store), "whatever")
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "database is down") {
+		t.Errorf("internal error leaked to client: %s", rec.Body.String())
 	}
 }

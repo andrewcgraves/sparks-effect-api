@@ -159,6 +159,22 @@ func TestPublicReadRoutesStayOpen(t *testing.T) {
 	}
 }
 
+// The route-read endpoint is public: a client previewing /routes/:slug has no
+// session yet, so it must not require one.
+func TestRouteReadEndpointStaysOpenWithoutAToken(t *testing.T) {
+	h := newTestServer(t, newStubDeps())
+
+	rec := request(t, h, http.MethodGet, "/api/routes/no-such-route", "")
+	if rec.Code == http.StatusUnauthorized || rec.Code == http.StatusForbidden {
+		t.Errorf("status = %d, route read must not require auth", rec.Code)
+	}
+	// stubAuthDeps has no routes, so an anonymous caller should see the
+	// ordinary not-found response rather than an auth rejection.
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 for an unknown slug", rec.Code)
+	}
+}
+
 // With no database there is no user or session store, so the auth endpoints
 // must say so plainly rather than 404 or panic.
 func TestAuthRoutesReportUnavailableWithoutADatabase(t *testing.T) {
@@ -181,5 +197,11 @@ func TestAuthRoutesReportUnavailableWithoutADatabase(t *testing.T) {
 	// The public read path must still work in database-less local dev.
 	if rec := request(t, h, http.MethodGet, "/api/scenarios", ""); rec.Code != http.StatusOK {
 		t.Errorf("public route status = %d, want 200 without a database", rec.Code)
+	}
+
+	// Route reads live in Postgres, so without a database they must say so
+	// plainly too, rather than 404ing as if the endpoint didn't exist.
+	if rec := request(t, h, http.MethodGet, "/api/routes/ca-hsr-trunk", ""); rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("route read status = %d, want 503 with no database configured", rec.Code)
 	}
 }
