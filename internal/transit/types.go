@@ -46,14 +46,17 @@ type RouteSegment struct {
 // authored for, but a route ingested through the admin endpoint is a standalone
 // alignment addressed by its slug, so it has no scenario until one adopts it.
 type Route struct {
-	ID            string         `yaml:"id"            json:"id"`
-	ScenarioID    *string        `yaml:"scenario_id,omitempty" json:"scenario_id,omitempty"`
-	Slug          string         `yaml:"slug"          json:"slug"`
-	Name          string         `yaml:"name"          json:"name"`
-	Mode          string         `yaml:"mode"          json:"mode"`
-	Geometry      GeoLineString  `yaml:"geometry"      json:"geometry"`
-	Bidirectional bool           `yaml:"bidirectional" json:"bidirectional"`
-	Segments      []RouteSegment `yaml:"segments,omitempty" json:"segments"`
+	ID            string        `yaml:"id"                     json:"id"`
+	ScenarioID    *string       `yaml:"scenario_id,omitempty"  json:"scenario_id,omitempty"`
+	Slug          string        `yaml:"slug"                   json:"slug"`
+	Name          string        `yaml:"name"                   json:"name"`
+	Mode          string        `yaml:"mode"                   json:"mode"`
+	Geometry      GeoLineString `yaml:"geometry"               json:"geometry"`
+	Bidirectional bool          `yaml:"bidirectional"          json:"bidirectional"`
+	// Segments is always emitted, even when empty: a client reading a route
+	// back should see an explicit empty list rather than a missing key it has
+	// to interpret.
+	Segments []RouteSegment `yaml:"segments,omitempty"     json:"segments"`
 }
 
 // Station is a named boarding point owned by a scenario.

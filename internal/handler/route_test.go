@@ -148,6 +148,14 @@ func TestCreateRouteRejectsInvalidPayloads(t *testing.T) {
 			"properties":{"name":"!!!"}}`},
 		{"unknown scenario", `{"type":"LineString","coordinates":[[-122,37],[-121,37]],
 			"properties":{"name":"X","scenario_slug":"no-such-scenario"}}`},
+		{"repeated coordinate", `{"type":"LineString","coordinates":[[-122,37],[-122,37]],
+			"properties":{"name":"X"}}`},
+		// A misspelled physics key must be refused outright, not silently
+		// decoded as a zero-valued (tangent, level) segment.
+		{"misspelled physics key", `{"type":"LineString","coordinates":[[-122,37],[-121,37]],
+			"properties":{"name":"X","segments":[{"cant__mm":150}]}}`},
+		{"unknown top-level field", `{"type":"LineString","coordinates":[[-122,37],[-121,37]],
+			"properties":{"name":"X"},"nonsense":true}`},
 	}
 
 	for _, tc := range tests {
@@ -228,5 +236,17 @@ func TestCreateRouteReportsStorageFailure(t *testing.T) {
 	// The client must not be handed the underlying database error.
 	if strings.Contains(rec.Body.String(), "database is down") {
 		t.Errorf("internal error leaked to client: %s", rec.Body.String())
+	}
+}
+
+// A bbox is legal GeoJSON, so a standards-conformant export must not be turned
+// away by the strict field decoding that catches misspelled physics keys.
+func TestCreateRouteAcceptsGeoJSONBBox(t *testing.T) {
+	store := newFakeRouteStore()
+	body := `{"type":"LineString","bbox":[-122,37,-121,38],
+		"coordinates":[[-122,37],[-121,37]],"properties":{"name":"Boxed"}}`
+	rec := postJSON(t, handler.CreateRoute(store), "/api/admin/routes", body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body %s", rec.Code, rec.Body.String())
 	}
 }

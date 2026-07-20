@@ -29,8 +29,14 @@ type RouteStore interface {
 func CreateRoute(store RouteStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var in route.Ingest
-		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-			writeError(w, http.StatusBadRequest, "malformed request body")
+		dec := json.NewDecoder(r.Body)
+		// Unknown fields are rejected rather than ignored. A misspelled physics
+		// key (cant__mm) would otherwise decode to a zero-valued segment and
+		// sail through range validation as tangent, level track — silently
+		// storing physics the author never wrote.
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&in); err != nil {
+			writeError(w, http.StatusBadRequest, "malformed request body: "+err.Error())
 			return
 		}
 
@@ -70,7 +76,7 @@ func CreateRoute(store RouteStore) http.HandlerFunc {
 		// A scenario is optional: an ingested route is a standalone alignment
 		// unless the caller names one. The slug is resolved to an ID here so a
 		// client can never supply an arbitrary scenario_id directly.
-		scenarioID, ok := resolveScenario(w, r, store, in.Properties.ScenarioSlug)
+		scenarioID, ok := resolveScenarioOrFail(w, r, store, in.Properties.ScenarioSlug)
 		if !ok {
 			return
 		}
@@ -109,10 +115,10 @@ func CreateRoute(store RouteStore) http.HandlerFunc {
 	}
 }
 
-// resolveScenario turns an optional scenario slug into a scenario ID, writing
+// resolveScenarioOrFail turns an optional scenario slug into a scenario ID, writing
 // the error response itself and reporting ok=false when the caller should stop.
 // An empty slug is not an error — it yields a nil (standalone) scenario.
-func resolveScenario(w http.ResponseWriter, r *http.Request, store RouteStore, slug string) (*string, bool) {
+func resolveScenarioOrFail(w http.ResponseWriter, r *http.Request, store RouteStore, slug string) (*string, bool) {
 	if slug == "" {
 		return nil, true
 	}

@@ -66,6 +66,7 @@ func TestValidateRejectsBadGeometry(t *testing.T) {
 		{"latitude too low", func(in *Ingest) { in.Coordinates[1][1] = -90.5 }, "latitude"},
 		{"latitude too high", func(in *Ingest) { in.Coordinates[1][1] = 90.5 }, "latitude"},
 		{"non-finite longitude", func(in *Ingest) { in.Coordinates[1][0] = math.NaN() }, "longitude"},
+		{"repeated point", func(in *Ingest) { in.Coordinates[1] = in.Coordinates[0] }, "zero-length"},
 		{"infinite latitude", func(in *Ingest) { in.Coordinates[1][1] = math.Inf(1) }, "latitude"},
 	}
 

@@ -86,6 +86,10 @@ type Ingest struct {
 	Type        string      `json:"type"`
 	Coordinates [][]float64 `json:"coordinates"`
 	Properties  Properties  `json:"properties"`
+	// BBox is accepted and ignored. GeoJSON permits it on any geometry, and
+	// the handler rejects unknown fields, so it is declared here purely so a
+	// standards-conformant export is not turned away.
+	BBox []float64 `json:"bbox,omitempty"`
 }
 
 // Validate reports the first problem with an ingestion payload, or nil if the
@@ -101,6 +105,13 @@ func Validate(in Ingest) error {
 	for i, pos := range in.Coordinates {
 		if err := validatePosition(pos); err != nil {
 			return fmt.Errorf("coordinate %d: %w", i, err)
+		}
+		// A repeated point is a zero-length span. It is almost always an
+		// authoring slip, and it is not harmless: everything downstream that
+		// divides by segment length — chainage, projection, run-profile
+		// integration — would divide by zero.
+		if i > 0 && samePosition(in.Coordinates[i-1], pos) {
+			return fmt.Errorf("coordinate %d repeats coordinate %d, giving a zero-length segment", i, i-1)
 		}
 	}
 
@@ -170,53 +181,10 @@ func inRange(v, lo, hi float64) bool {
 	return v >= lo && v <= hi
 }
 
-// Slugify derives a URL slug from a display name: lowercase, with every run of
-// non-alphanumeric characters collapsed to a single hyphen and no leading or
-// trailing hyphen. It returns "" for a name with no alphanumeric content, which
-// callers must treat as "no slug could be derived".
-//
-// Slugify's output always satisfies IsValidSlug.
-func Slugify(name string) string {
-	var b strings.Builder
-	pendingHyphen := false
-	for _, r := range strings.ToLower(name) {
-		if isSlugRune(r) {
-			// Emit a separator only once we know a real character follows, so
-			// the result never starts or ends with a hyphen.
-			if pendingHyphen && b.Len() > 0 {
-				b.WriteByte('-')
-			}
-			pendingHyphen = false
-			b.WriteRune(r)
-			continue
-		}
-		pendingHyphen = true
-	}
-	return b.String()
-}
-
-// IsValidSlug reports whether s is already in canonical slug form: one or more
-// lowercase-alphanumeric words joined by single hyphens.
-func IsValidSlug(s string) bool {
-	if s == "" {
-		return false
-	}
-	for _, part := range strings.Split(s, "-") {
-		if part == "" { // leading, trailing, or doubled hyphen
-			return false
-		}
-		for _, r := range part {
-			if !isSlugRune(r) {
-				return false
-			}
-		}
-	}
-	return true
-}
-
-// isSlugRune reports whether r may appear inside a slug word. ASCII digits and
-// lowercase letters only: admitting accented or non-Latin characters would
-// produce slugs that do not survive a round trip through a URL path cleanly.
-func isSlugRune(r rune) bool {
-	return (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+// samePosition reports whether two validated positions are identical. Exact
+// equality is the right test here: these are authored values that round-trip
+// through JSON unchanged, not the result of arithmetic, so a tolerance would
+// only start rejecting legitimately close points.
+func samePosition(a, b []float64) bool {
+	return a[0] == b[0] && a[1] == b[1]
 }

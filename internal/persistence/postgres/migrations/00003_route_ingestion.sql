@@ -8,8 +8,12 @@
 -- scenario, so the constraint is global rather than per-scenario. Existing rows
 -- are backfilled from the route id before the NOT NULL lands, since a route
 -- name is not guaranteed to slugify to anything unique.
+--
+-- The backfill uses the *whole* id, not a prefix: seeded route ids are assigned
+-- from a shared pattern (00000000-0000-4002-...), so any leading slice of them
+-- collides across rows and would fail the UNIQUE constraint added below.
 ALTER TABLE routes ADD COLUMN slug text;
-UPDATE routes SET slug = 'route-' || left(id::text, 8) WHERE slug IS NULL;
+UPDATE routes SET slug = 'route-' || id::text WHERE slug IS NULL;
 ALTER TABLE routes ALTER COLUMN slug SET NOT NULL;
 ALTER TABLE routes ADD CONSTRAINT routes_slug_key UNIQUE (slug);
 
