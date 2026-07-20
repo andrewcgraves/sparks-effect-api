@@ -22,7 +22,7 @@ func validUserService() transit.UserService {
 			{Name: "San Francisco", Lat: 37.7749, Lng: -122.4194, Seq: 0},
 			{Name: "San Jose", Lat: 37.3382, Lng: -121.8863, Seq: 1},
 		},
-		FrequencyWindows: []transit.ServiceFrequencyWindow{
+		FrequencyWindows: []transit.FrequencyWindow{
 			{StartTime: "06:00", EndTime: "10:00", HeadwayS: 900},
 		},
 	}

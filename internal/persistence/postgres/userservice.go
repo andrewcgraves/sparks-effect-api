@@ -113,7 +113,7 @@ func (r *Repo) getUserServiceBy(ctx context.Context, op, query, arg string) (tra
 		return transit.UserService{}, false, wrap(op, err)
 	}
 
-	windows, err := r.listUserServiceFrequencyWindows(ctx, svc.ID)
+	windows, err := r.listUserFrequencyWindows(ctx, svc.ID)
 	if err != nil {
 		return transit.UserService{}, false, err
 	}
@@ -158,8 +158,8 @@ func (r *Repo) ListUserServicesByOwner(ctx context.Context, ownerID string) ([]t
 
 // frequencyWindowsByService reads the windows for many services in one query,
 // so listing N services costs two round trips rather than N+1.
-func (r *Repo) frequencyWindowsByService(ctx context.Context, serviceIDs []string) (map[string][]transit.ServiceFrequencyWindow, error) {
-	out := map[string][]transit.ServiceFrequencyWindow{}
+func (r *Repo) frequencyWindowsByService(ctx context.Context, serviceIDs []string) (map[string][]transit.FrequencyWindow, error) {
+	out := map[string][]transit.FrequencyWindow{}
 	if len(serviceIDs) == 0 {
 		return out, nil
 	}
@@ -176,7 +176,7 @@ func (r *Repo) frequencyWindowsByService(ctx context.Context, serviceIDs []strin
 	for rows.Next() {
 		var (
 			id string
-			fw transit.ServiceFrequencyWindow
+			fw transit.FrequencyWindow
 		)
 		if err := rows.Scan(&id, &fw.StartTime, &fw.EndTime, &fw.HeadwayS); err != nil {
 			return nil, wrap("frequencyWindowsByService scan", err)
@@ -213,29 +213,29 @@ func (r *Repo) RouteExists(ctx context.Context, routeID string) (bool, error) {
 	return exists, wrap("RouteExists", err)
 }
 
-func (r *Repo) listUserServiceFrequencyWindows(ctx context.Context, serviceID string) ([]transit.ServiceFrequencyWindow, error) {
+func (r *Repo) listUserFrequencyWindows(ctx context.Context, serviceID string) ([]transit.FrequencyWindow, error) {
 	rows, err := r.pool.Query(ctx,
 		`SELECT start_time, end_time, headway_s FROM user_service_frequency_windows
 		 WHERE user_service_id = $1 ORDER BY seq`, serviceID)
 	if err != nil {
-		return nil, wrap("listUserServiceFrequencyWindows", err)
+		return nil, wrap("listUserFrequencyWindows", err)
 	}
 	defer rows.Close()
 
-	out := []transit.ServiceFrequencyWindow{}
+	out := []transit.FrequencyWindow{}
 	for rows.Next() {
-		var fw transit.ServiceFrequencyWindow
+		var fw transit.FrequencyWindow
 		if err := rows.Scan(&fw.StartTime, &fw.EndTime, &fw.HeadwayS); err != nil {
-			return nil, wrap("listUserServiceFrequencyWindows scan", err)
+			return nil, wrap("listUserFrequencyWindows scan", err)
 		}
 		out = append(out, fw)
 	}
-	return out, wrap("listUserServiceFrequencyWindows rows", rows.Err())
+	return out, wrap("listUserFrequencyWindows rows", rows.Err())
 }
 
 // insertFrequencyWindows writes windows in slice order, persisting that order
 // as seq so reads return them as the author arranged them.
-func insertFrequencyWindows(ctx context.Context, tx pgx.Tx, serviceID string, windows []transit.ServiceFrequencyWindow) error {
+func insertFrequencyWindows(ctx context.Context, tx pgx.Tx, serviceID string, windows []transit.FrequencyWindow) error {
 	for i, fw := range windows {
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO user_service_frequency_windows

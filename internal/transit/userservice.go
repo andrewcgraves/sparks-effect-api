@@ -17,17 +17,17 @@ import (
 // catalog. Reconciling the two models is future work; keeping them apart leaves
 // the seeded CAHSR compile path untouched.
 type UserService struct {
-	ID               string                   `json:"id"`
-	Slug             string                   `json:"slug"`
-	RouteID          string                   `json:"route_id"`
-	OwnerID          string                   `json:"owner_id"`
-	Name             string                   `json:"name"`
-	Description      string                   `json:"description,omitempty"`
-	Vehicle          VehicleParams            `json:"vehicle"`
-	Stops            []ServiceStopPoint       `json:"stops"`
-	FrequencyWindows []ServiceFrequencyWindow `json:"frequency_windows"`
-	CreatedAt        time.Time                `json:"created_at"`
-	UpdatedAt        time.Time                `json:"updated_at"`
+	ID               string             `json:"id"`
+	Slug             string             `json:"slug"`
+	RouteID          string             `json:"route_id"`
+	OwnerID          string             `json:"owner_id"`
+	Name             string             `json:"name"`
+	Description      string             `json:"description,omitempty"`
+	Vehicle          VehicleParams      `json:"vehicle"`
+	Stops            []ServiceStopPoint `json:"stops"`
+	FrequencyWindows []FrequencyWindow  `json:"frequency_windows"`
+	CreatedAt        time.Time          `json:"created_at"`
+	UpdatedAt        time.Time          `json:"updated_at"`
 }
 
 // VehicleParams are the rolling-stock capabilities a user sets on their own
@@ -47,14 +47,6 @@ type ServiceStopPoint struct {
 	Lat  float64 `json:"lat"`
 	Lng  float64 `json:"lng"`
 	Seq  int     `json:"seq"`
-}
-
-// ServiceFrequencyWindow is a headway-based operating window. Times are
-// free-form clock strings ("06:00"); the compiler interprets them.
-type ServiceFrequencyWindow struct {
-	StartTime string `json:"start_time"`
-	EndTime   string `json:"end_time"`
-	HeadwayS  int    `json:"headway_s"`
 }
 
 // Validate reports whether the service is well-formed enough to persist.

@@ -313,7 +313,6 @@ func TestWritableDomainRoundTrip(t *testing.T) {
 		stationA   = "00000000-0000-4005-8002-000000000001"
 		stationB   = "00000000-0000-4005-8002-000000000002"
 		serviceID  = "00000000-0000-4004-8002-000000000001"
-		windowID   = "00000000-0000-4006-8002-000000000001"
 	)
 
 	if err := repo.CreateScenario(ctx, transit.Scenario{
@@ -354,7 +353,7 @@ func TestWritableDomainRoundTrip(t *testing.T) {
 			{StationID: stationB, Sequence: 2, DwellS: &dwell},
 		},
 		FrequencyWindows: []transit.FrequencyWindow{
-			{ID: windowID, ServiceID: serviceID, StartTime: "06:00", EndTime: "22:00", HeadwayS: 600},
+			{StartTime: "06:00", EndTime: "22:00", HeadwayS: 600},
 		},
 	}
 	if err := repo.CreateService(ctx, svc); err != nil {

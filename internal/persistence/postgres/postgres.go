@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/ids"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
@@ -295,10 +296,17 @@ func (r *Repo) CreateService(ctx context.Context, svc transit.Service) error {
 	}
 
 	for _, fw := range svc.FrequencyWindows {
+		// The row PK is persistence identity, not domain data: nothing
+		// references a frequency window by id, so it is minted here rather
+		// than carried on the type.
+		fwID, err := ids.NewUUID()
+		if err != nil {
+			return wrap("CreateService frequency window id", err)
+		}
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO frequency_windows (id, service_id, start_time, end_time, headway_s)
 			 VALUES ($1, $2, $3, $4, $5)`,
-			fw.ID, svc.ID, fw.StartTime, fw.EndTime, fw.HeadwayS); err != nil {
+			fwID, svc.ID, fw.StartTime, fw.EndTime, fw.HeadwayS); err != nil {
 			return wrap("CreateService frequency windows", err)
 		}
 	}
@@ -380,7 +388,7 @@ func (r *Repo) listServiceStops(ctx context.Context, serviceID string) ([]transi
 
 func (r *Repo) listFrequencyWindows(ctx context.Context, serviceID string) ([]transit.FrequencyWindow, error) {
 	rows, err := r.pool.Query(ctx,
-		`SELECT id, service_id, start_time, end_time, headway_s FROM frequency_windows
+		`SELECT start_time, end_time, headway_s FROM frequency_windows
 		 WHERE service_id = $1 ORDER BY start_time`, serviceID)
 	if err != nil {
 		return nil, wrap("listFrequencyWindows", err)
@@ -390,7 +398,7 @@ func (r *Repo) listFrequencyWindows(ctx context.Context, serviceID string) ([]tr
 	var out []transit.FrequencyWindow
 	for rows.Next() {
 		var fw transit.FrequencyWindow
-		if err := rows.Scan(&fw.ID, &fw.ServiceID, &fw.StartTime, &fw.EndTime, &fw.HeadwayS); err != nil {
+		if err := rows.Scan(&fw.StartTime, &fw.EndTime, &fw.HeadwayS); err != nil {
 			return nil, wrap("listFrequencyWindows scan", err)
 		}
 		out = append(out, fw)

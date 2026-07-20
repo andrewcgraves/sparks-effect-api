@@ -34,12 +34,12 @@ const maxServiceBodyBytes = 1 << 20 // 1 MiB
 // (id, slug, owner_id) are deliberately absent: the server assigns them, so a
 // client cannot claim an ID or reassign ownership by including them.
 type serviceRequest struct {
-	RouteID          string                           `json:"route_id"`
-	Name             string                           `json:"name"`
-	Description      string                           `json:"description"`
-	Vehicle          transit.VehicleParams            `json:"vehicle"`
-	Stops            []transit.ServiceStopPoint       `json:"stops"`
-	FrequencyWindows []transit.ServiceFrequencyWindow `json:"frequency_windows"`
+	RouteID          string                     `json:"route_id"`
+	Name             string                     `json:"name"`
+	Description      string                     `json:"description"`
+	Vehicle          transit.VehicleParams      `json:"vehicle"`
+	Stops            []transit.ServiceStopPoint `json:"stops"`
+	FrequencyWindows []transit.FrequencyWindow  `json:"frequency_windows"`
 }
 
 // applyTo copies the client-writable fields onto svc, leaving ID, Slug, and
