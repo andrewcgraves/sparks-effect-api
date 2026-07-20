@@ -26,7 +26,7 @@ type AuthDeps interface {
 	handler.AuthStore
 	handler.UserStore
 	handler.OwnerStore
-	// RouteStore backs admin route ingestion.
+	// RouteStore backs admin route ingestion and the public route-read endpoint.
 	handler.RouteStore
 	// GetSessionUser backs the middleware's auth.SessionLookup.
 	GetSessionUser(ctx context.Context, tokenHash string) (transit.User, bool, error)
@@ -49,6 +49,7 @@ func New(cfg config.Config, store *transit.Store, deps AuthDeps, chainer isochro
 
 	mux.HandleFunc("POST /api/isochrone", handler.Isochrone(chainer, lg))
 
+	registerRouteReadRoutes(mux, deps)
 	registerAuthRoutes(mux, cfg, deps)
 
 	h := cors(mux, cfg.AllowLocalhostCORS)
@@ -58,6 +59,17 @@ func New(cfg config.Config, store *transit.Store, deps AuthDeps, chainer isochro
 		Handler:           logRequests(h),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
+}
+
+// registerRouteReadRoutes wires the public route-read endpoint. Ingested
+// routes live in Postgres, not the embedded scenario store, so with no
+// database configured it answers 503 rather than 404.
+func registerRouteReadRoutes(mux *http.ServeMux, deps AuthDeps) {
+	if deps == nil {
+		mux.HandleFunc("/api/routes/", serviceUnavailable("route storage is unavailable"))
+		return
+	}
+	mux.HandleFunc("GET /api/routes/{slug}", handler.RouteBySlug(deps))
 }
 
 // registerAuthRoutes wires the invite-only auth surface.
@@ -82,7 +94,7 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps) {
 			"/api/auth/login", "/api/auth/logout", "/api/auth/me",
 			"/api/me/scenarios", "/api/me/services", "/api/admin/",
 		} {
-			mux.HandleFunc(pattern, authUnavailable)
+			mux.HandleFunc(pattern, serviceUnavailable("authentication is unavailable"))
 		}
 		return
 	}
@@ -105,11 +117,17 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps) {
 	mux.Handle("POST /api/admin/routes", adminOnly(handler.CreateRoute(deps)))
 }
 
-func authUnavailable(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusServiceUnavailable)
-	if _, err := w.Write([]byte(`{"error":"authentication is unavailable: no database configured"}` + "\n")); err != nil {
-		log.Printf("server: failed to write response: %v", err)
+// serviceUnavailable answers 503 for a route whose backing store is Postgres
+// when no database is configured, so a client can tell "not deployed with a
+// database" from "no such endpoint".
+func serviceUnavailable(msg string) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		body := `{"error":"` + msg + `: no database configured"}` + "\n"
+		if _, err := w.Write([]byte(body)); err != nil {
+			log.Printf("server: failed to write response: %v", err)
+		}
 	}
 }
 
