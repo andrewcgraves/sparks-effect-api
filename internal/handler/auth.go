@@ -56,9 +56,15 @@ func Login(store AuthStore, ttl time.Duration) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
-		// Both branches answer identically; the lookup result only decides
-		// whether there is a hash to check at all.
-		if !found || !auth.VerifyPassword(hash, req.Password) {
+		// An unknown email still pays for a bcrypt comparison, so the two
+		// failure modes cost the same time as well as returning the same body.
+		// Skipping the work here would leak account existence through latency.
+		if !found {
+			auth.VerifyNothing(req.Password)
+			writeError(w, http.StatusUnauthorized, invalidCredentials)
+			return
+		}
+		if !auth.VerifyPassword(hash, req.Password) {
 			writeError(w, http.StatusUnauthorized, invalidCredentials)
 			return
 		}
@@ -89,7 +95,7 @@ func Login(store AuthStore, ttl time.Duration) http.HandlerFunc {
 // RequireAuth, so an unauthenticated caller never reaches it.
 func Logout(store AuthStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		token, ok := bearerToken(r)
+		token, ok := auth.BearerToken(r)
 		if !ok {
 			// Unreachable behind RequireAuth; answered idempotently rather than
 			// as an error, since "no session" is the state the caller wanted.
@@ -122,16 +128,4 @@ func Me() http.HandlerFunc {
 // provisioning and login can never disagree about which row an email names.
 func normalizeEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
-}
-
-// bearerToken mirrors the middleware's header parsing for the one handler that
-// needs the raw token rather than the resolved identity.
-func bearerToken(r *http.Request) (string, bool) {
-	const prefix = "bearer "
-	header := r.Header.Get("Authorization")
-	if len(header) < len(prefix) || !strings.EqualFold(header[:len(prefix)], prefix) {
-		return "", false
-	}
-	token := strings.TrimSpace(header[len(prefix):])
-	return token, token != ""
 }

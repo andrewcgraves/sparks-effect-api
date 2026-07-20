@@ -3,6 +3,7 @@ package auth_test
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 )
@@ -47,6 +48,26 @@ func TestVerifyPasswordRejectsEmptyHash(t *testing.T) {
 	}
 	if auth.VerifyPassword("", "anything") {
 		t.Error("empty hash must not verify")
+	}
+}
+
+// VerifyNothing exists to make an unknown-account login cost the same as a
+// wrong-password one. It must always fail, and must actually do the bcrypt
+// work — a stub returning false immediately would reintroduce the timing leak.
+func TestVerifyNothingAlwaysFailsAndCostsRealWork(t *testing.T) {
+	for _, pw := range []string{"", "anything", "no account has this password"} {
+		if auth.VerifyNothing(pw) {
+			t.Errorf("VerifyNothing(%q) = true, must always be false", pw)
+		}
+	}
+
+	// A real bcrypt comparison at the configured cost is far slower than a
+	// bare return. This threshold is loose enough not to flake on slow CI but
+	// tight enough to catch the work being skipped entirely.
+	start := time.Now()
+	auth.VerifyNothing("some-password")
+	if elapsed := time.Since(start); elapsed < time.Millisecond {
+		t.Errorf("VerifyNothing returned in %v — too fast to have hashed anything", elapsed)
 	}
 }
 

@@ -10,6 +10,7 @@
 package auth
 
 import (
+	"crypto/rand"
 	"errors"
 
 	"golang.org/x/crypto/bcrypt"
@@ -30,6 +31,48 @@ func HashPassword(password string) (string, error) {
 		return "", err
 	}
 	return string(h), nil
+}
+
+// dummyHash is a valid bcrypt hash used by VerifyNothing to spend the same work
+// as a real comparison.
+//
+// It hashes 32 random bytes generated at startup, not a fixed string: a literal
+// would be a password that genuinely matches, so any future caller trusting the
+// return value could be authenticated by submitting it. Random per-process
+// content means no input can ever match.
+//
+// Generated at init rather than hard-coded also keeps it at the current cost
+// setting — a stale constant at a lower cost would itself be a timing signal.
+var dummyHash []byte
+
+func init() {
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		panic("auth: cannot generate dummy hash seed: " + err.Error())
+	}
+	h, err := bcrypt.GenerateFromPassword(secret, bcrypt.DefaultCost)
+	if err != nil {
+		// Only reachable if bcrypt itself is broken, in which case no
+		// authentication is possible anyway.
+		panic("auth: cannot generate dummy hash: " + err.Error())
+	}
+	dummyHash = h
+}
+
+// VerifyNothing performs a throwaway password comparison and always reports
+// false.
+//
+// The login path calls it when no account matches the submitted email, so a
+// request for an unknown address costs the same bcrypt work as one for a known
+// address with the wrong password. Without it, response latency alone reveals
+// which emails have accounts — the account-enumeration leak that returning an
+// identical error message is meant to prevent.
+//
+// The comparison's result is deliberately discarded rather than returned: there
+// is no account here to authenticate, so no input may ever produce true.
+func VerifyNothing(password string) bool {
+	_ = bcrypt.CompareHashAndPassword(dummyHash, []byte(password))
+	return false
 }
 
 // VerifyPassword reports whether password matches the stored bcrypt hash.

@@ -11,9 +11,16 @@ import "github.com/andrewcgraves/sparks-effect-api/internal/transit"
 // (e.g. the ca-hsr baseline) — which is admin-only, so no account can quietly
 // rewrite shared scenarios.
 //
-// Note this governs *owned* resources. The public GET endpoints serve curated
-// data and remain unauthenticated; this predicate gates the owner-scoped and
-// mutating paths.
+// Note this governs *owned* resources: it gates the owner-scoped reads and the
+// mutating paths. It is not consulted by the public GET endpoints, which today
+// serve only unowned curated data because that is all the seed produces.
+//
+// That stops being true the moment SPA-80/81 let users create owned scenarios
+// and services: GET /api/scenarios reads the compiled store, which holds every
+// row, so owned rows would become anonymously readable. Whoever adds that
+// authoring path must decide how the public reads exclude owned rows — the
+// compiled store deliberately keeps them all, since the graph must compile
+// from the full set regardless of who owns what.
 func CanAccess(user transit.User, ownerID *string) bool {
 	if user.IsAdmin {
 		return true

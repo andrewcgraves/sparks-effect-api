@@ -65,8 +65,10 @@ func New(cfg config.Config, store *transit.Store, deps AuthDeps, chainer isochro
 //
 //   - public:        login only — the way in.
 //   - authenticated: identity and the caller's own scenarios/services.
-//   - admin:         account provisioning, and where SPA-75's route-write
-//     endpoints (POST/PUT/DELETE under /api/routes) register.
+//   - admin:         account provisioning. SPA-75's route-write endpoints
+//     register here too, by wrapping them in adminOnly — whatever path they
+//     take. Note the database-less 503 list below is matched by path, so a new
+//     path must be added there as well or it will 404 in that build.
 //
 // With no database configured there is nothing to authenticate against, so
 // every route answers 503 rather than 404 — a client can tell "not deployed

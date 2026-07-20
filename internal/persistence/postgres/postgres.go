@@ -10,7 +10,6 @@ import (
 	"embed"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -505,6 +504,11 @@ func (r *Repo) GetUserCredentialsByEmail(ctx context.Context, email string) (tra
 
 const userColumns = `id, email, name, is_admin, created_at, updated_at`
 
+// userColumnsU is the same list qualified for joins against sessions, where a
+// bare `id` would be ambiguous. Kept in step with userColumns by hand — both
+// feed the same scanUser, so a mismatch fails loudly at the first query.
+const userColumnsU = `u.id, u.email, u.name, u.is_admin, u.created_at, u.updated_at`
+
 func (r *Repo) GetUserByID(ctx context.Context, id string) (transit.User, bool, error) {
 	return scanUser(r.pool.QueryRow(ctx, `SELECT `+userColumns+` FROM users WHERE id = $1`, id))
 }
@@ -558,7 +562,7 @@ func (r *Repo) CreateSession(ctx context.Context, s transit.Session) error {
 // comparison.
 func (r *Repo) GetSessionUser(ctx context.Context, tokenHash string) (transit.User, bool, error) {
 	return scanUser(r.pool.QueryRow(ctx,
-		`SELECT `+prefixed(userColumns, "u")+`
+		`SELECT `+userColumnsU+`
 		 FROM sessions s JOIN users u ON u.id = s.user_id
 		 WHERE s.token_hash = $1 AND s.expires_at > now()`, tokenHash))
 }
@@ -574,16 +578,6 @@ func (r *Repo) DeleteExpiredSessions(ctx context.Context) (int64, error) {
 		return 0, wrap("DeleteExpiredSessions", err)
 	}
 	return tag.RowsAffected(), nil
-}
-
-// prefixed qualifies a comma-separated column list with a table alias, so the
-// shared column constants can be reused in joins without ambiguity.
-func prefixed(columns, alias string) string {
-	parts := strings.Split(columns, ", ")
-	for i, c := range parts {
-		parts[i] = alias + "." + c
-	}
-	return strings.Join(parts, ", ")
 }
 
 // --- Jobs ---

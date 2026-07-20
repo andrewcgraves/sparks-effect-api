@@ -53,6 +53,17 @@ func main() {
 		if err := bootstrapAdmin(ctx, cfg, repo, lg); err != nil {
 			log.Fatalf("failed to provision bootstrap admin: %v", err)
 		}
+		// Lapsed sessions can no longer authenticate (GetSessionUser filters on
+		// expiry), so this is housekeeping, not a security control — it just
+		// keeps the table from growing without bound. On boot is enough given
+		// the deploy cadence; a periodic reaper would be the next step if the
+		// process ever ran for months at a time.
+		if n, err := repo.DeleteExpiredSessions(ctx); err != nil {
+			// Not fatal: the API is perfectly usable with stale rows present.
+			log.Printf("could not prune expired sessions: %v", err)
+		} else if n > 0 {
+			lg.Printf("pruned %d expired session(s)", n)
+		}
 	}
 
 	stadiaClient := stadia.NewHTTPClient(cfg.StadiaAPIKey).WithLogger(lg)

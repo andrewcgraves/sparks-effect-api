@@ -41,7 +41,7 @@ func UserFrom(ctx context.Context) (transit.User, bool) {
 func RequireAuth(lookup SessionLookup) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			token, ok := bearerToken(r)
+			token, ok := BearerToken(r)
 			if !ok {
 				unauthorized(w)
 				return
@@ -85,9 +85,14 @@ func RequireAdmin(lookup SessionLookup) func(http.Handler) http.Handler {
 	}
 }
 
-// bearerToken extracts the token from an `Authorization: Bearer <token>`
+// BearerToken extracts the token from an `Authorization: Bearer <token>`
 // header. The scheme is matched case-insensitively per RFC 7235.
-func bearerToken(r *http.Request) (string, bool) {
+//
+// Exported because logout needs the raw token to derive the hash it must
+// revoke. Both it and the middleware must agree on exactly what counts as a
+// valid header — if they drifted, logout would revoke nothing and still
+// answer 204.
+func BearerToken(r *http.Request) (string, bool) {
 	const prefix = "bearer "
 	header := r.Header.Get("Authorization")
 	if len(header) < len(prefix) || !strings.EqualFold(header[:len(prefix)], prefix) {
