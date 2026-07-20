@@ -14,18 +14,19 @@ const earthRadiusM = 6371000.0
 // (longitude, then latitude) — the order used throughout this codebase (e.g.
 // transit.GeoLineString).
 type Point struct {
-	Lng float64
-	Lat float64
+	Lng float64 // degrees
+	Lat float64 // degrees
 }
 
 // Segment is the authored track physics for one span between two consecutive
 // line coordinates. Its fields mirror transit.RouteSegment; it is defined
 // locally so this package stays free of a dependency on internal/transit, the
 // same seam internal/route already keeps for its own mirrored Segment type.
+// The zero value describes tangent, level, uncanted track.
 type Segment struct {
-	CantMM       float64
-	CurveRadiusM float64
-	GradePct     float64
+	CantMM       float64 // applied superelevation, millimeters
+	CurveRadiusM float64 // curve radius, meters; 0 means tangent (straight) track
+	GradePct     float64 // grade as a percent; positive = ascending, negative = descending
 }
 
 // Stop is a position to project onto a route line, carrying an opaque
@@ -65,7 +66,13 @@ type InterStopSpan struct {
 // physicsSegs, when non-empty, must have exactly len(line)-1 entries — one per
 // span between consecutive line coordinates, the same convention
 // transit.Route uses. An empty physicsSegs means every span is tangent, level,
-// uncanted track (the zero Segment).
+// uncanted track (the zero Segment) — mirroring transit.Route.Segments, which
+// is itself optional for the same reason.
+//
+// Nearest-point snapping assumes line is a simple polyline: on a
+// self-intersecting or switchback route, a stop can snap to the geometrically
+// closer of two passes rather than the one intended by the service's stopping
+// pattern.
 //
 // ProjectStops returns an error if line has fewer than 2 points, physicsSegs
 // is non-empty with the wrong length, or fewer than 2 stops are given (there
@@ -82,13 +89,13 @@ func ProjectStops(line []Point, physicsSegs []Segment, stops []Stop) ([]InterSto
 		return nil, fmt.Errorf("need at least 2 stops to form an inter-stop span, got %d", len(stops))
 	}
 
-	segs := physicsSegs
-	if len(segs) == 0 {
-		segs = make([]Segment, len(line)-1)
+	physics := physicsSegs
+	if len(physics) == 0 {
+		physics = make([]Segment, len(line)-1)
 	}
 
-	planarLine, refLatRad := projectLinePlanar(line)
-	cum := cumulativeChainage(planarLine)
+	pl := projectLinePlanar(line)
+	lineSegs := buildLineSegments(pl, physics)
 
 	type projectedStop struct {
 		Stop
@@ -96,8 +103,8 @@ func ProjectStops(line []Point, physicsSegs []Segment, stops []Stop) ([]InterSto
 	}
 	projected := make([]projectedStop, len(stops))
 	for i, s := range stops {
-		x, y := projectPlanar(s.Location, refLatRad)
-		projected[i] = projectedStop{Stop: s, chainageM: snapToLine(planarLine, cum, x, y)}
+		p := projectPoint(s.Location, pl.refLatRad)
+		projected[i] = projectedStop{Stop: s, chainageM: snapToLine(pl, p)}
 	}
 
 	sort.SliceStable(projected, func(i, j int) bool {
@@ -111,113 +118,144 @@ func ProjectStops(line []Point, physicsSegs []Segment, stops []Stop) ([]InterSto
 			FromStopID: from.ID,
 			ToStopID:   to.ID,
 			DistanceM:  to.chainageM - from.chainageM,
-			Segments:   splitSpan(cum, segs, from.chainageM, to.chainageM),
+			Segments:   splitSpan(lineSegs, from.chainageM, to.chainageM),
 		})
 	}
 
 	return spans, nil
 }
 
+// planarPoint is a position in the local planar (x, y) meter frame produced by
+// the equirectangular projection below. It is a distinct type from Point so
+// geographic (degree) and projected (meter) coordinates can never be mixed up
+// at a call site.
+type planarPoint struct {
+	X, Y float64
+}
+
+// planarLine is a route line projected into local planar meters, alongside
+// the per-vertex chainage (distance along the line from its start) and the
+// reference latitude the projection used — callers need the latter to project
+// stops consistently with the line.
+type planarLine struct {
+	points    []planarPoint
+	chainageM []float64 // chainageM[i] is the distance along the line to points[i]
+	refLatRad float64
+}
+
+// degToRad converts degrees to radians.
+func degToRad(deg float64) float64 {
+	return deg * math.Pi / 180
+}
+
 // projectLinePlanar converts a WGS84 line to local planar meters using an
-// equirectangular approximation around the line's mean latitude, and returns
-// the projected points alongside the reference latitude used (so stops can be
-// projected consistently with it).
+// equirectangular approximation around the line's mean latitude, and computes
+// each vertex's chainage.
 //
 // This trades literal geodesic accuracy for a locally-consistent, self-similar
 // distance metric — which is what nearest-point projection and chainage need:
 // the same answer whether you sum the pieces or measure the whole, not the
 // true great-circle length. It is accurate to a small fraction of a percent at
 // the route scales this compiler targets (regional rail lines).
-func projectLinePlanar(line []Point) (planar []Point, refLatRad float64) {
+func projectLinePlanar(line []Point) planarLine {
 	var latSum float64
 	for _, p := range line {
 		latSum += p.Lat
 	}
-	refLatRad = (latSum / float64(len(line))) * math.Pi / 180
+	refLatRad := degToRad(latSum / float64(len(line)))
 
-	planar = make([]Point, len(line))
+	points := make([]planarPoint, len(line))
 	for i, p := range line {
-		x, y := projectPlanar(p, refLatRad)
-		planar[i] = Point{Lng: x, Lat: y} // reused as a plain (x, y) pair in meters
+		points[i] = projectPoint(p, refLatRad)
 	}
-	return planar, refLatRad
+
+	chainageM := make([]float64, len(points))
+	for i := 1; i < len(points); i++ {
+		chainageM[i] = chainageM[i-1] + planarDist(points[i-1], points[i])
+	}
+
+	return planarLine{points: points, chainageM: chainageM, refLatRad: refLatRad}
 }
 
-// projectPlanar converts a single WGS84 point to local planar meters (x, y)
-// around refLatRad, using the same equirectangular approximation as
+// projectPoint converts a single WGS84 point to local planar meters around
+// refLatRad, using the same equirectangular approximation as
 // projectLinePlanar.
-func projectPlanar(p Point, refLatRad float64) (x, y float64) {
-	latRad := p.Lat * math.Pi / 180
-	lngRad := p.Lng * math.Pi / 180
-	x = earthRadiusM * lngRad * math.Cos(refLatRad)
-	y = earthRadiusM * latRad
-	return x, y
-}
-
-// cumulativeChainage returns, for each vertex of a planar line, the distance
-// along the line from its first point. cum[0] is always 0 and
-// len(cum) == len(planarLine).
-func cumulativeChainage(planarLine []Point) []float64 {
-	cum := make([]float64, len(planarLine))
-	for i := 1; i < len(planarLine); i++ {
-		cum[i] = cum[i-1] + planarDist(planarLine[i-1], planarLine[i])
+func projectPoint(p Point, refLatRad float64) planarPoint {
+	return planarPoint{
+		X: earthRadiusM * degToRad(p.Lng) * math.Cos(refLatRad),
+		Y: earthRadiusM * degToRad(p.Lat),
 	}
-	return cum
 }
 
-func planarDist(a, b Point) float64 {
-	dx := b.Lng - a.Lng
-	dy := b.Lat - a.Lat
-	return math.Hypot(dx, dy)
+func planarDist(a, b planarPoint) float64 {
+	return math.Hypot(b.X-a.X, b.Y-a.Y)
 }
 
-// snapToLine finds the point on the polyline nearest to (x, y) and returns its
+// snapToLine finds the point on the polyline nearest to p and returns its
 // chainage — the distance along the line from the start to the snapped point.
-func snapToLine(planarLine []Point, cum []float64, x, y float64) (chainageM float64) {
+func snapToLine(pl planarLine, p planarPoint) (chainageM float64) {
 	best := math.Inf(1)
-	for i := 0; i < len(planarLine)-1; i++ {
-		a, b := planarLine[i], planarLine[i+1]
-		t, cx, cy := closestPointOnSegment(a, b, x, y)
-		d := math.Hypot(x-cx, y-cy)
+	for i := 0; i < len(pl.points)-1; i++ {
+		a, b := pl.points[i], pl.points[i+1]
+		t, closest := closestPointOnSegment(a, b, p)
+		d := planarDist(p, closest)
 		if d < best {
 			best = d
-			chainageM = cum[i] + t*planarDist(a, b)
+			chainageM = pl.chainageM[i] + t*planarDist(a, b)
 		}
 	}
 	return chainageM
 }
 
-// closestPointOnSegment projects (x, y) onto the segment a→b, clamped to the
+// closestPointOnSegment projects p onto the segment a→b, clamped to the
 // segment, and returns the clamp parameter t in [0, 1] and the resulting point.
-func closestPointOnSegment(a, b Point, x, y float64) (t, cx, cy float64) {
-	dx := b.Lng - a.Lng
-	dy := b.Lat - a.Lat
+func closestPointOnSegment(a, b, p planarPoint) (t float64, closest planarPoint) {
+	dx := b.X - a.X
+	dy := b.Y - a.Y
 	lenSq := dx*dx + dy*dy
 	if lenSq == 0 { // degenerate (duplicate) vertex: the segment is a point
-		return 0, a.Lng, a.Lat
+		return 0, a
 	}
-	t = ((x-a.Lng)*dx + (y-a.Lat)*dy) / lenSq
+	t = ((p.X-a.X)*dx + (p.Y-a.Y)*dy) / lenSq
 	if t < 0 {
 		t = 0
 	} else if t > 1 {
 		t = 1
 	}
-	return t, a.Lng + t*dx, a.Lat + t*dy
+	return t, planarPoint{X: a.X + t*dx, Y: a.Y + t*dy}
 }
 
-// splitSpan slices the underlying per-vertex-segment physics into the
-// sub-segments falling within [fromChainageM, toChainageM), producing one
-// SpanSegment per underlying route segment the span fully or partly covers.
-func splitSpan(cum []float64, segs []Segment, fromChainageM, toChainageM float64) []SpanSegment {
+// lineSegment is one physics-uniform stretch of route line, expressed in
+// chainage terms: it runs from StartM to EndM, with Physics applying across
+// it. Bundling the two keeps them from drifting out of sync the way parallel
+// chainage/physics slices indexed by a shared i would.
+type lineSegment struct {
+	StartM, EndM float64
+	Physics      Segment
+}
+
+// buildLineSegments pairs each underlying route segment's physics with the
+// chainage span (from planarLn's per-vertex chainage) it covers.
+func buildLineSegments(planarLn planarLine, physics []Segment) []lineSegment {
+	out := make([]lineSegment, len(physics))
+	for i, seg := range physics {
+		out[i] = lineSegment{StartM: planarLn.chainageM[i], EndM: planarLn.chainageM[i+1], Physics: seg}
+	}
+	return out
+}
+
+// splitSpan slices lineSegs into the sub-segments falling within
+// [fromChainageM, toChainageM), producing one SpanSegment per underlying route
+// segment the span fully or partly covers.
+func splitSpan(lineSegs []lineSegment, fromChainageM, toChainageM float64) []SpanSegment {
 	var out []SpanSegment
-	for i, seg := range segs {
-		segStart, segEnd := cum[i], cum[i+1]
-		lo := math.Max(segStart, fromChainageM)
-		hi := math.Min(segEnd, toChainageM)
+	for _, seg := range lineSegs {
+		lo := math.Max(seg.StartM, fromChainageM)
+		hi := math.Min(seg.EndM, toChainageM)
 		if hi-lo <= 0 {
 			continue
 		}
-		out = append(out, SpanSegment{DistanceM: hi - lo, Physics: seg})
+		out = append(out, SpanSegment{DistanceM: hi - lo, Physics: seg.Physics})
 	}
 	return out
 }

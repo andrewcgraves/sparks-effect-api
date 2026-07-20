@@ -144,16 +144,27 @@ func TestProjectStops_reordersStopsByChainageAndSplitsAcrossVertex(t *testing.T)
 // must produce exactly two spans, in chainage order, each summing to the
 // correct leg distance.
 func TestProjectStops_threeStopsProduceTwoOrderedSpans(t *testing.T) {
-	// An L-shaped line: north from (0,0) to (0,1), then east to (1,1).
+	// An L-shaped line near Fresno, CA (representative of the CA-HSR corridor
+	// this compiler targets): north for one leg, then east for the other. Legs
+	// are ~1.1 km, small enough that the implementation's equirectangular
+	// approximation and true great-circle (haversine) distance agree to well
+	// under a meter, so haversineM below — a fresh, independent implementation
+	// of the standard formula — is a real ground truth, not a restatement of
+	// the code under test.
+	const (
+		baseLng  = -119.78
+		baseLat  = 36.75
+		deltaDeg = 0.01
+	)
 	line := []Point{
-		{Lng: 0.0, Lat: 0.0},
-		{Lng: 0.0, Lat: 1.0},
-		{Lng: 1.0, Lat: 1.0},
+		{Lng: baseLng, Lat: baseLat},
+		{Lng: baseLng, Lat: baseLat + deltaDeg},
+		{Lng: baseLng + deltaDeg, Lat: baseLat + deltaDeg},
 	}
 	stops := []Stop{
-		{ID: "start", Location: Point{Lng: 0.0, Lat: 0.0}},
-		{ID: "corner", Location: Point{Lng: 0.0, Lat: 1.0}},
-		{ID: "end", Location: Point{Lng: 1.0, Lat: 1.0}},
+		{ID: "start", Location: line[0]},
+		{ID: "corner", Location: line[1]},
+		{ID: "end", Location: line[2]},
 	}
 
 	got, err := ProjectStops(line, nil, stops)
@@ -171,22 +182,112 @@ func TestProjectStops_threeStopsProduceTwoOrderedSpans(t *testing.T) {
 		t.Errorf("got[1] endpoints = (%s, %s), want (corner, end)", got[1].FromStopID, got[1].ToStopID)
 	}
 
-	// The projection uses a single equirectangular reference latitude for the
-	// whole line (its mean latitude, documented on projectLinePlanar) rather
-	// than a per-segment one, so the east-west leg at lat=1 is foreshortened by
-	// cos(meanLat) relative to the north-south leg. Both legs below are
-	// computed independently from that documented formula, not copied from the
-	// implementation's control flow.
-	const earthR = 6371000.0
-	meanLatRad := (0.0 + 1.0 + 1.0) / 3.0 * math.Pi / 180.0
-	nsLegM := earthR * (1.0 * math.Pi / 180.0)
-	ewLegM := earthR * (1.0 * math.Pi / 180.0) * math.Cos(meanLatRad)
+	nsLegM := haversineM(line[0], line[1])
+	ewLegM := haversineM(line[1], line[2])
 
 	if math.Abs(got[0].DistanceM-nsLegM) > distTol {
-		t.Errorf("got[0].DistanceM = %v, want ~%v", got[0].DistanceM, nsLegM)
+		t.Errorf("got[0].DistanceM = %v, want ~%v (haversine ground truth)", got[0].DistanceM, nsLegM)
 	}
 	if math.Abs(got[1].DistanceM-ewLegM) > distTol {
-		t.Errorf("got[1].DistanceM = %v, want ~%v", got[1].DistanceM, ewLegM)
+		t.Errorf("got[1].DistanceM = %v, want ~%v (haversine ground truth)", got[1].DistanceM, ewLegM)
+	}
+}
+
+// haversineM is an independent great-circle distance implementation (the
+// standard haversine formula, mean Earth radius 6371 km) used purely as test
+// ground truth. It is not shared with — and must not be kept in sync with —
+// the equirectangular approximation project.go uses internally.
+func haversineM(a, b Point) float64 {
+	const r = 6371000.0
+	lat1, lat2 := a.Lat*math.Pi/180, b.Lat*math.Pi/180
+	dLat := (b.Lat - a.Lat) * math.Pi / 180
+	dLng := (b.Lng - a.Lng) * math.Pi / 180
+	h := math.Sin(dLat/2)*math.Sin(dLat/2) +
+		math.Cos(lat1)*math.Cos(lat2)*math.Sin(dLng/2)*math.Sin(dLng/2)
+	return r * 2 * math.Atan2(math.Sqrt(h), math.Sqrt(1-h))
+}
+
+// TestProjectStops_stopsBeyondLineEndsClampToEndpoints covers the clamped
+// nearest-point behavior for a stop that falls before the line's start or
+// after its end (e.g. a station sited slightly past the mapped end of a
+// route): it must snap to that endpoint rather than extrapolating off the
+// line, so both stops land at the line's own endpoint chainages.
+func TestProjectStops_stopsBeyondLineEndsClampToEndpoints(t *testing.T) {
+	line := []Point{
+		{Lng: 0.0, Lat: 0.0},
+		{Lng: 0.0, Lat: 1.0},
+	}
+	stops := []Stop{
+		{ID: "before-start", Location: Point{Lng: 0.0, Lat: -0.5}}, // past the start
+		{ID: "after-end", Location: Point{Lng: 0.0, Lat: 1.5}},     // past the end
+	}
+
+	got, err := ProjectStops(line, nil, stops)
+	if err != nil {
+		t.Fatalf("ProjectStops() error = %v, want nil", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(got) = %d, want 1", len(got))
+	}
+
+	span := got[0]
+	if span.FromStopID != "before-start" || span.ToStopID != "after-end" {
+		t.Fatalf("span endpoints = (%s, %s), want (before-start, after-end)", span.FromStopID, span.ToStopID)
+	}
+
+	wantDistM := haversineM(line[0], line[1])
+	if math.Abs(span.DistanceM-wantDistM) > distTol {
+		t.Errorf("span.DistanceM = %v, want ~%v (both stops clamped to the line's own endpoints)",
+			span.DistanceM, wantDistM)
+	}
+}
+
+// TestProjectStops_spanCrossingTwoInteriorVerticesSplitsIntoThreeSegments
+// covers a span that is not adjacent to a single route vertex pair: it
+// crosses two interior vertices, so it must be split into one SpanSegment per
+// underlying route segment (three), each carrying that segment's own physics
+// and summing back to the span's total distance.
+func TestProjectStops_spanCrossingTwoInteriorVerticesSplitsIntoThreeSegments(t *testing.T) {
+	line := []Point{
+		{Lng: 0.0, Lat: 0.0},
+		{Lng: 0.0, Lat: 1.0},
+		{Lng: 0.0, Lat: 2.0},
+		{Lng: 0.0, Lat: 3.0},
+	}
+	segs := []Segment{
+		{CantMM: 50, CurveRadiusM: 500, GradePct: 0.5},
+		{CantMM: 100, CurveRadiusM: 1000, GradePct: 1.0},
+		{CantMM: 150, CurveRadiusM: 1500, GradePct: 1.5},
+	}
+	stops := []Stop{
+		{ID: "a", Location: line[0]},
+		{ID: "b", Location: line[3]},
+	}
+
+	got, err := ProjectStops(line, segs, stops)
+	if err != nil {
+		t.Fatalf("ProjectStops() error = %v, want nil", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(got) = %d, want 1", len(got))
+	}
+
+	span := got[0]
+	if len(span.Segments) != 3 {
+		t.Fatalf("len(span.Segments) = %d, want 3 (one per underlying route segment crossed)", len(span.Segments))
+	}
+	for i, seg := range segs {
+		if span.Segments[i].Physics != seg {
+			t.Errorf("span.Segments[%d].Physics = %+v, want %+v", i, span.Segments[i].Physics, seg)
+		}
+	}
+
+	var summed float64
+	for _, ss := range span.Segments {
+		summed += ss.DistanceM
+	}
+	if math.Abs(summed-span.DistanceM) > distTol {
+		t.Errorf("sum of SpanSegment distances = %v, want equal to span.DistanceM = %v", summed, span.DistanceM)
 	}
 }
 
