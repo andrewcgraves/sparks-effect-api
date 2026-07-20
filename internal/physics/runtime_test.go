@@ -140,6 +140,58 @@ func TestSpanRunSeconds_midSpanCurveSlowsAndRecovers(t *testing.T) {
 	}
 }
 
+// TestSpanRunSeconds_descendingGradeIncreasesTime exercises the
+// GradePct -> ratio conversion SpanRunSeconds does before calling SpeedLimit
+// (Segment.GradePct is a percent; SpeedLimitInputs.Grade is a ratio) — a
+// spot with no other coverage, since every other SpanRunSeconds test uses
+// level track. A wrong or missing /100 would silently change the derate
+// factor below and this golden value would no longer match.
+//
+// Worked example: vmax = 10 m/s, accel = decel = 1 m/s^2, a single 200 m
+// segment with GradePct = -10 (a 10% descent, ratio 0.10).
+//
+//	speedlimit.go's descending-grade derate: d = 0.10, threshold = 0.02,
+//	coeff = 5.0, so factor = 1 - 5*(0.10-0.02) = 1 - 0.4 = 0.6
+//	cap = 10 * 0.6 = 6 m/s
+//	accel/decel distance to cap: 6^2/2 = 18 m each (36 m total)
+//	cruise: 200 - 36 = 164 m at 6 m/s = 27.333... s
+//	total: 6 + 6 + 27.333... = 39.333... s
+//
+// A level (grade 0) span of the same 200 m instead cruises at the full
+// 10 m/s cap (50+50 m accel/decel, 100 m cruise at 10 m/s = 10 s): 10+10+10 =
+// 30 s — strictly less, since the descent must derate the cap.
+func TestSpanRunSeconds_descendingGradeIncreasesTime(t *testing.T) {
+	vehicle := testVehicle()
+	graded := InterStopSpan{
+		DistanceM: 200,
+		Segments:  []SpanSegment{{DistanceM: 200, Physics: Segment{GradePct: -10}}},
+	}
+	level := InterStopSpan{
+		DistanceM: 200,
+		Segments:  []SpanSegment{{DistanceM: 200, Physics: Segment{}}},
+	}
+
+	got, err := SpanRunSeconds(graded, vehicle)
+	if err != nil {
+		t.Fatalf("SpanRunSeconds(graded) error = %v, want nil", err)
+	}
+	const want = 39.33333333333333 // 6 + 6 + 164.0/6.0
+	if !almostEqualTol(got, want, timeTol) {
+		t.Errorf("SpanRunSeconds(graded) = %v, want %v (±%v)", got, want, timeTol)
+	}
+
+	levelSecs, err := SpanRunSeconds(level, vehicle)
+	if err != nil {
+		t.Fatalf("SpanRunSeconds(level) error = %v, want nil", err)
+	}
+	if !almostEqualTol(levelSecs, 30.0, timeTol) {
+		t.Errorf("SpanRunSeconds(level) = %v, want 30.0 (±%v)", levelSecs, timeTol)
+	}
+	if got <= levelSecs {
+		t.Errorf("descending-grade time %v should exceed level time %v", got, levelSecs)
+	}
+}
+
 func TestSpanRunSeconds_rejectsNonPositiveVehicleParams(t *testing.T) {
 	validSpan := InterStopSpan{
 		DistanceM: 100,

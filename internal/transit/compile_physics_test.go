@@ -172,13 +172,63 @@ func TestCompileServicePhysics_threeStopsProduceTwoSpans(t *testing.T) {
 	}
 }
 
+// TestCompileServicePhysics_gradeThreadsThroughToRunTime confirms a route's
+// per-segment GradePct actually reaches SpanRunSeconds through
+// toPhysicsSegments and affects the compiled edge — the physics package's
+// own TestSpanRunSeconds_descendingGradeIncreasesTime pins the GradePct/100
+// conversion in isolation; this closes the same gap for the wiring between
+// RouteSegment and physics.Segment.
+func TestCompileServicePhysics_gradeThreadsThroughToRunTime(t *testing.T) {
+	stations := []Station{
+		{ID: "st-a", Slug: "a", Location: GeoPoint{Coordinates: []float64{0, 0}}, PlatformHeight: "high"},
+		{ID: "st-b", Slug: "b", Location: GeoPoint{Coordinates: []float64{1, 0}}, PlatformHeight: "high"},
+	}
+	svc := Service{
+		ID:     "svc-1",
+		Active: true,
+		Stops: []ServiceStop{
+			{StationID: "st-a", Sequence: 1},
+			{StationID: "st-b", Sequence: 2},
+		},
+	}
+	vt := physicsTestVehicle()
+
+	levelRoute := Route{Geometry: GeoLineString{Coordinates: [][]float64{{0, 0}, {1, 0}}}}
+	gradedRoute := Route{
+		Geometry: GeoLineString{Coordinates: [][]float64{{0, 0}, {1, 0}}},
+		Segments: []RouteSegment{{GradePct: -10}},
+	}
+
+	level, err := CompileServicePhysics(levelRoute, stations, svc, vt)
+	if err != nil {
+		t.Fatalf("CompileServicePhysics(level) error = %v, want nil", err)
+	}
+	graded, err := CompileServicePhysics(gradedRoute, stations, svc, vt)
+	if err != nil {
+		t.Fatalf("CompileServicePhysics(graded) error = %v, want nil", err)
+	}
+
+	levelSecs, ok := servicePathSecs(level, "a", "b")
+	if !ok {
+		t.Fatal("no path a -> b over level edges")
+	}
+	gradedSecs, ok := servicePathSecs(graded, "a", "b")
+	if !ok {
+		t.Fatal("no path a -> b over graded edges")
+	}
+	if gradedSecs <= levelSecs {
+		t.Errorf("descending-grade edge time %d should exceed level edge time %d", gradedSecs, levelSecs)
+	}
+}
+
 func TestCompileServicePhysics_errorsOnUnknownStation(t *testing.T) {
 	route := Route{Geometry: GeoLineString{Coordinates: [][]float64{{0, 0}, {1, 0}}}}
 	stations := []Station{
 		{ID: "st-a", Slug: "a", Location: GeoPoint{Coordinates: []float64{0, 0}}},
 	}
 	svc := Service{
-		ID: "svc-1",
+		ID:     "svc-1",
+		Active: true,
 		Stops: []ServiceStop{
 			{StationID: "st-a", Sequence: 1},
 			{StationID: "st-missing", Sequence: 2},
@@ -197,7 +247,8 @@ func TestCompileServicePhysics_errorsOnRouteWithFewerThanTwoPoints(t *testing.T)
 		{ID: "st-b", Slug: "b", Location: GeoPoint{Coordinates: []float64{1, 0}}},
 	}
 	svc := Service{
-		ID: "svc-1",
+		ID:     "svc-1",
+		Active: true,
 		Stops: []ServiceStop{
 			{StationID: "st-a", Sequence: 1},
 			{StationID: "st-b", Sequence: 2},
@@ -206,6 +257,33 @@ func TestCompileServicePhysics_errorsOnRouteWithFewerThanTwoPoints(t *testing.T)
 
 	if _, err := CompileServicePhysics(route, stations, svc, physicsTestVehicle()); err == nil {
 		t.Error("CompileServicePhysics() error = nil, want an error for a route with < 2 geometry points")
+	}
+}
+
+// TestCompileServicePhysics_inactiveServiceReturnsEmptyGraph matches
+// Compile's convention (compile.go: `if !svc.Active { continue }`) of
+// contributing nothing to the TransitGraph for an inactive service.
+func TestCompileServicePhysics_inactiveServiceReturnsEmptyGraph(t *testing.T) {
+	route := Route{Geometry: GeoLineString{Coordinates: [][]float64{{0, 0}, {1, 0}}}}
+	stations := []Station{
+		{ID: "st-a", Slug: "a", Location: GeoPoint{Coordinates: []float64{0, 0}}},
+		{ID: "st-b", Slug: "b", Location: GeoPoint{Coordinates: []float64{1, 0}}},
+	}
+	svc := Service{
+		ID:     "svc-1",
+		Active: false,
+		Stops: []ServiceStop{
+			{StationID: "st-a", Sequence: 1},
+			{StationID: "st-b", Sequence: 2},
+		},
+	}
+
+	got, err := CompileServicePhysics(route, stations, svc, physicsTestVehicle())
+	if err != nil {
+		t.Fatalf("CompileServicePhysics() error = %v, want nil", err)
+	}
+	if len(got.Edges) != 0 {
+		t.Errorf("len(Edges) = %d, want 0 for an inactive service", len(got.Edges))
 	}
 }
 
@@ -219,7 +297,8 @@ func TestCompileServicePhysics_errorsOnSegmentCountMismatch(t *testing.T) {
 		{ID: "st-b", Slug: "b", Location: GeoPoint{Coordinates: []float64{2, 0}}},
 	}
 	svc := Service{
-		ID: "svc-1",
+		ID:     "svc-1",
+		Active: true,
 		Stops: []ServiceStop{
 			{StationID: "st-a", Sequence: 1},
 			{StationID: "st-b", Sequence: 2},

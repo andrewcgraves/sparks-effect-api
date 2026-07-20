@@ -22,7 +22,15 @@ import (
 // existing hand-authored-table compiler's convention — see TravelTimes),
 // varying only by which end's dwell they carry, matching pathDwellSecs in
 // compile.go.
+//
+// An inactive svc compiles to an empty ServiceGraph (no edges), the same
+// as Compile's `if !svc.Active { continue }` — contributing nothing to a
+// TransitGraph a caller assembles from the result.
 func CompileServicePhysics(route Route, stations []Station, svc Service, vt VehicleType) (ServiceGraph, error) {
+	if !svc.Active {
+		return ServiceGraph{}, nil
+	}
+
 	line, err := toPhysicsLine(route.Geometry)
 	if err != nil {
 		return ServiceGraph{}, fmt.Errorf("compile: service %q: %w", svc.ID, err)
