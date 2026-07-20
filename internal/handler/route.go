@@ -12,7 +12,7 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// RouteStore is the slice of the repository route ingestion needs.
+// RouteStore is the slice of the repository route ingestion and reads need.
 type RouteStore interface {
 	CreateRoute(ctx context.Context, r transit.Route) error
 	GetRouteBySlug(ctx context.Context, slug string) (transit.Route, bool, error)
