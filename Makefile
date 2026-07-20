@@ -45,8 +45,13 @@ test: deps
 # test-integration runs the full suite with a Postgres URL exported, so the
 # integration tests actually execute. Point it at any Postgres via TEST_DATABASE_URL;
 # defaults to the `make db-up` container. Used by both `make itest` and CI.
+#
+# -p 1 runs one package at a time. More than one package's integration tests
+# reset the shared throwaway database to a known-empty state, and Go otherwise
+# runs packages in parallel — so without this they wipe each other's schema
+# mid-test and fail spuriously.
 test-integration: deps
-	TEST_DATABASE_URL="$(TEST_DATABASE_URL)" go test ./... -race -cover
+	TEST_DATABASE_URL="$(TEST_DATABASE_URL)" go test ./... -race -cover -p 1
 
 # itest brings up a throwaway Postgres, runs the integration suite, and tears it
 # down again — the one-command local equivalent of the CI job.

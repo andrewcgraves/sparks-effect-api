@@ -150,7 +150,7 @@ func TestUsersRoundTrip(t *testing.T) {
 		Name:    "Andrew",
 		IsAdmin: true,
 	}
-	if err := repo.CreateUser(ctx, u); err != nil {
+	if err := repo.CreateUser(ctx, u, "hash-placeholder"); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
 
