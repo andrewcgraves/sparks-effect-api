@@ -225,6 +225,78 @@ func TestJobsRoundTrip(t *testing.T) {
 	if len(jobs) != 1 {
 		t.Errorf("ListJobs: want 1, got %d", len(jobs))
 	}
+	if jobs[0].Result != nil {
+		t.Errorf("ListJobs: a failed job must not carry a result, got %+v", jobs[0].Result)
+	}
+}
+
+// TestJobCompletionStoresResultRetrievableBySlug pins the async job model's
+// headline behaviour (SPA-82): a compile job's result survives as jsonb and
+// can be found by the scenario's slug alone, with no job id in hand.
+func TestJobCompletionStoresResultRetrievableBySlug(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := freshRepo(t)
+
+	sc := transit.Scenario{ID: "00000000-0000-4001-8001-000000000009", Slug: "graph-scenario", Name: "Graph Scenario"}
+	if err := repo.CreateScenario(ctx, sc); err != nil {
+		t.Fatalf("CreateScenario: %v", err)
+	}
+
+	j := transit.Job{
+		ID:         "00000000-0000-400a-8001-000000000002",
+		Kind:       "compile",
+		Status:     transit.JobStatusQueued,
+		ScenarioID: &sc.ID,
+	}
+	if err := repo.CreateJob(ctx, j); err != nil {
+		t.Fatalf("CreateJob: %v", err)
+	}
+	if err := repo.UpdateJobStatus(ctx, j.ID, transit.JobStatusRunning, ""); err != nil {
+		t.Fatalf("UpdateJobStatus running: %v", err)
+	}
+
+	// Nothing has succeeded yet.
+	if _, ok, err := repo.GetLatestSucceededJob(ctx, sc.Slug, "compile"); err != nil || ok {
+		t.Fatalf("GetLatestSucceededJob before completion: ok=%v err=%v, want ok=false", ok, err)
+	}
+
+	graph := transit.TransitGraph{Services: []transit.ServiceGraph{
+		{ServiceID: "svc-1", WaitSecs: 90, Edges: []transit.Edge{
+			{FromSlug: "a", ToSlug: "b", Seconds: 120},
+			{FromSlug: "b", ToSlug: "a", Seconds: 130},
+		}},
+	}}
+	if err := repo.CompleteJob(ctx, j.ID, graph); err != nil {
+		t.Fatalf("CompleteJob: %v", err)
+	}
+
+	byID, ok, err := repo.GetJobByID(ctx, j.ID)
+	if err != nil || !ok {
+		t.Fatalf("GetJobByID: ok=%v err=%v", ok, err)
+	}
+	if byID.Status != transit.JobStatusSucceeded {
+		t.Errorf("GetJobByID: status = %q, want succeeded", byID.Status)
+	}
+	if byID.Result == nil || len(byID.Result.Services) != 1 || byID.Result.Services[0].ServiceID != "svc-1" {
+		t.Fatalf("GetJobByID: result = %+v, want the compiled graph", byID.Result)
+	}
+
+	bySlug, ok, err := repo.GetLatestSucceededJob(ctx, sc.Slug, "compile")
+	if err != nil || !ok {
+		t.Fatalf("GetLatestSucceededJob: ok=%v err=%v", ok, err)
+	}
+	if bySlug.ID != j.ID || bySlug.Result == nil || len(bySlug.Result.Services[0].Edges) != 2 {
+		t.Errorf("GetLatestSucceededJob = %+v, want job %s with its graph", bySlug, j.ID)
+	}
+
+	// A different kind for the same scenario must not match.
+	if _, ok, err := repo.GetLatestSucceededJob(ctx, sc.Slug, "compute"); err != nil || ok {
+		t.Fatalf("GetLatestSucceededJob wrong kind: ok=%v err=%v, want ok=false", ok, err)
+	}
+	// An unknown scenario slug must not match.
+	if _, ok, err := repo.GetLatestSucceededJob(ctx, "no-such-scenario", "compile"); err != nil || ok {
+		t.Fatalf("GetLatestSucceededJob unknown scenario: ok=%v err=%v, want ok=false", ok, err)
+	}
 }
 
 // TestWritableDomainRoundTrip proves arbitrary domain rows (not just the seed)

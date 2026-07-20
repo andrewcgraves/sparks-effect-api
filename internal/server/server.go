@@ -28,6 +28,9 @@ type AuthDeps interface {
 	handler.OwnerStore
 	// RouteStore backs admin route ingestion and the public route-read endpoint.
 	handler.RouteStore
+	// CompileStore backs the async compile job surface: triggering a scenario
+	// compile, polling its job, and reading the compiled graph back by slug.
+	handler.CompileStore
 	// GetSessionUser backs the middleware's auth.SessionLookup.
 	GetSessionUser(ctx context.Context, tokenHash string) (transit.User, bool, error)
 }
@@ -50,6 +53,7 @@ func New(cfg config.Config, store *transit.Store, deps AuthDeps, chainer isochro
 	mux.HandleFunc("POST /api/isochrone", handler.Isochrone(chainer, lg))
 
 	registerRouteReadRoutes(mux, deps)
+	registerCompileRoutes(mux, deps)
 	registerAuthRoutes(mux, cfg, deps)
 
 	h := cors(mux, cfg.AllowLocalhostCORS)
@@ -70,6 +74,19 @@ func registerRouteReadRoutes(mux *http.ServeMux, deps AuthDeps) {
 		return
 	}
 	mux.HandleFunc("GET /api/routes/{slug}", handler.RouteBySlug(deps))
+}
+
+// registerCompileRoutes wires the public read half of the async compile job
+// model: the compiled graph, fetched by scenario slug. Triggering a compile
+// and polling the resulting job both require authentication and are
+// registered in registerAuthRoutes instead, alongside the other identity-gated
+// routes.
+func registerCompileRoutes(mux *http.ServeMux, deps AuthDeps) {
+	if deps == nil {
+		mux.HandleFunc("GET /api/scenarios/{slug}/graph", serviceUnavailable("compiled graph storage is unavailable"))
+		return
+	}
+	mux.HandleFunc("GET /api/scenarios/{slug}/graph", handler.ScenarioGraph(deps))
 }
 
 // registerAuthRoutes wires the invite-only auth surface.
@@ -93,6 +110,7 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps) {
 		for _, pattern := range []string{
 			"/api/auth/login", "/api/auth/logout", "/api/auth/me",
 			"/api/me/scenarios", "/api/me/services", "/api/admin/",
+			"/api/scenarios/{slug}/compile", "/api/jobs/{id}",
 		} {
 			mux.HandleFunc(pattern, serviceUnavailable("authentication is unavailable"))
 		}
@@ -111,6 +129,11 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps) {
 	mux.Handle("GET /api/auth/me", authenticated(handler.Me()))
 	mux.Handle("GET /api/me/scenarios", authenticated(handler.MyScenarios(deps)))
 	mux.Handle("GET /api/me/services", authenticated(handler.MyServices(deps)))
+	// Async compile jobs: any authenticated caller may trigger a compile or
+	// poll a job. JobStatus enforces ownership itself (see its doc comment),
+	// since "not found" there means something different from "not admin".
+	mux.Handle("POST /api/scenarios/{slug}/compile", authenticated(handler.CompileScenario(deps)))
+	mux.Handle("GET /api/jobs/{id}", authenticated(handler.JobStatus(deps)))
 
 	// Admin-only.
 	mux.Handle("POST /api/admin/users", adminOnly(handler.CreateUser(deps)))

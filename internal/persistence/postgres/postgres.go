@@ -622,19 +622,10 @@ func (r *Repo) CreateJob(ctx context.Context, j transit.Job) error {
 	return wrap("CreateJob", err)
 }
 
+const jobColumns = `id, kind, status, scenario_id, owner_id, error, result, created_at, updated_at`
+
 func (r *Repo) GetJobByID(ctx context.Context, id string) (transit.Job, bool, error) {
-	var j transit.Job
-	err := r.pool.QueryRow(ctx,
-		`SELECT id, kind, status, scenario_id, owner_id, error, created_at, updated_at
-		 FROM jobs WHERE id = $1`, id).
-		Scan(&j.ID, &j.Kind, &j.Status, &j.ScenarioID, &j.OwnerID, &j.Error, &j.CreatedAt, &j.UpdatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return transit.Job{}, false, nil
-	}
-	if err != nil {
-		return transit.Job{}, false, wrap("GetJobByID", err)
-	}
-	return j, true, nil
+	return scanJob(r.pool.QueryRow(ctx, `SELECT `+jobColumns+` FROM jobs WHERE id = $1`, id))
 }
 
 func (r *Repo) UpdateJobStatus(ctx context.Context, id, status, errMsg string) error {
@@ -650,10 +641,23 @@ func (r *Repo) UpdateJobStatus(ctx context.Context, id, status, errMsg string) e
 	return nil
 }
 
+// CompleteJob marks a job succeeded and stores its compiled result in one
+// write, so a poller never observes "succeeded" with no result yet to read.
+func (r *Repo) CompleteJob(ctx context.Context, id string, result transit.TransitGraph) error {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE jobs SET status = $2, error = '', result = $3, updated_at = now() WHERE id = $1`,
+		id, transit.JobStatusSucceeded, result)
+	if err != nil {
+		return wrap("CompleteJob", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("postgres: CompleteJob: job %q not found", id)
+	}
+	return nil
+}
+
 func (r *Repo) ListJobs(ctx context.Context) ([]transit.Job, error) {
-	rows, err := r.pool.Query(ctx,
-		`SELECT id, kind, status, scenario_id, owner_id, error, created_at, updated_at
-		 FROM jobs ORDER BY created_at DESC`)
+	rows, err := r.pool.Query(ctx, `SELECT `+jobColumns+` FROM jobs ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, wrap("ListJobs", err)
 	}
@@ -661,14 +665,48 @@ func (r *Repo) ListJobs(ctx context.Context) ([]transit.Job, error) {
 
 	var out []transit.Job
 	for rows.Next() {
-		var j transit.Job
-		if err := rows.Scan(&j.ID, &j.Kind, &j.Status, &j.ScenarioID, &j.OwnerID,
-			&j.Error, &j.CreatedAt, &j.UpdatedAt); err != nil {
+		j, err := scanJobRow(rows)
+		if err != nil {
 			return nil, wrap("ListJobs scan", err)
 		}
 		out = append(out, j)
 	}
 	return out, wrap("ListJobs rows", rows.Err())
+}
+
+// GetLatestSucceededJob is the "result, retrievable by slug" read: it joins
+// through to scenarios by slug rather than requiring the caller to know a
+// scenario id, matching GetTravelTimes's slug-addressed convention.
+func (r *Repo) GetLatestSucceededJob(ctx context.Context, scenarioSlug, kind string) (transit.Job, bool, error) {
+	row := r.pool.QueryRow(ctx,
+		`SELECT j.id, j.kind, j.status, j.scenario_id, j.owner_id, j.error, j.result, j.created_at, j.updated_at
+		 FROM jobs j JOIN scenarios s ON s.id = j.scenario_id
+		 WHERE s.slug = $1 AND j.kind = $2 AND j.status = $3
+		 ORDER BY j.created_at DESC LIMIT 1`,
+		scenarioSlug, kind, transit.JobStatusSucceeded)
+	return scanJob(row)
+}
+
+// scanJob reads one jobColumns row, translating "no such row" into ok=false
+// rather than an error.
+func scanJob(row pgx.Row) (transit.Job, bool, error) {
+	var j transit.Job
+	err := row.Scan(&j.ID, &j.Kind, &j.Status, &j.ScenarioID, &j.OwnerID, &j.Error, &j.Result, &j.CreatedAt, &j.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return transit.Job{}, false, nil
+	}
+	if err != nil {
+		return transit.Job{}, false, wrap("scanJob", err)
+	}
+	return j, true, nil
+}
+
+// scanJobRow is scanJob's pgx.Rows counterpart, for the multi-row ListJobs
+// reader.
+func scanJobRow(rows pgx.Rows) (transit.Job, error) {
+	var j transit.Job
+	err := rows.Scan(&j.ID, &j.Kind, &j.Status, &j.ScenarioID, &j.OwnerID, &j.Error, &j.Result, &j.CreatedAt, &j.UpdatedAt)
+	return j, err
 }
 
 func wrap(op string, err error) error {

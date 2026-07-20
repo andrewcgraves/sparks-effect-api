@@ -6,19 +6,23 @@ import (
 )
 
 type Edge struct {
-	FromSlug string
-	ToSlug   string
-	Seconds  int
+	FromSlug string `json:"from_slug"`
+	ToSlug   string `json:"to_slug"`
+	Seconds  int    `json:"seconds"`
 }
 
 type ServiceGraph struct {
-	ServiceID string
-	Edges     []Edge
-	WaitSecs  int
+	ServiceID string `json:"service_id"`
+	Edges     []Edge `json:"edges"`
+	WaitSecs  int    `json:"wait_secs"`
 }
 
+// TransitGraph is a compiled, Dijkstra-ready representation of a scenario's
+// active services — either hand-authored (Compile) or physics-derived
+// (CompileScenario) — and is what an async compile job persists as its result
+// (see Job.Result).
 type TransitGraph struct {
-	Services []ServiceGraph
+	Services []ServiceGraph `json:"services"`
 }
 
 func Compile(
