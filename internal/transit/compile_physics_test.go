@@ -2,6 +2,19 @@ package transit
 
 import "testing"
 
+// compileSeeded runs the seeded model through the adapter into the one
+// physics compiler — the same path CompileScenario takes. These cases predate
+// the CompilableService refactor and are kept as its regression net: only how
+// the input is constructed changed, never what is asserted.
+func compileSeeded(t *testing.T, route Route, stations []Station, svc Service, vt VehicleType) (ServiceGraph, error) {
+	t.Helper()
+	cs, err := CompilableFromService(route, stations, svc, vt)
+	if err != nil {
+		return ServiceGraph{}, err
+	}
+	return CompileServicePhysics(cs)
+}
+
 func physicsTestVehicle() VehicleType {
 	return VehicleType{
 		ID:              "vt-physics",
@@ -57,7 +70,7 @@ func TestCompileServicePhysics_twoStopStraightLine(t *testing.T) {
 		},
 	}
 
-	got, err := CompileServicePhysics(route, stations, svc, physicsTestVehicle())
+	got, err := compileSeeded(t, route, stations, svc, physicsTestVehicle())
 	if err != nil {
 		t.Fatalf("CompileServicePhysics() error = %v, want nil", err)
 	}
@@ -111,7 +124,7 @@ func TestCompileServicePhysics_feedsDijkstra(t *testing.T) {
 		},
 	}
 
-	sg, err := CompileServicePhysics(route, stations, svc, physicsTestVehicle())
+	sg, err := compileSeeded(t, route, stations, svc, physicsTestVehicle())
 	if err != nil {
 		t.Fatalf("CompileServicePhysics() error = %v, want nil", err)
 	}
@@ -148,7 +161,7 @@ func TestCompileServicePhysics_threeStopsProduceTwoSpans(t *testing.T) {
 		},
 	}
 
-	got, err := CompileServicePhysics(route, stations, svc, physicsTestVehicle())
+	got, err := compileSeeded(t, route, stations, svc, physicsTestVehicle())
 	if err != nil {
 		t.Fatalf("CompileServicePhysics() error = %v, want nil", err)
 	}
@@ -199,13 +212,13 @@ func TestCompileServicePhysics_gradeThreadsThroughToRunTime(t *testing.T) {
 		Segments: []RouteSegment{{GradePct: -10}},
 	}
 
-	level, err := CompileServicePhysics(levelRoute, stations, svc, vt)
+	level, err := compileSeeded(t, levelRoute, stations, svc, vt)
 	if err != nil {
-		t.Fatalf("CompileServicePhysics(level) error = %v, want nil", err)
+		t.Fatalf("compileSeeded(level) error = %v, want nil", err)
 	}
-	graded, err := CompileServicePhysics(gradedRoute, stations, svc, vt)
+	graded, err := compileSeeded(t, gradedRoute, stations, svc, vt)
 	if err != nil {
-		t.Fatalf("CompileServicePhysics(graded) error = %v, want nil", err)
+		t.Fatalf("compileSeeded(graded) error = %v, want nil", err)
 	}
 
 	levelSecs, ok := servicePathSecs(level, "a", "b")
@@ -235,7 +248,7 @@ func TestCompileServicePhysics_errorsOnUnknownStation(t *testing.T) {
 		},
 	}
 
-	if _, err := CompileServicePhysics(route, stations, svc, physicsTestVehicle()); err == nil {
+	if _, err := compileSeeded(t, route, stations, svc, physicsTestVehicle()); err == nil {
 		t.Error("CompileServicePhysics() error = nil, want an error for an unknown station id")
 	}
 }
@@ -255,37 +268,16 @@ func TestCompileServicePhysics_errorsOnRouteWithFewerThanTwoPoints(t *testing.T)
 		},
 	}
 
-	if _, err := CompileServicePhysics(route, stations, svc, physicsTestVehicle()); err == nil {
+	if _, err := compileSeeded(t, route, stations, svc, physicsTestVehicle()); err == nil {
 		t.Error("CompileServicePhysics() error = nil, want an error for a route with < 2 geometry points")
 	}
 }
 
-// TestCompileServicePhysics_inactiveServiceReturnsEmptyGraph matches
-// Compile's convention (compile.go: `if !svc.Active { continue }`) of
-// contributing nothing to the TransitGraph for an inactive service.
-func TestCompileServicePhysics_inactiveServiceReturnsEmptyGraph(t *testing.T) {
-	route := Route{Geometry: GeoLineString{Coordinates: [][]float64{{0, 0}, {1, 0}}}}
-	stations := []Station{
-		{ID: "st-a", Slug: "a", Location: GeoPoint{Coordinates: []float64{0, 0}}},
-		{ID: "st-b", Slug: "b", Location: GeoPoint{Coordinates: []float64{1, 0}}},
-	}
-	svc := Service{
-		ID:     "svc-1",
-		Active: false,
-		Stops: []ServiceStop{
-			{StationID: "st-a", Sequence: 1},
-			{StationID: "st-b", Sequence: 2},
-		},
-	}
-
-	got, err := CompileServicePhysics(route, stations, svc, physicsTestVehicle())
-	if err != nil {
-		t.Fatalf("CompileServicePhysics() error = %v, want nil", err)
-	}
-	if len(got.Edges) != 0 {
-		t.Errorf("len(Edges) = %d, want 0 for an inactive service", len(got.Edges))
-	}
-}
+// The inactive-service case used to live here, when CompileServicePhysics
+// short-circuited on Service.Active itself. Active is a seeded-model,
+// scenario-membership concern and the compiler no longer takes a Service at
+// all, so it is now honoured in exactly one place — see
+// TestCompileScenario_skipsInactiveServices.
 
 func TestCompileServicePhysics_errorsOnSegmentCountMismatch(t *testing.T) {
 	route := Route{
@@ -305,7 +297,7 @@ func TestCompileServicePhysics_errorsOnSegmentCountMismatch(t *testing.T) {
 		},
 	}
 
-	if _, err := CompileServicePhysics(route, stations, svc, physicsTestVehicle()); err == nil {
+	if _, err := compileSeeded(t, route, stations, svc, physicsTestVehicle()); err == nil {
 		t.Error("CompileServicePhysics() error = nil, want an error on a route/segment count mismatch")
 	}
 }

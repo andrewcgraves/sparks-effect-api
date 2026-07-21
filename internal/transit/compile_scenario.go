@@ -30,7 +30,11 @@ func CompileScenario(routes []Route, stations []Station, services []Service, veh
 			return TransitGraph{}, fmt.Errorf("compile: service %q references unknown vehicle type %q", svc.ID, svc.VehicleTypeID)
 		}
 
-		sg, err := CompileServicePhysics(rt, stations, svc, vt)
+		cs, err := CompilableFromService(rt, stations, svc, vt)
+		if err != nil {
+			return TransitGraph{}, err
+		}
+		sg, err := CompileServicePhysics(cs)
 		if err != nil {
 			return TransitGraph{}, err
 		}
