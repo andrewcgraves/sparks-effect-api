@@ -75,6 +75,14 @@ type Repository interface {
 	// Jobs.
 	CreateJob(ctx context.Context, j Job) error
 	GetJobByID(ctx context.Context, id string) (Job, bool, error)
+	// UpdateJobStatus transitions a job to running or failed. Success goes
+	// through CompleteJob instead, since it also carries the result.
 	UpdateJobStatus(ctx context.Context, id, status, errMsg string) error
+	// CompleteJob marks a job succeeded and stores its compiled result.
+	CompleteJob(ctx context.Context, id string, result TransitGraph) error
 	ListJobs(ctx context.Context) ([]Job, error)
+	// GetLatestSucceededJob finds the most recent succeeded job of kind for the
+	// scenario addressed by slug — the "result, retrievable by slug" path, so a
+	// caller never needs the job id once compilation has finished.
+	GetLatestSucceededJob(ctx context.Context, scenarioSlug, kind string) (Job, bool, error)
 }

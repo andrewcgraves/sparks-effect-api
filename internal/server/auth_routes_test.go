@@ -50,6 +50,29 @@ func (s *stubAuthDeps) GetRouteBySlug(context.Context, string) (transit.Route, b
 func (s *stubAuthDeps) GetScenarioBySlug(context.Context, string) (transit.Scenario, bool, error) {
 	return transit.Scenario{}, false, nil
 }
+func (s *stubAuthDeps) CreateJob(context.Context, transit.Job) error { return nil }
+func (s *stubAuthDeps) GetJobByID(context.Context, string) (transit.Job, bool, error) {
+	return transit.Job{}, false, nil
+}
+func (s *stubAuthDeps) UpdateJobStatus(context.Context, string, string, string) error { return nil }
+func (s *stubAuthDeps) CompleteJob(context.Context, string, transit.TransitGraph) error {
+	return nil
+}
+func (s *stubAuthDeps) GetLatestSucceededJob(context.Context, string, string) (transit.Job, bool, error) {
+	return transit.Job{}, false, nil
+}
+func (s *stubAuthDeps) ListRoutesByScenario(context.Context, string) ([]transit.Route, error) {
+	return nil, nil
+}
+func (s *stubAuthDeps) ListStationsByScenario(context.Context, string) ([]transit.Station, error) {
+	return nil, nil
+}
+func (s *stubAuthDeps) ListServicesByScenario(context.Context, string) ([]transit.Service, error) {
+	return nil, nil
+}
+func (s *stubAuthDeps) ListVehicleTypes(context.Context) ([]transit.VehicleType, error) {
+	return nil, nil
+}
 
 const (
 	adminToken = "admin-token"
@@ -97,6 +120,8 @@ func TestProtectedRoutesRejectAnonymousCallers(t *testing.T) {
 		{http.MethodGet, "/api/me/services"},
 		{http.MethodPost, "/api/admin/users"},
 		{http.MethodPost, "/api/admin/routes"},
+		{http.MethodPost, "/api/scenarios/ca-hsr/compile"},
+		{http.MethodGet, "/api/jobs/some-id"},
 	}
 
 	for _, p := range protected {
@@ -144,6 +169,25 @@ func TestAuthenticatedRoutesAdmitValidTokens(t *testing.T) {
 	}
 }
 
+// A valid token must reach the compile-job handlers rather than being stuck
+// at the auth gate. stubAuthDeps has no scenarios or jobs, so the handlers
+// themselves answer 404 — the point here is only that it isn't 401/403.
+func TestCompileJobRoutesAdmitValidTokens(t *testing.T) {
+	h := newTestServer(t, newStubDeps())
+
+	for _, p := range []struct{ method, path string }{
+		{http.MethodPost, "/api/scenarios/ca-hsr/compile"},
+		{http.MethodGet, "/api/jobs/some-id"},
+	} {
+		t.Run(p.method+" "+p.path, func(t *testing.T) {
+			rec := request(t, h, p.method, p.path, userToken)
+			if rec.Code == http.StatusUnauthorized || rec.Code == http.StatusForbidden {
+				t.Errorf("status = %d, a valid token must pass the auth gate", rec.Code)
+			}
+		})
+	}
+}
+
 // The public read endpoints predate auth and must stay reachable — adding
 // authentication must not silently gate the existing curated data.
 func TestPublicReadRoutesStayOpen(t *testing.T) {
@@ -175,6 +219,22 @@ func TestRouteReadEndpointStaysOpenWithoutAToken(t *testing.T) {
 	}
 }
 
+// The compiled-graph read is public, like the other scenario reads — a
+// caller checking whether a compile has finished has no session yet either.
+func TestGraphEndpointStaysOpenWithoutAToken(t *testing.T) {
+	h := newTestServer(t, newStubDeps())
+
+	rec := request(t, h, http.MethodGet, "/api/scenarios/ca-hsr/graph", "")
+	if rec.Code == http.StatusUnauthorized || rec.Code == http.StatusForbidden {
+		t.Errorf("status = %d, the compiled graph read must not require auth", rec.Code)
+	}
+	// stubAuthDeps has no succeeded jobs, so this is "not compiled yet", not an
+	// auth rejection.
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 with nothing compiled yet", rec.Code)
+	}
+}
+
 // With no database there is no user or session store, so the auth endpoints
 // must say so plainly rather than 404 or panic.
 func TestAuthRoutesReportUnavailableWithoutADatabase(t *testing.T) {
@@ -185,6 +245,8 @@ func TestAuthRoutesReportUnavailableWithoutADatabase(t *testing.T) {
 		{http.MethodGet, "/api/auth/me"},
 		{http.MethodPost, "/api/admin/users"},
 		{http.MethodGet, "/api/me/scenarios"},
+		{http.MethodPost, "/api/scenarios/ca-hsr/compile"},
+		{http.MethodGet, "/api/jobs/some-id"},
 	} {
 		t.Run(p.method+" "+p.path, func(t *testing.T) {
 			rec := request(t, h, p.method, p.path, adminToken)
@@ -203,5 +265,12 @@ func TestAuthRoutesReportUnavailableWithoutADatabase(t *testing.T) {
 	// plainly too, rather than 404ing as if the endpoint didn't exist.
 	if rec := request(t, h, http.MethodGet, "/api/routes/ca-hsr-trunk", ""); rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("route read status = %d, want 503 with no database configured", rec.Code)
+	}
+
+	// The compiled graph is likewise Postgres-backed and unauthenticated, so
+	// it needs its own database-less check independent of the auth-gated loop
+	// above.
+	if rec := request(t, h, http.MethodGet, "/api/scenarios/ca-hsr/graph", ""); rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("graph read status = %d, want 503 with no database configured", rec.Code)
 	}
 }

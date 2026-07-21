@@ -180,15 +180,18 @@ const (
 )
 
 // Job is a unit of async work (e.g. compile or compute) whose status survives
-// restarts so callers can poll by job_id. The richer job model lands in a later
-// issue; this persists the identity, kind, status, and result/error envelope.
+// restarts so callers can poll by job_id.
 type Job struct {
-	ID         string    `json:"id"`
-	Kind       string    `json:"kind"`
-	Status     string    `json:"status"`
-	ScenarioID *string   `json:"scenario_id,omitempty"`
-	OwnerID    *string   `json:"owner_id,omitempty"`
-	Error      string    `json:"error,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID         string  `json:"id"`
+	Kind       string  `json:"kind"`
+	Status     string  `json:"status"`
+	ScenarioID *string `json:"scenario_id,omitempty"`
+	OwnerID    *string `json:"owner_id,omitempty"`
+	Error      string  `json:"error,omitempty"`
+	// Result is the compiled TransitGraph, set only once Status is
+	// JobStatusSucceeded. A caller can also reach it directly by scenario slug
+	// via Repository.GetLatestSucceededJob, without knowing the job id.
+	Result    *TransitGraph `json:"result,omitempty"`
+	CreatedAt time.Time     `json:"created_at"`
+	UpdatedAt time.Time     `json:"updated_at"`
 }
