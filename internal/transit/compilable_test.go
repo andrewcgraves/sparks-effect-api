@@ -51,7 +51,7 @@ func TestCompilableFromService_projectsStationsAndResolvesDwell(t *testing.T) {
 		t.Errorf("Windows = %+v, want the service's single 600s window", got.Windows)
 	}
 
-	want := []CompiledStop{
+	want := []CompilableStop{
 		// a: platform "low" != floor "high", so DwellStepS (60).
 		{Slug: "a", Lat: 0, Lng: 0, DwellS: 60},
 		// b: platform "high" == floor "high", so DwellLevelS (30).
@@ -141,10 +141,11 @@ func TestCompilableFromUserService_projectsEmbeddedStops(t *testing.T) {
 	if got.ID != "us-1" {
 		t.Errorf("ID = %q, want us-1", got.ID)
 	}
-	if got.Vehicle != svc.Vehicle {
-		t.Errorf("Vehicle = %+v, want the service's inline params verbatim", got.Vehicle)
+	wantVehicle := Kinematics{MaxSpeedKMH: 200, AccelerationMS2: 1, DecelerationMS2: 1}
+	if got.Vehicle != wantVehicle {
+		t.Errorf("Vehicle = %+v, want %+v — the inline params' kinematics, without DwellS", got.Vehicle, wantVehicle)
 	}
-	want := []CompiledStop{
+	want := []CompilableStop{
 		{Slug: "my-express--north-end", Lat: 0, Lng: 0, DwellS: 45},
 		{Slug: "my-express--south-end", Lat: 0, Lng: 1, DwellS: 45},
 	}

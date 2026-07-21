@@ -17,23 +17,39 @@ import (
 // the adapters below, so CompileServicePhysics knows about neither.
 //
 // Stops are in stopping order; the adapters do the ordering, since Sequence
-// (seeded) and Seq (authored) are different fields.
+// (seeded) and Seq (authored) are different fields. Their slugs must be
+// distinct — they are the graph's node keys.
 type CompilableService struct {
 	ID      string
 	Route   Route
-	Vehicle VehicleParams
-	Stops   []CompiledStop
+	Vehicle Kinematics
+	Stops   []CompilableStop
 	Windows []FrequencyWindow
 }
 
-// CompiledStop is one stop with everything the compiler needs already decided.
+// Kinematics is the whole of what the compiler asks of a vehicle: how fast it
+// may go and how hard it may accelerate and brake.
+//
+// Deliberately not VehicleParams, which also carries a DwellS the compiler
+// would ignore — dwell is settled per stop by the adapters (see
+// CompilableStop.DwellS), so a vehicle-level dwell here would be a field that
+// looks load-bearing and is not.
+type Kinematics struct {
+	MaxSpeedKMH     float64
+	AccelerationMS2 float64
+	DecelerationMS2 float64
+}
+
+// CompilableStop is one stop with everything the compiler needs already
+// decided: an identity to key edges on, a position to project onto the
+// alignment, and a dwell to add.
 //
 // DwellS is resolved, not a hint: the two models disagree about where dwell
 // comes from — seeded compares a Station's platform height to the vehicle's
 // floor height to choose between VehicleType.DwellLevelS and DwellStepS, while
 // an authored service has one flat VehicleParams.DwellS — so each adapter
 // settles it and the compiler just adds the number.
-type CompiledStop struct {
+type CompilableStop struct {
 	Slug   string
 	Lat    float64
 	Lng    float64
@@ -56,7 +72,7 @@ func CompilableFromService(route Route, stations []Station, svc Service, vt Vehi
 	stops := append([]ServiceStop(nil), svc.Stops...)
 	sort.SliceStable(stops, func(i, j int) bool { return stops[i].Sequence < stops[j].Sequence })
 
-	compiled := make([]CompiledStop, len(stops))
+	compiled := make([]CompilableStop, len(stops))
 	for i, stop := range stops {
 		st, ok := stationsByID[stop.StationID]
 		if !ok {
@@ -65,7 +81,7 @@ func CompilableFromService(route Route, stations []Station, svc Service, vt Vehi
 		if len(st.Location.Coordinates) < 2 {
 			return CompilableService{}, fmt.Errorf("compile: service %q: station %q has no location", svc.ID, st.Slug)
 		}
-		compiled[i] = CompiledStop{
+		compiled[i] = CompilableStop{
 			Slug:   st.Slug,
 			Lng:    st.Location.Coordinates[0],
 			Lat:    st.Location.Coordinates[1],
@@ -76,7 +92,7 @@ func CompilableFromService(route Route, stations []Station, svc Service, vt Vehi
 	return CompilableService{
 		ID:    svc.ID,
 		Route: route,
-		Vehicle: VehicleParams{
+		Vehicle: Kinematics{
 			MaxSpeedKMH:     vt.MaxSpeedKMH,
 			AccelerationMS2: vt.AccelerationMS2,
 			DecelerationMS2: vt.DecelerationMS2,
@@ -99,10 +115,10 @@ func CompilableFromUserService(route Route, svc UserService) CompilableService {
 	stops := append([]ServiceStopPoint(nil), svc.Stops...)
 	sort.SliceStable(stops, func(i, j int) bool { return stops[i].Seq < stops[j].Seq })
 
-	compiled := make([]CompiledStop, len(stops))
+	compiled := make([]CompilableStop, len(stops))
 	taken := make(map[string]bool, len(stops))
 	for i, stop := range stops {
-		compiled[i] = CompiledStop{
+		compiled[i] = CompilableStop{
 			Slug:   uniqueStopSlug(svc.Slug, stop.Name, taken),
 			Lat:    stop.Lat,
 			Lng:    stop.Lng,
@@ -111,19 +127,35 @@ func CompilableFromUserService(route Route, svc UserService) CompilableService {
 	}
 
 	return CompilableService{
-		ID:      svc.ID,
-		Route:   route,
-		Vehicle: svc.Vehicle,
+		ID:    svc.ID,
+		Route: route,
+		Vehicle: Kinematics{
+			MaxSpeedKMH:     svc.Vehicle.MaxSpeedKMH,
+			AccelerationMS2: svc.Vehicle.AccelerationMS2,
+			DecelerationMS2: svc.Vehicle.DecelerationMS2,
+		},
 		Stops:   compiled,
 		Windows: svc.FrequencyWindows,
 	}
 }
 
-// uniqueStopSlug mints `{service}--{stop}`, suffixing on collision so two stops
-// sharing a name within one service do not collapse onto the same graph node.
-// taken accumulates across a service's stops and is mutated by each call.
+// StopSlug mints the graph node key for one stop of a user-authored service:
+// `{service}--{stop}`, namespaced so two services that both stop at "Downtown"
+// stay distinct in a graph assembled from both.
+//
+// Exported because it is a persistence contract, not just a compile detail.
+// SPA-103 stores this slug on the stop row; a stored slug and a derived one
+// must agree exactly, or a service's graph node keys shift underneath the
+// backfill. Both sides call this.
+func StopSlug(serviceSlug, stopName string) string {
+	return Slugify(serviceSlug) + "--" + Slugify(stopName)
+}
+
+// uniqueStopSlug is StopSlug plus collision handling, so two stops sharing a
+// name within one service do not collapse onto the same graph node. taken
+// accumulates across a service's stops and is mutated by each call.
 func uniqueStopSlug(serviceSlug, stopName string, taken map[string]bool) string {
-	base := Slugify(serviceSlug) + "--" + Slugify(stopName)
+	base := StopSlug(serviceSlug, stopName)
 	slug := base
 	for n := 2; taken[slug]; n++ {
 		slug = fmt.Sprintf("%s-%d", base, n)

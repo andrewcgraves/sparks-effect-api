@@ -18,11 +18,12 @@ import (
 // It takes a CompilableService rather than any one domain model, so the seeded
 // Service and the user-authored UserService compile through the same code —
 // see the adapters in compilable.go. svc.Route must have at least 2 geometry
-// coordinates and svc.Stops must have at least 2 entries, already ordered.
+// coordinates, and svc.Stops must have at least 2 entries, already ordered and
+// with distinct slugs.
 //
-// Vehicle.DwellS is not read here: each stop's dwell is already resolved into
-// CompiledStop.DwellS by the adapter, because the two models decide it
-// differently.
+// An inactive seeded service is not special-cased here: whether a service
+// belongs in a graph at all is scenario-assembly semantics, and CompileScenario
+// already skips it before reaching this.
 //
 // Edges reuse the same forward motion time in both directions (the existing
 // hand-authored-table compiler's convention — see TravelTimes), varying only by
@@ -39,10 +40,15 @@ func CompileServicePhysics(svc CompilableService) (ServiceGraph, error) {
 
 	// physics.Stop.ID is keyed by stop slug, which is also the graph edge key,
 	// so the span results below map straight back onto stops with no
-	// intermediate lookup table.
-	stopBySlug := make(map[string]CompiledStop, len(svc.Stops))
+	// intermediate lookup table. That makes slug uniqueness load-bearing: two
+	// stops sharing one would silently collapse into a single graph node and
+	// lose a span, so reject it rather than compile a quietly wrong graph.
+	stopBySlug := make(map[string]CompilableStop, len(svc.Stops))
 	physicsStops := make([]physics.Stop, len(svc.Stops))
 	for i, stop := range svc.Stops {
+		if _, dup := stopBySlug[stop.Slug]; dup {
+			return ServiceGraph{}, fmt.Errorf("compile: service %q has two stops with slug %q", svc.ID, stop.Slug)
+		}
 		stopBySlug[stop.Slug] = stop
 		physicsStops[i] = physics.Stop{ID: stop.Slug, Location: physics.Point{Lng: stop.Lng, Lat: stop.Lat}}
 	}

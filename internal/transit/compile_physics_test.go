@@ -273,11 +273,27 @@ func TestCompileServicePhysics_errorsOnRouteWithFewerThanTwoPoints(t *testing.T)
 	}
 }
 
-// The inactive-service case used to live here, when CompileServicePhysics
-// short-circuited on Service.Active itself. Active is a seeded-model,
-// scenario-membership concern and the compiler no longer takes a Service at
-// all, so it is now honoured in exactly one place — see
-// TestCompileScenario_skipsInactiveServices.
+// Slug uniqueness is load-bearing: physics.Stop.ID is the stop slug, so a
+// duplicate would collapse two stops onto one graph node and silently drop a
+// span. The seeded adapter cannot guarantee it — Station.Slug is whatever the
+// scenario data says — so the compiler checks.
+func TestCompileServicePhysics_errorsOnDuplicateStopSlug(t *testing.T) {
+	svc := CompilableService{
+		ID:    "svc-1",
+		Route: Route{Geometry: GeoLineString{Coordinates: [][]float64{{0, 0}, {1, 0}}}},
+		Vehicle: Kinematics{
+			MaxSpeedKMH: 36, AccelerationMS2: 1, DecelerationMS2: 1,
+		},
+		Stops: []CompilableStop{
+			{Slug: "a", Lat: 0, Lng: 0},
+			{Slug: "a", Lat: 0, Lng: 1},
+		},
+	}
+
+	if _, err := CompileServicePhysics(svc); err == nil {
+		t.Error("CompileServicePhysics() error = nil, want an error for two stops sharing a slug")
+	}
+}
 
 func TestCompileServicePhysics_errorsOnSegmentCountMismatch(t *testing.T) {
 	route := Route{
