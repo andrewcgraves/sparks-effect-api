@@ -42,6 +42,18 @@ type Repository interface {
 	AddServiceToScenario(ctx context.Context, scenarioID, serviceID string) error
 	ListServiceIDsByScenario(ctx context.Context, scenarioID string) ([]string, error)
 
+	// UserServices are user-authored services: self-contained aggregates with
+	// embedded stops and inline vehicle params, written and read whole.
+	// Ownership is enforced above this layer; these methods do not filter by
+	// caller, so handlers must check UserService.OwnerID before mutating.
+	CreateUserService(ctx context.Context, svc UserService) error
+	GetUserServiceByID(ctx context.Context, id string) (UserService, bool, error)
+	GetUserServiceBySlug(ctx context.Context, slug string) (UserService, bool, error)
+	ListUserServicesByOwner(ctx context.Context, ownerID string) ([]UserService, error)
+	UpdateUserService(ctx context.Context, svc UserService) error
+	DeleteUserService(ctx context.Context, id string) error
+	RouteExists(ctx context.Context, routeID string) (bool, error)
+
 	// TravelTimes (adjacent segment run times) per scenario.
 	UpsertTravelTimes(ctx context.Context, tt TravelTimes) error
 	GetTravelTimes(ctx context.Context, scenarioSlug string) (TravelTimes, bool, error)

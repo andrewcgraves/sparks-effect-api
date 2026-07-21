@@ -1,7 +1,6 @@
 package transit
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 )
@@ -273,7 +272,7 @@ func TestCompile_waitSecsFromFrequencyWindows(t *testing.T) {
 	makeService := func(id string, headways []int) Service {
 		windows := make([]FrequencyWindow, len(headways))
 		for i, h := range headways {
-			windows[i] = FrequencyWindow{ID: fmt.Sprintf("fw-%d", i), ServiceID: id, HeadwayS: h}
+			windows[i] = FrequencyWindow{HeadwayS: h}
 		}
 		return Service{
 			ID:            id,

@@ -31,6 +31,26 @@ func (s *stubAuthDeps) GetSessionUser(_ context.Context, tokenHash string) (tran
 func (s *stubAuthDeps) GetUserCredentialsByEmail(context.Context, string) (transit.User, string, bool, error) {
 	return transit.User{}, "", false, nil
 }
+
+// User-authored services (SPA-80): stubbed so route registration can be
+// exercised; behaviour lives in the handler package's tests.
+func (s *stubAuthDeps) CreateUserService(context.Context, transit.UserService) error { return nil }
+func (s *stubAuthDeps) UpdateUserService(context.Context, transit.UserService) error { return nil }
+func (s *stubAuthDeps) DeleteUserService(context.Context, string) error              { return nil }
+func (s *stubAuthDeps) RouteExists(context.Context, string) (bool, error)            { return true, nil }
+
+func (s *stubAuthDeps) GetUserServiceByID(context.Context, string) (transit.UserService, bool, error) {
+	return transit.UserService{}, false, nil
+}
+
+func (s *stubAuthDeps) GetUserServiceBySlug(context.Context, string) (transit.UserService, bool, error) {
+	return transit.UserService{}, false, nil
+}
+
+func (s *stubAuthDeps) ListUserServicesByOwner(context.Context, string) ([]transit.UserService, error) {
+	return nil, nil
+}
+
 func (s *stubAuthDeps) CreateSession(context.Context, transit.Session) error   { return nil }
 func (s *stubAuthDeps) DeleteSession(context.Context, string) error            { return nil }
 func (s *stubAuthDeps) CreateUser(context.Context, transit.User, string) error { return nil }

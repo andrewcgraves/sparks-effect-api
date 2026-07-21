@@ -89,10 +89,16 @@ type ServiceStop struct {
 	DwellS    *int   `yaml:"dwell_s,omitempty" json:"dwell_s,omitempty"`
 }
 
-// FrequencyWindow describes a headway-based operating window for a service.
+// FrequencyWindow describes a headway-based operating window. Times are
+// free-form clock strings ("06:00"); the compiler interprets them.
+//
+// Shared by both service models: the seeded Service and the user-authored
+// UserService express headways identically, so this is one type rather than
+// two. It deliberately carries no row identity — a window has no meaning
+// outside the service that owns it, and both persistence paths write the whole
+// ordered set together — which is what lets helpers like bestHeadwayOver2 run
+// against either model.
 type FrequencyWindow struct {
-	ID        string `yaml:"id"         json:"id"`
-	ServiceID string `yaml:"service_id" json:"service_id"`
 	StartTime string `yaml:"start_time" json:"start_time"`
 	EndTime   string `yaml:"end_time"   json:"end_time"`
 	HeadwayS  int    `yaml:"headway_s"  json:"headway_s"`

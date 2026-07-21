@@ -31,6 +31,8 @@ type AuthDeps interface {
 	// CompileStore backs the async compile job surface: triggering a scenario
 	// compile, polling its job, and reading the compiled graph back by slug.
 	handler.CompileStore
+	// ServiceStore backs the user-authored service CRUD endpoints.
+	handler.ServiceStore
 	// GetSessionUser backs the middleware's auth.SessionLookup.
 	GetSessionUser(ctx context.Context, tokenHash string) (transit.User, bool, error)
 }
@@ -111,6 +113,7 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps) {
 			"/api/auth/login", "/api/auth/logout", "/api/auth/me",
 			"/api/me/scenarios", "/api/me/services", "/api/admin/",
 			"/api/scenarios/{slug}/compile", "/api/jobs/{id}",
+			"/api/services", "/api/services/",
 		} {
 			mux.HandleFunc(pattern, serviceUnavailable("authentication is unavailable"))
 		}
@@ -134,6 +137,15 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps) {
 	// since "not found" there means something different from "not admin".
 	mux.Handle("POST /api/scenarios/{slug}/compile", authenticated(handler.CompileScenario(deps)))
 	mux.Handle("GET /api/jobs/{id}", authenticated(handler.JobStatus(deps)))
+
+	// User-authored services: owner-scoped CRUD. Reads are owner-scoped too —
+	// unlike the curated scenario data these are a user's own drafts, so they
+	// sit behind the same gate as the writes rather than the public reads.
+	mux.Handle("POST /api/services", authenticated(handler.CreateService(deps)))
+	mux.Handle("GET /api/services", authenticated(handler.MyUserServices(deps)))
+	mux.Handle("GET /api/services/{slug}", authenticated(handler.GetService(deps)))
+	mux.Handle("PUT /api/services/{slug}", authenticated(handler.UpdateService(deps)))
+	mux.Handle("DELETE /api/services/{slug}", authenticated(handler.DeleteService(deps)))
 
 	// Admin-only.
 	mux.Handle("POST /api/admin/users", adminOnly(handler.CreateUser(deps)))
@@ -173,7 +185,7 @@ func cors(next http.Handler, allowLocalhost bool) http.Handler {
 		origin := r.Header.Get("Origin")
 		if allowedOrigins[origin] || (allowLocalhost && isLocalhostOrigin(origin)) {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 			w.Header().Add("Vary", "Origin")
 
