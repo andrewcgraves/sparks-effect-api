@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -48,6 +49,28 @@ func (s *stubAuthDeps) GetUserServiceBySlug(context.Context, string) (transit.Us
 }
 
 func (s *stubAuthDeps) ListUserServicesByOwner(context.Context, string) ([]transit.UserService, error) {
+	return nil, nil
+}
+
+// User-owned scenarios (SPA-81): stubbed so route registration can be
+// exercised; behaviour lives in the handler package's tests.
+func (s *stubAuthDeps) CreateUserScenario(context.Context, transit.UserScenario) error { return nil }
+func (s *stubAuthDeps) UpdateUserScenario(context.Context, transit.UserScenario) error { return nil }
+func (s *stubAuthDeps) DeleteUserScenario(context.Context, string) error               { return nil }
+
+func (s *stubAuthDeps) GetUserScenarioByID(context.Context, string) (transit.UserScenario, bool, error) {
+	return transit.UserScenario{}, false, nil
+}
+
+func (s *stubAuthDeps) GetUserScenarioBySlug(context.Context, string) (transit.UserScenario, bool, error) {
+	return transit.UserScenario{}, false, nil
+}
+
+func (s *stubAuthDeps) ListUserScenariosByOwner(context.Context, string) ([]transit.UserScenario, error) {
+	return nil, nil
+}
+
+func (s *stubAuthDeps) UserServiceIDsOwnedBy(context.Context, string, []string) (map[string]bool, error) {
 	return nil, nil
 }
 
@@ -117,9 +140,17 @@ func newStubDeps() *stubAuthDeps {
 	}}
 }
 
-func request(t *testing.T, h http.Handler, method, path, token string) *httptest.ResponseRecorder {
+// request builds and serves a test request. An optional body (JSON) may be
+// passed as a single trailing arg; omitting it sends an empty body.
+func request(t *testing.T, h http.Handler, method, path, token string, body ...string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(method, path, http.NoBody)
+	var req *http.Request
+	if len(body) == 0 || body[0] == "" {
+		req = httptest.NewRequest(method, path, http.NoBody)
+	} else {
+		req = httptest.NewRequest(method, path, strings.NewReader(body[0]))
+		req.Header.Set("Content-Type", "application/json")
+	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -142,6 +173,11 @@ func TestProtectedRoutesRejectAnonymousCallers(t *testing.T) {
 		{http.MethodPost, "/api/admin/routes"},
 		{http.MethodPost, "/api/scenarios/ca-hsr/compile"},
 		{http.MethodGet, "/api/jobs/some-id"},
+		{http.MethodPost, "/api/user-scenarios"},
+		{http.MethodGet, "/api/user-scenarios"},
+		{http.MethodGet, "/api/user-scenarios/some-slug"},
+		{http.MethodPut, "/api/user-scenarios/some-slug"},
+		{http.MethodDelete, "/api/user-scenarios/some-slug"},
 	}
 
 	for _, p := range protected {
@@ -208,6 +244,36 @@ func TestCompileJobRoutesAdmitValidTokens(t *testing.T) {
 	}
 }
 
+// A valid token must reach the user-scenario CRUD handlers, and the existing
+// public curated-scenario read at the same base path must be unaffected — the
+// two live at distinct paths (/api/user-scenarios vs /api/scenarios) so
+// neither shadows the other.
+func TestUserScenarioRoutesAdmitValidTokensAndDontShadowPublicReads(t *testing.T) {
+	h := newTestServer(t, newStubDeps())
+
+	for _, p := range []struct{ method, path string }{
+		{http.MethodPost, "/api/user-scenarios"},
+		{http.MethodGet, "/api/user-scenarios"},
+		{http.MethodGet, "/api/user-scenarios/some-slug"},
+		{http.MethodPut, "/api/user-scenarios/some-slug"},
+		{http.MethodDelete, "/api/user-scenarios/some-slug"},
+	} {
+		t.Run(p.method+" "+p.path, func(t *testing.T) {
+			rec := request(t, h, p.method, p.path, userToken)
+			if rec.Code == http.StatusUnauthorized || rec.Code == http.StatusForbidden {
+				t.Errorf("status = %d, a valid token must pass the auth gate", rec.Code)
+			}
+		})
+	}
+
+	// The curated public read at /api/scenarios/{slug} must still answer
+	// unauthenticated, proving /api/user-scenarios did not shadow it.
+	rec := request(t, h, http.MethodGet, "/api/scenarios/ca-hsr", "")
+	if rec.Code != http.StatusOK {
+		t.Errorf("public curated read status = %d, want 200", rec.Code)
+	}
+}
+
 // The public read endpoints predate auth and must stay reachable — adding
 // authentication must not silently gate the existing curated data.
 func TestPublicReadRoutesStayOpen(t *testing.T) {
@@ -267,6 +333,9 @@ func TestAuthRoutesReportUnavailableWithoutADatabase(t *testing.T) {
 		{http.MethodGet, "/api/me/scenarios"},
 		{http.MethodPost, "/api/scenarios/ca-hsr/compile"},
 		{http.MethodGet, "/api/jobs/some-id"},
+		{http.MethodPost, "/api/user-scenarios"},
+		{http.MethodGet, "/api/user-scenarios"},
+		{http.MethodGet, "/api/user-scenarios/some-slug"},
 	} {
 		t.Run(p.method+" "+p.path, func(t *testing.T) {
 			rec := request(t, h, p.method, p.path, adminToken)

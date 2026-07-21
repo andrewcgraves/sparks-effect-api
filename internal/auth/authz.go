@@ -15,12 +15,13 @@ import "github.com/andrewcgraves/sparks-effect-api/internal/transit"
 // mutating paths. It is not consulted by the public GET endpoints, which today
 // serve only unowned curated data because that is all the seed produces.
 //
-// That stops being true the moment SPA-80/81 let users create owned scenarios
-// and services: GET /api/scenarios reads the compiled store, which holds every
-// row, so owned rows would become anonymously readable. Whoever adds that
-// authoring path must decide how the public reads exclude owned rows — the
-// compiled store deliberately keeps them all, since the graph must compile
-// from the full set regardless of who owns what.
+// SPA-80 (UserService) and SPA-81 (UserScenario) both resolved the risk this
+// comment used to warn about — a user-authored row leaking into the public
+// compiled store — the same way: by keeping user-authored content in its own
+// type and table, entirely outside the seeded Scenario/Service pair that
+// GET /api/scenarios compiles and serves. Nothing user-owned ever reaches
+// LoadStore, so the compiled store and its public reads are unaffected by
+// either feature.
 func CanAccess(user transit.User, ownerID *string) bool {
 	if user.IsAdmin {
 		return true

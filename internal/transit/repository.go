@@ -54,6 +54,21 @@ type Repository interface {
 	DeleteUserService(ctx context.Context, id string) error
 	RouteExists(ctx context.Context, routeID string) (bool, error)
 
+	// UserScenarios are owner-scoped curated sets of UserService IDs. Like
+	// UserServices, ownership is enforced above this layer: these methods do
+	// not filter by caller, so handlers must check UserScenario.OwnerID before
+	// mutating.
+	CreateUserScenario(ctx context.Context, sc UserScenario) error
+	GetUserScenarioByID(ctx context.Context, id string) (UserScenario, bool, error)
+	GetUserScenarioBySlug(ctx context.Context, slug string) (UserScenario, bool, error)
+	ListUserScenariosByOwner(ctx context.Context, ownerID string) ([]UserScenario, error)
+	UpdateUserScenario(ctx context.Context, sc UserScenario) error
+	DeleteUserScenario(ctx context.Context, id string) error
+	// UserServiceIDsOwnedBy reports which of ids are both known user_services
+	// and owned by ownerID, so scenario membership can be validated in one
+	// round trip rather than one GetUserServiceByID call per id.
+	UserServiceIDsOwnedBy(ctx context.Context, ownerID string, ids []string) (map[string]bool, error)
+
 	// TravelTimes (adjacent segment run times) per scenario.
 	UpsertTravelTimes(ctx context.Context, tt TravelTimes) error
 	GetTravelTimes(ctx context.Context, scenarioSlug string) (TravelTimes, bool, error)

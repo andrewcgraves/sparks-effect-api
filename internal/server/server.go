@@ -33,6 +33,8 @@ type AuthDeps interface {
 	handler.CompileStore
 	// ServiceStore backs the user-authored service CRUD endpoints.
 	handler.ServiceStore
+	// ScenarioStore backs the user-owned scenario CRUD endpoints.
+	handler.ScenarioStore
 	// GetSessionUser backs the middleware's auth.SessionLookup.
 	GetSessionUser(ctx context.Context, tokenHash string) (transit.User, bool, error)
 }
@@ -45,6 +47,12 @@ func New(cfg config.Config, store *transit.Store, deps AuthDeps, chainer isochro
 	mux.HandleFunc("GET /healthz", handler.Health)
 
 	// Public reads: the curated scenario data, unauthenticated by design.
+	//
+	// This is a distinct resource from the owner-scoped UserScenario CRUD
+	// registered below at /api/user-scenarios: these routes read the seeded,
+	// compiled TransitGraph store and must keep answering exactly what they
+	// answer today. Rather than repurpose /api/scenarios/{slug} for both, the
+	// new resource lives at a path of its own — see registerAuthRoutes.
 	mux.HandleFunc("GET /api/scenarios", handler.Scenarios(store))
 	mux.HandleFunc("GET /api/scenarios/{slug}", handler.ScenarioBySlug(store))
 	mux.HandleFunc("GET /api/scenarios/{slug}/routes", handler.ScenarioRoutes(store))
@@ -114,6 +122,7 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps) {
 			"/api/me/scenarios", "/api/me/services", "/api/admin/",
 			"/api/scenarios/{slug}/compile", "/api/jobs/{id}",
 			"/api/services", "/api/services/",
+			"/api/user-scenarios", "/api/user-scenarios/",
 		} {
 			mux.HandleFunc(pattern, serviceUnavailable("authentication is unavailable"))
 		}
@@ -146,6 +155,16 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps) {
 	mux.Handle("GET /api/services/{slug}", authenticated(handler.GetService(deps)))
 	mux.Handle("PUT /api/services/{slug}", authenticated(handler.UpdateService(deps)))
 	mux.Handle("DELETE /api/services/{slug}", authenticated(handler.DeleteService(deps)))
+
+	// User-owned scenarios: owner-scoped CRUD over a curated set of UserService
+	// ids. Named /api/user-scenarios, distinct from the public /api/scenarios
+	// collection above, so the existing curated read path is untouched rather
+	// than repurposed or ambiguously overloaded.
+	mux.Handle("POST /api/user-scenarios", authenticated(handler.CreateUserScenario(deps)))
+	mux.Handle("GET /api/user-scenarios", authenticated(handler.MyUserScenarios(deps)))
+	mux.Handle("GET /api/user-scenarios/{slug}", authenticated(handler.GetUserScenario(deps)))
+	mux.Handle("PUT /api/user-scenarios/{slug}", authenticated(handler.UpdateUserScenario(deps)))
+	mux.Handle("DELETE /api/user-scenarios/{slug}", authenticated(handler.DeleteUserScenario(deps)))
 
 	// Admin-only.
 	mux.Handle("POST /api/admin/users", adminOnly(handler.CreateUser(deps)))
