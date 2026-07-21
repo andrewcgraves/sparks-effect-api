@@ -107,19 +107,44 @@ func CompilableFromService(route Route, stations []Station, svc Service, vt Vehi
 // so the only real work is minting a stop identity — graph edges are keyed by
 // slug and a ServiceStopPoint has none.
 //
-// Slugs are namespaced by the owning service (`{service}--{stop}`) so two
-// services that both stop at "Downtown" stay distinct in a graph assembled from
-// both. No Station row is created: stops stay embedded, which is the decision
+// route must be the one svc references. Projecting stops onto an alignment they
+// were never authored against would produce a plausible-looking wrong graph
+// rather than an error, so the mismatch is rejected here.
+//
+// Namespacing slugs by the owning service (see StopSlugs) is a trade, not a
+// free win. It stops two unrelated services that each have a "Downtown" from
+// fusing into one node and inventing a transfer between places 50km apart — but
+// it equally means two services stopping at the *same* place cannot interchange
+// there, because graphDijkstra pools edges by slug and namespaced stops are
+// separate nodes. Until user services can share a stop identity, the services in
+// a user scenario do not connect to each other. SPA-83 consumes these graphs and
+// is where that surfaces.
+//
+// No Station row is created: stops stay embedded, which is the decision
 // UserService was built around.
-func CompilableFromUserService(route Route, svc UserService) CompilableService {
-	stops := append([]ServiceStopPoint(nil), svc.Stops...)
-	sort.SliceStable(stops, func(i, j int) bool { return stops[i].Seq < stops[j].Seq })
+func CompilableFromUserService(route Route, svc UserService) (CompilableService, error) {
+	if route.ID != svc.RouteID {
+		return CompilableService{}, fmt.Errorf("compile: service %q references route %q, got route %q",
+			svc.ID, svc.RouteID, route.ID)
+	}
 
-	compiled := make([]CompilableStop, len(stops))
-	taken := make(map[string]bool, len(stops))
-	for i, stop := range stops {
+	slugs := StopSlugs(svc)
+
+	// Identities are assigned over svc.Stops as authored and then reordered for
+	// compilation, rather than assigned after sorting, so that a stop's slug
+	// depends on where its author put it and not on where Seq happens to sort
+	// it. That is what lets StopSlugs answer for the same stop out here.
+	order := make([]int, len(svc.Stops))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(a, b int) bool { return svc.Stops[order[a]].Seq < svc.Stops[order[b]].Seq })
+
+	compiled := make([]CompilableStop, len(order))
+	for i, idx := range order {
+		stop := svc.Stops[idx]
 		compiled[i] = CompilableStop{
-			Slug:   uniqueStopSlug(svc.Slug, stop.Name, taken),
+			Slug:   slugs[idx],
 			Lat:    stop.Lat,
 			Lng:    stop.Lng,
 			DwellS: svc.Vehicle.DwellS,
@@ -136,30 +161,38 @@ func CompilableFromUserService(route Route, svc UserService) CompilableService {
 		},
 		Stops:   compiled,
 		Windows: svc.FrequencyWindows,
-	}
+	}, nil
 }
 
-// StopSlug mints the graph node key for one stop of a user-authored service:
-// `{service}--{stop}`, namespaced so two services that both stop at "Downtown"
-// stay distinct in a graph assembled from both.
+// StopSlugs mints the graph node key for every stop of a user-authored service —
+// `{service}--{stop}` — returning one slug per stop, positionally aligned with
+// svc.Stops.
 //
-// Exported because it is a persistence contract, not just a compile detail.
-// SPA-103 stores this slug on the stop row; a stored slug and a derived one
-// must agree exactly, or a service's graph node keys shift underneath the
-// backfill. Both sides call this.
-func StopSlug(serviceSlug, stopName string) string {
-	return Slugify(serviceSlug) + "--" + Slugify(stopName)
-}
-
-// uniqueStopSlug is StopSlug plus collision handling, so two stops sharing a
-// name within one service do not collapse onto the same graph node. taken
-// accumulates across a service's stops and is mutated by each call.
-func uniqueStopSlug(serviceSlug, stopName string, taken map[string]bool) string {
-	base := StopSlug(serviceSlug, stopName)
-	slug := base
-	for n := 2; taken[slug]; n++ {
-		slug = fmt.Sprintf("%s-%d", base, n)
+// This is the only place those keys are minted, and it is exported because the
+// slug is a persistence contract rather than a compile detail: SPA-103 stores it
+// on the stop row, and a stored slug that disagreed with a derived one would
+// shift a service's graph node keys underneath the backfill. Taking the whole
+// service rather than a single name is what makes that guarantee keepable — the
+// suffix a repeated name gets depends on the stops before it, so no per-name
+// function could return the same answer the compiler uses.
+//
+// Stop names are not unique within a service, so a repeat takes a -2, -3, ...
+// suffix, assigned in slice order — which UserService documents as the source of
+// truth for the stopping pattern. A slug is therefore only as stable as the
+// stops ahead of it: inserting a second "Central" before an existing one renames
+// the existing one. A caller that has persisted these must re-read them after an
+// edit rather than re-derive them.
+func StopSlugs(svc UserService) []string {
+	slugs := make([]string, len(svc.Stops))
+	taken := make(map[string]bool, len(svc.Stops))
+	for i, stop := range svc.Stops {
+		base := Slugify(svc.Slug) + "--" + Slugify(stop.Name)
+		slug := base
+		for n := 2; taken[slug]; n++ {
+			slug = fmt.Sprintf("%s-%d", base, n)
+		}
+		taken[slug] = true
+		slugs[i] = slug
 	}
-	taken[slug] = true
-	return slug
+	return slugs
 }
