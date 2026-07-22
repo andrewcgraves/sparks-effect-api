@@ -204,11 +204,22 @@ func CompilableFromUserService(route Route, svc UserService) (CompilableService,
 // stops ahead of it: inserting a second "Central" before an existing one renames
 // the existing one. A caller that has persisted these must re-read them after an
 // edit rather than re-derive them.
+//
+// svc.Slug is required, and is taken as given rather than re-slugified: it is
+// what makes one service's identities distinct from another's, and the uniqueness
+// this relies on is the UNIQUE constraint on user_services.slug.
 func StopSlugs(svc UserService) []string {
 	slugs := make([]string, len(svc.Stops))
 	taken := make(map[string]bool, len(svc.Stops))
 	for i, stop := range svc.Stops {
-		base := Slugify(svc.Slug) + "--" + Slugify(stop.Name)
+		// svc.Slug is used verbatim rather than passed through Slugify. It is
+		// already a slug — the handler mints it with Slugify and then adds any
+		// collision suffix — and Slugify is not idempotent at the margin: it
+		// truncates at maxSlugLen, so re-slugifying an 82-character "<80 chars>-2"
+		// cuts off the very suffix that distinguishes it, and two different
+		// services mint byte-identical stop identities. user_services.slug is
+		// UNIQUE, so taking it as given is exactly the guarantee this needs.
+		base := svc.Slug + "--" + Slugify(stop.Name)
 		slug := base
 		for n := 2; taken[slug]; n++ {
 			slug = fmt.Sprintf("%s-%d", base, n)

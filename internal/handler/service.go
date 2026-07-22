@@ -54,6 +54,15 @@ type serviceRequest struct {
 // applyTo copies the client-writable fields onto svc, leaving ID, Slug, and
 // OwnerID untouched. RouteID is not among them: it is resolved from the request
 // slug by validateAndSnapService, which needs the route itself anyway.
+//
+// The two server-assigned parts of a stop — its Seq and its Slug — are settled
+// here, in the one place a client's stops are taken in. Minting unconditionally
+// is what makes the slug unspoofable: serviceRequest.Stops is the model type, so
+// a client can put a slug on the wire, and anything short of overwriting every
+// one of them would let it name another service's stop.
+//
+// svc.Slug must already be set, since a stop identity is namespaced by its
+// service (see transit.UserService.MintStopSlugs).
 func (req serviceRequest) applyTo(svc *transit.UserService) {
 	svc.Name = req.Name
 	svc.Description = req.Description
@@ -61,6 +70,7 @@ func (req serviceRequest) applyTo(svc *transit.UserService) {
 	svc.Stops = req.Stops
 	svc.FrequencyWindows = req.FrequencyWindows
 	svc.NormalizeStops()
+	svc.MintStopSlugs()
 }
 
 // CreateService persists a new user-authored service owned by the caller.
@@ -87,19 +97,22 @@ func CreateService(store ServiceStore) http.HandlerFunc {
 			return
 		}
 
-		svc := transit.UserService{ID: id, OwnerID: user.ID}
+		// The service slug is settled before the request is applied, because a
+		// stop's identity is namespaced by it: minting stops first would name them
+		// after the slug the service asked for rather than the one it got, so two
+		// services whose names collide would mint colliding stop identities.
+		slug, err := mintSlug(r.Context(), store, req.Name)
+		if err != nil {
+			writeInternalError(w, "minting slug", err)
+			return
+		}
+
+		svc := transit.UserService{ID: id, Slug: slug, OwnerID: user.ID}
 		req.applyTo(&svc)
 
 		if !validateAndSnapService(w, r, store, &svc, req.RouteSlug) {
 			return
 		}
-
-		slug, err := mintSlug(r.Context(), store, svc.Name)
-		if err != nil {
-			writeInternalError(w, "minting slug", err)
-			return
-		}
-		svc.Slug = slug
 
 		if err := store.CreateUserService(r.Context(), svc); err != nil {
 			writeInternalError(w, "creating service", err)

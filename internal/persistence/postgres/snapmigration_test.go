@@ -21,11 +21,17 @@ import (
 // 00007 on the next Migrate, which is what lets a test put a pre-snap row in
 // front of it. Doing it this way rather than migrating partially keeps the test
 // honest — it runs the real migration file, not a copy of its SQL.
+//
+// 00008 is rewound with it, because a state before 00007 is necessarily also a
+// state before 00008: leaving 00008's constraint in place would refuse the
+// pre-snap rows these tests insert, and they would fail on the fixture rather
+// than on the migration under test.
 func rewindSnapMigration(t *testing.T, url string) {
 	t.Helper()
 	exec(t, url,
+		`ALTER TABLE user_services DROP CONSTRAINT IF EXISTS user_services_stops_have_slugs`,
 		`ALTER TABLE user_services DROP CONSTRAINT IF EXISTS user_services_stops_are_snapped`,
-		`DELETE FROM goose_db_version WHERE version_id = 7`)
+		`DELETE FROM goose_db_version WHERE version_id IN (7, 8)`)
 }
 
 func exec(t *testing.T, url string, statements ...string) {
@@ -127,8 +133,8 @@ func TestSnappedStopsConstraintRejectsAnUnsnappedStop(t *testing.T) {
 	_, err = conn.Exec(ctx, `INSERT INTO user_services (id, slug, route_id, owner_id, name, vehicle, stops)
 		VALUES ('`+usServiceID+`', 'unsnapped', '`+usRouteID+`', '`+usOwnerID+`', 'Unsnapped',
 		        '{"max_speed_kmh":320,"acceleration_ms2":1.1,"deceleration_ms2":1.3,"dwell_s":45}',
-		        '[{"name":"A","lat":37.0,"lng":-121.8,"seq":0,"chainage_m":0,"offset_m":0},
-		          {"name":"B","lat":37.0,"lng":-121.4,"seq":1}]')`)
+		        '[{"name":"A","slug":"unsnapped--a","lat":37.0,"lng":-121.8,"seq":0,"chainage_m":0,"offset_m":0},
+		          {"name":"B","slug":"unsnapped--b","lat":37.0,"lng":-121.4,"seq":1}]')`)
 	if err == nil {
 		t.Fatal("a stop with no chainage_m was accepted")
 	}

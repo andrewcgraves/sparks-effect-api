@@ -55,8 +55,12 @@ func userServiceFixture(t *testing.T) (*postgres.Repo, context.Context, string) 
 	return repo, ctx, url
 }
 
+// sampleUserService is a service in the shape the write path produces, stop
+// identities included — it mints them through MintStopSlugs rather than
+// spelling them out, so a change to the scheme reaches these tests instead of
+// leaving them asserting against a stale hand-written copy.
 func sampleUserService() transit.UserService {
-	return transit.UserService{
+	svc := transit.UserService{
 		ID: usServiceID, Slug: "bay-area-express", RouteID: usRouteID, OwnerID: usOwnerID,
 		Name: "Bay Area Express", Description: "Peak express",
 		Vehicle: transit.VehicleParams{
@@ -72,6 +76,8 @@ func sampleUserService() transit.UserService {
 			{StartTime: "10:00", EndTime: "16:00", HeadwayS: 1800},
 		},
 	}
+	svc.MintStopSlugs()
+	return svc
 }
 
 func TestUserServiceRoundTrip(t *testing.T) {
