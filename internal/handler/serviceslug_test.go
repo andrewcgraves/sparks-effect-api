@@ -196,3 +196,34 @@ func TestStoredStopSlugsMatchWhatTheCompilerDerives(t *testing.T) {
 		}
 	}
 }
+
+// The seam where the service-slug collision suffix meets stop namespacing, end
+// to end. mintSlug appends "-2" after slugifying, so two services sharing a
+// maximum-length name get slugs of 80 and 82 characters — and anything that
+// re-slugified the longer one would truncate the suffix back off and hand both
+// services the same stop identities.
+func TestCreateKeepsStopSlugsDistinctForMaxLengthServiceNames(t *testing.T) {
+	store := newFakeServiceStore()
+	payload := `{
+		"route_slug": "diagonal",
+		"name": "` + strings.Repeat("a", 80) + `",
+		"vehicle": {"max_speed_kmh": 200, "acceleration_ms2": 1, "deceleration_ms2": 1, "dwell_s": 30},
+		"stops": [{"name": "Downtown", "lat": 1, "lng": 1}, {"name": "Airport", "lat": 2, "lng": 2}],
+		"frequency_windows": []
+	}`
+
+	first := decodeService(t, serveAs(t, store, svcOwner, http.MethodPost, "/api/services", payload))
+	second := decodeService(t, serveAs(t, store, svcOwner, http.MethodPost, "/api/services", payload))
+	if first.Slug == second.Slug {
+		t.Fatalf("setup: both services got slug %q", first.Slug)
+	}
+
+	firstSlugs := storedStopSlugs(t, store, first.ID)
+	secondSlugs := storedStopSlugs(t, store, second.ID)
+	for i := range firstSlugs {
+		if firstSlugs[i] == secondSlugs[i] {
+			t.Errorf("stop %d: services %q and %q both minted identity %q",
+				i, first.Slug, second.Slug, firstSlugs[i])
+		}
+	}
+}

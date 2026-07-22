@@ -56,20 +56,18 @@ type ServiceStopPoint struct {
 	// that could name itself could name another service's stop.
 	//
 	// It is *not* the graph edge key, despite Edge.FromSlug/ToSlug and
-	// ReachableStation.StationSlug being slugs too. Interchange in this system is
-	// only ever two services emitting an edge under one key, so a per-service
-	// namespaced identity used as the key would make interchange structurally
-	// impossible — N services, N disconnected components, silently. SPA-109
-	// decides the real key by clustering co-located stops across a scenario's
-	// members at compile time. For a single-service compile every cluster is a
-	// singleton and the two coincide, which is why the adapter uses this as the
-	// key today; see CompilableStop.Slug.
+	// ReachableStation.StationSlug being slugs too: a per-service namespaced
+	// identity used as the key would make interchange structurally impossible.
+	// SPA-109 resolves interchange by clustering co-located stops across a
+	// scenario's members at compile time and assigning that cluster key instead.
+	// CompilableStop.Slug carries the argument in full.
 	//
 	// Stored rather than derived on read because it is the identity anything
-	// resolving a compile result back to a stop reports. The compiler still
-	// derives its own copy through StopSlugs — the same function that mints this
-	// — so the two agree by construction, and a row that predates this field
-	// compiles identically rather than differently.
+	// resolving a compile result back to a stop reports. Nothing in the compile
+	// path depends on the stored copy, though: CompilableFromUserService derives
+	// its own list from StopSlugs, the same function that mints this, so this
+	// field reports an identity rather than deciding one and the two cannot
+	// disagree.
 	Slug string  `json:"slug"`
 	Lat  float64 `json:"lat"`
 	Lng  float64 `json:"lng"`

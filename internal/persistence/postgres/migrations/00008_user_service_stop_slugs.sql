@@ -22,10 +22,11 @@
 --
 -- ## Why presence and not uniqueness
 --
--- Slugs must also be unique within a service — SPA-115's clustering walks stops
--- in ascending slug order, so a duplicate would make cluster keys depend on
--- input order. That is enforced in transit.StopSlugs, which disambiguates a
--- repeated name with a -2, -3, ... suffix, and is tested at that seam.
+-- Slugs must also be unique within a service — SPA-109's clustering is expected
+-- to walk stops in ascending slug order (SPA-115 settles that algorithm), so a
+-- duplicate would make cluster keys depend on input order. That is enforced in
+-- transit.StopSlugs, which disambiguates a repeated name with a -2, -3, ...
+-- suffix, and is tested at that seam.
 --
 -- It is not re-enforced here because a CHECK cannot contain a subquery, so
 -- expressing "the slugs in this document are distinct" would mean a stored

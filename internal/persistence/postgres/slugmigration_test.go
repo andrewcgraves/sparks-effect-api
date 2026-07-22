@@ -28,11 +28,12 @@ func rewindSlugMigration(t *testing.T, url string) {
 		`DELETE FROM goose_db_version WHERE version_id = 8`)
 }
 
-// insertPreSlugUserService writes a row in the post-snap, pre-SPA-103 shape:
-// snapped coordinates, so 00007's constraint is satisfied, but no stop
-// identities. It goes in through raw SQL because the Go model can no longer
-// express a stop without one.
-func insertPreSlugUserService(t *testing.T, url, stopsJSON string) {
+// insertUserServiceRaw writes a user_services row with the stop document given
+// verbatim. It goes in through raw SQL because the Go model can no longer
+// express a stop without an identity, which is exactly the shape these tests
+// need to put in front of the migration. Coordinates are snapped throughout, so
+// 00007's constraint is satisfied and only 00008 is under test.
+func insertUserServiceRaw(t *testing.T, url, stopsJSON string) {
 	t.Helper()
 	exec(t, url, `INSERT INTO user_services (id, slug, route_id, owner_id, name, vehicle, stops)
 		VALUES ('`+usServiceID+`', 'legacy', '`+usRouteID+`', '`+usOwnerID+`', 'Legacy',
@@ -47,7 +48,7 @@ func insertPreSlugUserService(t *testing.T, url, stopsJSON string) {
 func TestSlugMigrationRefusesAPreSlugRow(t *testing.T) {
 	_, _, url := userServiceFixture(t)
 	rewindSlugMigration(t, url)
-	insertPreSlugUserService(t, url, `[
+	insertUserServiceRaw(t, url, `[
 		{"name":"A","lat":37.0,"lng":-121.8,"seq":0,"chainage_m":0,"offset_m":0},
 		{"name":"B","lat":37.0,"lng":-121.4,"seq":1,"chainage_m":35000,"offset_m":0}
 	]`)
@@ -69,7 +70,7 @@ func TestSlugMigrationRefusesAPreSlugRow(t *testing.T) {
 func TestSlugMigrationRefusesAnEmptySlug(t *testing.T) {
 	_, _, url := userServiceFixture(t)
 	rewindSlugMigration(t, url)
-	insertPreSlugUserService(t, url, `[
+	insertUserServiceRaw(t, url, `[
 		{"name":"A","slug":"legacy--a","lat":37.0,"lng":-121.8,"seq":0,"chainage_m":0,"offset_m":0},
 		{"name":"B","slug":"","lat":37.0,"lng":-121.4,"seq":1,"chainage_m":35000,"offset_m":0}
 	]`)
@@ -96,7 +97,7 @@ func TestSlugMigrationRunsOnAnEmptyTable(t *testing.T) {
 func TestSlugMigrationAcceptsAnAlreadySluggedRow(t *testing.T) {
 	_, _, url := userServiceFixture(t)
 	rewindSlugMigration(t, url)
-	insertPreSlugUserService(t, url, `[
+	insertUserServiceRaw(t, url, `[
 		{"name":"A","slug":"legacy--a","lat":37.0,"lng":-121.8,"seq":0,"chainage_m":0,"offset_m":0},
 		{"name":"B","slug":"legacy--b","lat":37.0,"lng":-121.4,"seq":1,"chainage_m":35000,"offset_m":0}
 	]`)

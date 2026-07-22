@@ -106,26 +106,6 @@ func TestMintStopSlugsIsIdempotent(t *testing.T) {
 	}
 }
 
-// The defect this whole ticket exists to avoid: a stop persisted under one
-// identity and compiled under another. The compiler derives its keys from
-// StopSlugs, so what is stored has to be the same list.
-func TestMintStopSlugsMatchesWhatTheCompilerDerives(t *testing.T) {
-	svc := transit.UserService{
-		Slug: "bay-area-express",
-		Stops: []transit.ServiceStopPoint{
-			{Name: "San Francisco"}, {Name: "Central"}, {Name: "Central"}, {Name: "San Jose"},
-		},
-	}
-	derived := transit.StopSlugs(svc)
-	svc.MintStopSlugs()
-
-	for i, got := range slugsOf(svc) {
-		if got != derived[i] {
-			t.Errorf("stop %d: stored %q but the compiler derives %q", i, got, derived[i])
-		}
-	}
-}
-
 // A slug is only useful as identity if it is one — the suffix rule has to hold
 // even where two stops slugify to the same base from different display names.
 func TestMintStopSlugsAreUniqueWithinAService(t *testing.T) {
@@ -157,5 +137,24 @@ func TestMintStopSlugsToleratesNoStops(t *testing.T) {
 
 	if len(svc.Stops) != 0 {
 		t.Fatalf("minting invented %d stops", len(svc.Stops))
+	}
+}
+
+// Two services cannot share a stop identity, and the collision suffix on a
+// service slug is the case where that nearly fails: mintSlug appends "-2"
+// *after* slugifying, so a maximum-length name yields an 82-character slug.
+// Anything that re-slugified that would truncate the suffix back off and hand
+// both services the same prefix.
+func TestMintStopSlugsKeepsLongServiceSlugsDistinct(t *testing.T) {
+	long := strings.Repeat("a", 80)
+
+	first := transit.UserService{Slug: long, Stops: []transit.ServiceStopPoint{{Name: "Downtown"}}}
+	second := transit.UserService{Slug: long + "-2", Stops: []transit.ServiceStopPoint{{Name: "Downtown"}}}
+	first.MintStopSlugs()
+	second.MintStopSlugs()
+
+	if first.Stops[0].Slug == second.Stops[0].Slug {
+		t.Fatalf("services %q and %q both minted stop identity %q",
+			first.Slug, second.Slug, first.Stops[0].Slug)
 	}
 }
