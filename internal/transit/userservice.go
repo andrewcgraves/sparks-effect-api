@@ -50,7 +50,27 @@ type VehicleParams struct {
 // products, persisted alongside it so nothing downstream has to re-derive them
 // and risk disagreeing.
 type ServiceStopPoint struct {
-	Name string  `json:"name"`
+	Name string `json:"name"`
+	// Slug is this stop's identity — `{service}--{stop}`, minted server-side by
+	// MintStopSlugs on every write and never read from the client, since a stop
+	// that could name itself could name another service's stop.
+	//
+	// It is *not* the graph edge key, despite Edge.FromSlug/ToSlug and
+	// ReachableStation.StationSlug being slugs too. Interchange in this system is
+	// only ever two services emitting an edge under one key, so a per-service
+	// namespaced identity used as the key would make interchange structurally
+	// impossible — N services, N disconnected components, silently. SPA-109
+	// decides the real key by clustering co-located stops across a scenario's
+	// members at compile time. For a single-service compile every cluster is a
+	// singleton and the two coincide, which is why the adapter uses this as the
+	// key today; see CompilableStop.Slug.
+	//
+	// Stored rather than derived on read because it is the identity anything
+	// resolving a compile result back to a stop reports. The compiler still
+	// derives its own copy through StopSlugs — the same function that mints this
+	// — so the two agree by construction, and a row that predates this field
+	// compiles identically rather than differently.
+	Slug string  `json:"slug"`
 	Lat  float64 `json:"lat"`
 	Lng  float64 `json:"lng"`
 	Seq  int     `json:"seq"`
@@ -125,6 +145,26 @@ func (s UserService) Validate() error {
 func (s *UserService) NormalizeStops() {
 	for i := range s.Stops {
 		s.Stops[i].Seq = i
+	}
+}
+
+// MintStopSlugs assigns every stop its identity, overwriting whatever was
+// there. Anything a client sent is discarded rather than merged: the slug is
+// server-assigned, and a stop allowed to name itself could claim another
+// service's identity.
+//
+// It requires s.Slug to be set — the identity is namespaced by the owning
+// service — so a create has to settle the service slug before calling this.
+//
+// The derivation is StopSlugs', not a second copy, because the compiler derives
+// the same list from the same function; a stop persisted under one identity and
+// compiled under another is the defect this exists to prevent. Re-minting an
+// unchanged service is therefore a no-op, which is what makes it safe on the
+// update path, where the whole aggregate is rewritten.
+func (s *UserService) MintStopSlugs() {
+	slugs := StopSlugs(*s)
+	for i := range s.Stops {
+		s.Stops[i].Slug = slugs[i]
 	}
 }
 

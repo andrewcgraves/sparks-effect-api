@@ -48,7 +48,7 @@ func userScenarioFixture(t *testing.T) (*postgres.Repo, context.Context) {
 	}
 
 	basicSvc := func(id, slug, owner string) transit.UserService {
-		return transit.UserService{
+		svc := transit.UserService{
 			ID: id, Slug: slug, RouteID: usnRouteID, OwnerID: owner, Name: "Service " + slug,
 			Vehicle: transit.VehicleParams{MaxSpeedKMH: 200, AccelerationMS2: 1, DecelerationMS2: 1, DwellS: 30},
 			Stops: []transit.ServiceStopPoint{
@@ -56,6 +56,8 @@ func userScenarioFixture(t *testing.T) (*postgres.Repo, context.Context) {
 				{Name: "B", Lat: 2, Lng: 2, Seq: 1},
 			},
 		}
+		svc.MintStopSlugs()
+		return svc
 	}
 	if err := repo.CreateUserService(ctx, basicSvc(usnService1ID, "usn-service-1", usnOwnerID)); err != nil {
 		t.Fatalf("CreateUserService 1: %v", err)
