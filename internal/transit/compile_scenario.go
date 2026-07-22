@@ -68,9 +68,13 @@ func CompileScenario(routes []Route, stations []Station, services []Service, veh
 // the same key, so CompileServicePhysics' duplicate-slug check still guards
 // each service exactly as before.
 func CompileServices(svcs []CompilableService) (TransitGraph, error) {
-	merged, report := MergeColocatedStops(svcs)
+	merged, report, nodes := MergeColocatedStops(svcs)
 
-	graph := TransitGraph{Merge: report}
+	// nodes come straight from the same clustering that rewrote the slugs, so
+	// they carry exactly one node per key the edges below emit — the closure
+	// the graph would otherwise lack, and which the hand-authored Compile does
+	// not provide (its seeded isochrone sources positions elsewhere).
+	graph := TransitGraph{Merge: report, Nodes: nodes}
 	for _, cs := range merged {
 		sg, err := CompileServicePhysics(cs)
 		if err != nil {
