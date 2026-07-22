@@ -745,28 +745,34 @@ func (r *Repo) ListJobs(ctx context.Context) ([]transit.Job, error) {
 
 // GetLatestSucceededJob is the seeded "result, retrievable by slug" read: it
 // joins through to scenarios by slug rather than requiring the caller to know a
-// scenario id, matching GetTravelTimes's slug-addressed convention.
+// scenario id, matching GetTravelTimes's slug-addressed convention. It is a thin
+// wrapper over latestSucceededJobBySlug, the one generalised resolver.
 func (r *Repo) GetLatestSucceededJob(ctx context.Context, scenarioSlug, kind string) (transit.Job, bool, error) {
-	row := r.pool.QueryRow(ctx,
-		`SELECT `+jobColumnsQualified+`
-		 FROM jobs j JOIN scenarios s ON s.id = j.scenario_id
-		 WHERE s.slug = $1 AND j.kind = $2 AND j.status = $3
-		 ORDER BY j.created_at DESC LIMIT 1`,
-		scenarioSlug, kind, transit.JobStatusSucceeded)
-	return scanJob(row)
+	return r.latestSucceededJobBySlug(ctx, "scenarios", "scenario_id", scenarioSlug, kind)
 }
 
-// GetLatestSucceededUserScenarioJob is the user-authored counterpart, joining
+// GetLatestSucceededUserScenarioJob is the user-authored counterpart, resolving
 // through user_scenarios instead of scenarios. Kind is fixed at
 // compile_user_scenario — a user scenario has exactly one compile kind — so the
 // caller addresses it by slug alone.
 func (r *Repo) GetLatestSucceededUserScenarioJob(ctx context.Context, userScenarioSlug string) (transit.Job, bool, error) {
+	return r.latestSucceededJobBySlug(ctx, "user_scenarios", "user_scenario_id", userScenarioSlug, transit.JobKindCompileUserScenario)
+}
+
+// latestSucceededJobBySlug is the single "compiled graph, retrievable by slug"
+// resolver both readers above share: it joins jobs to the target table on the
+// given FK column, filters by the target's slug, kind, and succeeded status, and
+// takes the most recent. targetTable and fkColumn are compile-time constants
+// from the two wrappers, never caller input, so interpolating them into the SQL
+// carries no injection surface; the slug, kind, and status remain bound
+// parameters.
+func (r *Repo) latestSucceededJobBySlug(ctx context.Context, targetTable, fkColumn, slug, kind string) (transit.Job, bool, error) {
 	row := r.pool.QueryRow(ctx,
 		`SELECT `+jobColumnsQualified+`
-		 FROM jobs j JOIN user_scenarios us ON us.id = j.user_scenario_id
-		 WHERE us.slug = $1 AND j.kind = $2 AND j.status = $3
+		 FROM jobs j JOIN `+targetTable+` t ON t.id = j.`+fkColumn+`
+		 WHERE t.slug = $1 AND j.kind = $2 AND j.status = $3
 		 ORDER BY j.created_at DESC LIMIT 1`,
-		userScenarioSlug, transit.JobKindCompileUserScenario, transit.JobStatusSucceeded)
+		slug, kind, transit.JobStatusSucceeded)
 	return scanJob(row)
 }
 

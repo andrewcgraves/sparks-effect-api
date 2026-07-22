@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
-	"github.com/andrewcgraves/sparks-effect-api/internal/ids"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 	"github.com/andrewcgraves/sparks-effect-api/internal/worker"
 )
@@ -45,8 +44,7 @@ func CompileScenario(store CompileStore) http.HandlerFunc {
 		slug := r.PathValue("slug")
 		sc, found, err := store.GetScenarioBySlug(r.Context(), slug)
 		if err != nil {
-			log.Printf("handler: looking up scenario failed: %v", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
+			writeInternalError(w, "looking up scenario", err)
 			return
 		}
 		if !found {
@@ -54,26 +52,14 @@ func CompileScenario(store CompileStore) http.HandlerFunc {
 			return
 		}
 
-		id, err := ids.NewUUID()
-		if err != nil {
-			log.Printf("handler: generating job id failed: %v", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
-			return
-		}
-
-		job := transit.Job{
-			ID:         id,
+		job, ok := createCompileJob(w, r, store, transit.Job{
 			Kind:       transit.JobKindCompileScenario,
-			Status:     transit.JobStatusQueued,
 			ScenarioID: &sc.ID,
 			OwnerID:    &user.ID,
-		}
-		if err := store.CreateJob(r.Context(), job); err != nil {
-			log.Printf("handler: creating job failed: %v", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
+		})
+		if !ok {
 			return
 		}
-
 		enqueueCompile(store, job)
 		writeJSON(w, http.StatusAccepted, job)
 	}
@@ -112,8 +98,7 @@ func JobStatus(store CompileStore) http.HandlerFunc {
 		id := r.PathValue("id")
 		job, found, err := store.GetJobByID(r.Context(), id)
 		if err != nil {
-			log.Printf("handler: looking up job failed: %v", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
+			writeInternalError(w, "looking up job", err)
 			return
 		}
 		if !found || (!user.IsAdmin && (job.OwnerID == nil || *job.OwnerID != user.ID)) {
@@ -134,8 +119,7 @@ func ScenarioGraph(store CompileStore) http.HandlerFunc {
 		slug := r.PathValue("slug")
 		job, found, err := store.GetLatestSucceededJob(r.Context(), slug, transit.JobKindCompileScenario)
 		if err != nil {
-			log.Printf("handler: looking up compiled graph failed: %v", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
+			writeInternalError(w, "looking up compiled graph", err)
 			return
 		}
 		if !found || job.Result == nil {

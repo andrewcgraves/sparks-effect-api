@@ -267,6 +267,8 @@ func (f *fakeCompileStore) ListUserServicesByIDs(_ context.Context, ids []string
 }
 
 func (f *fakeCompileStore) ListRoutesByIDs(_ context.Context, ids []string) ([]transit.Route, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	want := make(map[string]bool, len(ids))
 	for _, id := range ids {
 		want[id] = true
