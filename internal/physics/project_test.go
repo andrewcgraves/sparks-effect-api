@@ -402,3 +402,153 @@ func TestProjectStops_coincidentStopsProduceZeroDistanceSpan(t *testing.T) {
 		t.Errorf("span.DistanceM = %v, want ~0 for coincident stops", got[0].DistanceM)
 	}
 }
+
+// TestSnapStops_returnsChainagePreservingInputOrder covers the ordering
+// contract that separates SnapStops from ProjectStops: callers need to be able
+// to detect that a service's stop sequence disagrees with the route's
+// direction, which is impossible if the snapper pre-sorts by chainage. Stops
+// come back in the order they were supplied.
+func TestSnapStops_returnsChainagePreservingInputOrder(t *testing.T) {
+	line := []Point{{Lng: 0, Lat: 0}, {Lng: 0, Lat: 1}}
+	// Supplied in reverse chainage order on purpose.
+	stops := []Stop{
+		{ID: "far", Location: Point{Lng: 0, Lat: 1}},
+		{ID: "near", Location: Point{Lng: 0, Lat: 0}},
+	}
+
+	got, err := SnapStops(line, stops)
+	if err != nil {
+		t.Fatalf("SnapStops() error = %v, want nil", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len(got) = %d, want 2", len(got))
+	}
+
+	if got[0].ID != "far" || got[1].ID != "near" {
+		t.Fatalf("IDs = (%s, %s), want (far, near) — input order must be preserved",
+			got[0].ID, got[1].ID)
+	}
+
+	wantFarM := haversineM(line[0], line[1]) // haversine ground truth
+	if math.Abs(got[0].ChainageM-wantFarM) > distTol {
+		t.Errorf("got[0].ChainageM = %v, want ~%v", got[0].ChainageM, wantFarM)
+	}
+	if math.Abs(got[1].ChainageM) > distTol {
+		t.Errorf("got[1].ChainageM = %v, want ~0", got[1].ChainageM)
+	}
+}
+
+// TestSnapStops_offLineStopReturnsThePointOnTheLine covers the snapped
+// coordinate: for a stop sitting east of a meridian line, the answer is the
+// foot of the perpendicular — same latitude, on the line's longitude — not the
+// raw input point.
+func TestSnapStops_offLineStopReturnsThePointOnTheLine(t *testing.T) {
+	const lineLng = -119.78
+	line := []Point{{Lng: lineLng, Lat: 36.75}, {Lng: lineLng, Lat: 36.85}}
+	stops := []Stop{{ID: "east-of-line", Location: Point{Lng: lineLng + 0.01, Lat: 36.80}}}
+
+	got, err := SnapStops(line, stops)
+	if err != nil {
+		t.Fatalf("SnapStops() error = %v, want nil", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(got) = %d, want 1", len(got))
+	}
+
+	// degTol is a tolerance in degrees loose enough to absorb the planar
+	// round-trip but far tighter than the stop's 0.01° offset from the line.
+	const degTol = 1e-6
+	if math.Abs(got[0].Point.Lng-lineLng) > degTol {
+		t.Errorf("got[0].Point.Lng = %v, want ~%v (the snapped point lies on the line)", got[0].Point.Lng, lineLng)
+	}
+	if math.Abs(got[0].Point.Lat-36.80) > degTol {
+		t.Errorf("got[0].Point.Lat = %v, want ~36.80 (foot of the perpendicular)", got[0].Point.Lat)
+	}
+}
+
+// TestSnapStops_offsetIsDistanceFromRawInputToSnappedPoint covers OffsetM: how
+// far the caller's raw coordinate sits from the line. It is the input to the
+// off-route tolerance check, so it must measure the raw point, not the snapped
+// one — a stop already on the line has an offset of zero.
+func TestSnapStops_offsetIsDistanceFromRawInputToSnappedPoint(t *testing.T) {
+	const lineLng = -119.78
+	line := []Point{{Lng: lineLng, Lat: 36.75}, {Lng: lineLng, Lat: 36.85}}
+	offLine := Point{Lng: lineLng + 0.01, Lat: 36.80}
+	stops := []Stop{
+		{ID: "on-line", Location: Point{Lng: lineLng, Lat: 36.80}},
+		{ID: "east-of-line", Location: offLine},
+	}
+
+	got, err := SnapStops(line, stops)
+	if err != nil {
+		t.Fatalf("SnapStops() error = %v, want nil", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len(got) = %d, want 2", len(got))
+	}
+
+	if math.Abs(got[0].OffsetM) > distTol {
+		t.Errorf("got[0].OffsetM = %v, want ~0 for a stop already on the line", got[0].OffsetM)
+	}
+
+	// The perpendicular from the stop meets the meridian at its own latitude,
+	// so the offset is the east-west great-circle distance between the two —
+	// haversine ground truth, independent of the planar frame under test.
+	wantOffsetM := haversineM(offLine, Point{Lng: lineLng, Lat: 36.80})
+	if math.Abs(got[1].OffsetM-wantOffsetM) > distTol {
+		t.Errorf("got[1].OffsetM = %v, want ~%v (±%v)", got[1].OffsetM, wantOffsetM, distTol)
+	}
+}
+
+// TestSnapStops_errorsOnShortLine covers the one input SnapStops rejects: a
+// line it cannot project onto. It errors the same way ProjectStops does, so
+// callers see one message for one condition.
+func TestSnapStops_errorsOnShortLine(t *testing.T) {
+	stops := []Stop{{ID: "a", Location: Point{Lng: 0, Lat: 0}}}
+
+	for _, tc := range []struct {
+		name string
+		line []Point
+	}{
+		{name: "single point", line: []Point{{Lng: 0, Lat: 0}}},
+		{name: "empty line", line: nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := SnapStops(tc.line, stops)
+			if err == nil {
+				t.Fatalf("SnapStops() error = nil, want error containing %q", "at least 2")
+			}
+			if !strings.Contains(err.Error(), "at least 2") {
+				t.Errorf("SnapStops() error = %q, want it to contain %q", err.Error(), "at least 2")
+			}
+		})
+	}
+}
+
+// TestSnapStops_acceptsFewerThanTwoStops covers where SnapStops deliberately
+// diverges from ProjectStops: snapping needs no inter-stop span, so a single
+// stop (the snap-preview and single-stop validation case) is valid, and no
+// stops is an empty result rather than an error.
+func TestSnapStops_acceptsFewerThanTwoStops(t *testing.T) {
+	line := []Point{{Lng: 0, Lat: 0}, {Lng: 0, Lat: 1}}
+
+	got, err := SnapStops(line, []Stop{{ID: "only", Location: Point{Lng: 0, Lat: 0.5}}})
+	if err != nil {
+		t.Fatalf("SnapStops() with one stop error = %v, want nil", err)
+	}
+	if len(got) != 1 || got[0].ID != "only" {
+		t.Fatalf("got = %+v, want exactly one snapped stop with ID %q", got, "only")
+	}
+	wantChainageM := haversineM(line[0], Point{Lng: 0, Lat: 0.5})
+	if math.Abs(got[0].ChainageM-wantChainageM) > distTol {
+		t.Errorf("got[0].ChainageM = %v, want ~%v", got[0].ChainageM, wantChainageM)
+	}
+
+	empty, err := SnapStops(line, nil)
+	if err != nil {
+		t.Fatalf("SnapStops() with no stops error = %v, want nil", err)
+	}
+	if len(empty) != 0 {
+		t.Errorf("SnapStops() with no stops = %+v, want empty", empty)
+	}
+}
