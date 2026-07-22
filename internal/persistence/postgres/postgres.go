@@ -171,14 +171,14 @@ func (r *Repo) GetRouteBySlug(ctx context.Context, slug string) (transit.Route, 
 	return rt, true, nil
 }
 
-// ListRoutes returns every ingested route reduced to the fields a picker needs.
-// The projection is done in SQL rather than after the fact: geometry and
+// ListRouteSummaries returns every route reduced to the fields needed to choose
+// one. The projection is done in SQL rather than after the fact: geometry and
 // segments are the bulk of a route row and no caller of this list wants them.
 // Ordered by slug so the list a client renders is stable between calls.
-func (r *Repo) ListRoutes(ctx context.Context) ([]transit.RouteSummary, error) {
+func (r *Repo) ListRouteSummaries(ctx context.Context) ([]transit.RouteSummary, error) {
 	rows, err := r.pool.Query(ctx, `SELECT slug, name, mode FROM routes ORDER BY slug`)
 	if err != nil {
-		return nil, wrap("ListRoutes", err)
+		return nil, wrap("ListRouteSummaries", err)
 	}
 	defer rows.Close()
 
@@ -186,11 +186,11 @@ func (r *Repo) ListRoutes(ctx context.Context) ([]transit.RouteSummary, error) {
 	for rows.Next() {
 		var rs transit.RouteSummary
 		if err := rows.Scan(&rs.Slug, &rs.Name, &rs.Mode); err != nil {
-			return nil, wrap("ListRoutes scan", err)
+			return nil, wrap("ListRouteSummaries scan", err)
 		}
 		out = append(out, rs)
 	}
-	return out, wrap("ListRoutes rows", rows.Err())
+	return out, wrap("ListRouteSummaries rows", rows.Err())
 }
 
 func (r *Repo) ListRoutesByScenario(ctx context.Context, scenarioID string) ([]transit.Route, error) {

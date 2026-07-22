@@ -90,7 +90,7 @@ func (s *stubAuthDeps) CreateRoute(context.Context, transit.Route) error { retur
 func (s *stubAuthDeps) GetRouteBySlug(context.Context, string) (transit.Route, bool, error) {
 	return transit.Route{}, false, nil
 }
-func (s *stubAuthDeps) ListRoutes(context.Context) ([]transit.RouteSummary, error) {
+func (s *stubAuthDeps) ListRouteSummaries(context.Context) ([]transit.RouteSummary, error) {
 	return nil, nil
 }
 func (s *stubAuthDeps) GetScenarioBySlug(context.Context, string) (transit.Scenario, bool, error) {
@@ -310,7 +310,8 @@ func TestRouteReadEndpointStaysOpenWithoutAToken(t *testing.T) {
 
 // The route list shares the read endpoint's public posture: the picker that
 // consumes it runs before the user has picked anything, let alone signed in.
-// It must also not be shadowed by the sibling /api/routes/{slug} read.
+// A 200 here also proves the sibling /api/routes/{slug} read does not shadow
+// the collection.
 func TestRouteListEndpointStaysOpenWithoutAToken(t *testing.T) {
 	h := newTestServer(t, newStubDeps())
 
@@ -371,9 +372,8 @@ func TestAuthRoutesReportUnavailableWithoutADatabase(t *testing.T) {
 		t.Errorf("route read status = %d, want 503 with no database configured", rec.Code)
 	}
 
-	// The collection needs its own registration: a subtree pattern of
-	// /api/routes/ does not cover /api/routes, it only redirects to it, so
-	// without an exact entry the list would answer 301 rather than 503.
+	// The collection is checked separately from the slug read above: it is a
+	// distinct registration, for the reason given at registerRouteReadRoutes.
 	if rec := request(t, h, http.MethodGet, "/api/routes", ""); rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("route list status = %d, want 503 with no database configured", rec.Code)
 	}

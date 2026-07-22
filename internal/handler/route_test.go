@@ -58,7 +58,7 @@ func (f *fakeRouteStore) GetScenarioBySlug(_ context.Context, slug string) (tran
 	return sc, ok, nil
 }
 
-func (f *fakeRouteStore) ListRoutes(_ context.Context) ([]transit.RouteSummary, error) {
+func (f *fakeRouteStore) ListRouteSummaries(_ context.Context) ([]transit.RouteSummary, error) {
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
@@ -347,7 +347,7 @@ func TestRouteBySlugReportsStorageFailure(t *testing.T) {
 func listRoutes(t *testing.T, h http.Handler) *httptest.ResponseRecorder {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/routes", http.NoBody))
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/routes", nil))
 	return rec
 }
 

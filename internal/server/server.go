@@ -81,9 +81,10 @@ func New(cfg config.Config, store *transit.Store, deps AuthDeps, chainer isochro
 // they answer 503 rather than 404.
 func registerRouteReadRoutes(mux *http.ServeMux, deps AuthDeps) {
 	if deps == nil {
-		// The collection is registered separately from the subtree: a pattern of
-		// /api/routes/ does not serve /api/routes, it redirects to it, so without
-		// its own entry the list would answer 301 rather than 503.
+		// The collection needs its own entry alongside the subtree: /api/routes/
+		// does not serve /api/routes, it makes the mux answer that path with a
+		// 307 to the trailing-slash form. Without this the list would redirect
+		// rather than report itself unavailable.
 		mux.HandleFunc("/api/routes", serviceUnavailable("route storage is unavailable"))
 		mux.HandleFunc("/api/routes/", serviceUnavailable("route storage is unavailable"))
 		return

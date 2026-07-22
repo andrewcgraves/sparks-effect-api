@@ -16,7 +16,7 @@ import (
 type RouteStore interface {
 	CreateRoute(ctx context.Context, r transit.Route) error
 	GetRouteBySlug(ctx context.Context, slug string) (transit.Route, bool, error)
-	ListRoutes(ctx context.Context) ([]transit.RouteSummary, error)
+	ListRouteSummaries(ctx context.Context) ([]transit.RouteSummary, error)
 	GetScenarioBySlug(ctx context.Context, slug string) (transit.Scenario, bool, error)
 }
 
@@ -138,17 +138,18 @@ func RouteBySlug(store RouteStore) http.HandlerFunc {
 	}
 }
 
-// Routes returns a handler that lists the ingested routes for a picker: enough
-// to show a choice and address the one that is chosen, no more. It is the
-// discovery half of RouteBySlug — without it a client would have to already
-// know a slug to read anything — and shares its public posture, since the
-// picker runs before a caller has authenticated to author anything.
+// Routes returns a handler that lists routes for a picker: enough to show a
+// choice and address the one that is chosen, no more. It is the discovery half
+// of RouteBySlug — without it a client would have to already know a slug to
+// read anything.
 //
-// Like RouteBySlug it reads Postgres, not the embedded scenario store, so it
-// lists admin-ingested routes rather than seeded scenario ones.
+// Like RouteBySlug it reads Postgres rather than the embedded scenario store,
+// so it spans everything addressable by slug: admin-ingested alignments and the
+// seeded scenario routes alike. Both are real choices, so the picker is offered
+// both.
 func Routes(store RouteStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		routes, err := store.ListRoutes(r.Context())
+		routes, err := store.ListRouteSummaries(r.Context())
 		if err != nil {
 			log.Printf("handler: listing routes failed: %v", err)
 			writeError(w, http.StatusInternalServerError, "internal error")

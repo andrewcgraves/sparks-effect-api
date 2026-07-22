@@ -451,15 +451,15 @@ func TestIngestedRouteRoundTrip(t *testing.T) {
 	}
 }
 
-// ListRoutes backs the route picker (SPA-104): every ingested route, in a
+// ListRouteSummaries backs the route picker (SPA-104): every route, in a
 // stable order, reduced to the three fields a picker needs. Scenario-attached
 // and standalone routes are both listed — a picker offers whatever exists.
-func TestListRoutesReturnsEveryIngestedRouteInSlugOrder(t *testing.T) {
+func TestListRouteSummariesReturnsEveryRouteInSlugOrder(t *testing.T) {
 	ctx := context.Background()
 	repo, _ := freshRepo(t)
 
-	if empty, err := repo.ListRoutes(ctx); err != nil || len(empty) != 0 {
-		t.Fatalf("ListRoutes on an empty database: got %+v err=%v", empty, err)
+	if empty, err := repo.ListRouteSummaries(ctx); err != nil || len(empty) != 0 {
+		t.Fatalf("ListRouteSummaries on an empty database: got %+v err=%v", empty, err)
 	}
 
 	geom := transit.GeoLineString{
@@ -475,16 +475,16 @@ func TestListRoutesReturnsEveryIngestedRouteInSlugOrder(t *testing.T) {
 		}
 	}
 
-	got, err := repo.ListRoutes(ctx)
+	got, err := repo.ListRouteSummaries(ctx)
 	if err != nil {
-		t.Fatalf("ListRoutes: %v", err)
+		t.Fatalf("ListRouteSummaries: %v", err)
 	}
 	want := []transit.RouteSummary{
 		{Slug: "a-alignment", Name: "A Alignment", Mode: "metro"},
 		{Slug: "z-alignment", Name: "Z Alignment", Mode: "rail"},
 	}
 	if len(got) != len(want) {
-		t.Fatalf("ListRoutes = %+v, want %+v", got, want)
+		t.Fatalf("ListRouteSummaries = %+v, want %+v", got, want)
 	}
 	for i := range want {
 		if got[i] != want[i] {
