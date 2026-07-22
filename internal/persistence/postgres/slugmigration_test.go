@@ -26,6 +26,9 @@ func rewindSlugMigration(t *testing.T, url string) {
 	exec(t, url,
 		`ALTER TABLE user_services DROP CONSTRAINT IF EXISTS user_services_stops_have_slugs`,
 		`DELETE FROM goose_db_version WHERE version_id = 8`)
+	// 00009 sits after the migration under test, so it too must be unwound or
+	// goose refuses to re-apply 00008 with a later version still recorded.
+	rewindJobTargetsMigration(t, url)
 }
 
 // insertUserServiceRaw writes a user_services row with the stop document given

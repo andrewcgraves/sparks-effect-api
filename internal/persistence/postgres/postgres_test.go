@@ -266,7 +266,7 @@ func TestJobCompletionStoresResultRetrievableBySlug(t *testing.T) {
 			{FromSlug: "b", ToSlug: "a", Seconds: 130},
 		}},
 	}}
-	if err := repo.CompleteJob(ctx, j.ID, graph); err != nil {
+	if err := repo.CompleteJob(ctx, j.ID, graph, []string{"00000000-0000-4001-8001-000000000010"}); err != nil {
 		t.Fatalf("CompleteJob: %v", err)
 	}
 
@@ -279,6 +279,10 @@ func TestJobCompletionStoresResultRetrievableBySlug(t *testing.T) {
 	}
 	if byID.Result == nil || len(byID.Result.Services) != 1 || byID.Result.Services[0].ServiceID != "svc-1" {
 		t.Fatalf("GetJobByID: result = %+v, want the compiled graph", byID.Result)
+	}
+	// The compiled member service ids round-trip through the uuid[] column.
+	if len(byID.CompiledServiceIDs) != 1 || byID.CompiledServiceIDs[0] != "00000000-0000-4001-8001-000000000010" {
+		t.Errorf("GetJobByID: compiled_service_ids = %v, want the one recorded", byID.CompiledServiceIDs)
 	}
 
 	bySlug, ok, err := repo.GetLatestSucceededJob(ctx, sc.Slug, "compile")

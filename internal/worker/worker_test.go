@@ -9,6 +9,8 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/worker"
 )
 
+func ptr(s string) *string { return &s }
+
 // fakeStore is an in-memory stand-in for the repository slice a compile job
 // needs, plus recorders so tests can assert the status sequence a poller
 // would observe.
@@ -18,14 +20,18 @@ type fakeStore struct {
 	services     []transit.Service
 	vehicleTypes []transit.VehicleType
 
+	userScenarios map[string]transit.UserScenario
+	userServices  map[string]transit.UserService
+
 	listErr error
 
 	statusCalls []string // status argument of each UpdateJobStatus call, in order
 	lastErrMsg  string
 	updateErr   error
 
-	completedWith *transit.TransitGraph
-	completeErr   error
+	completedWith    *transit.TransitGraph
+	completedWithIDs []string
+	completeErr      error
 }
 
 func (f *fakeStore) ListRoutesByScenario(_ context.Context, _ string) ([]transit.Route, error) {
@@ -47,6 +53,52 @@ func (f *fakeStore) ListVehicleTypes(_ context.Context) ([]transit.VehicleType, 
 	return f.vehicleTypes, nil
 }
 
+func (f *fakeStore) GetUserScenarioByID(_ context.Context, id string) (transit.UserScenario, bool, error) {
+	if f.listErr != nil {
+		return transit.UserScenario{}, false, f.listErr
+	}
+	sc, ok := f.userScenarios[id]
+	return sc, ok, nil
+}
+
+func (f *fakeStore) GetUserServiceByID(_ context.Context, id string) (transit.UserService, bool, error) {
+	if f.listErr != nil {
+		return transit.UserService{}, false, f.listErr
+	}
+	svc, ok := f.userServices[id]
+	return svc, ok, nil
+}
+
+func (f *fakeStore) ListUserServicesByIDs(_ context.Context, ids []string) ([]transit.UserService, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	var out []transit.UserService
+	for _, id := range ids {
+		if svc, ok := f.userServices[id]; ok {
+			out = append(out, svc)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeStore) ListRoutesByIDs(_ context.Context, ids []string) ([]transit.Route, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	want := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		want[id] = true
+	}
+	var out []transit.Route
+	for _, rt := range f.routes {
+		if want[rt.ID] {
+			out = append(out, rt)
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeStore) UpdateJobStatus(_ context.Context, _, status, errMsg string) error {
 	if f.updateErr != nil {
 		return f.updateErr
@@ -56,11 +108,12 @@ func (f *fakeStore) UpdateJobStatus(_ context.Context, _, status, errMsg string)
 	return nil
 }
 
-func (f *fakeStore) CompleteJob(_ context.Context, _ string, result transit.TransitGraph) error {
+func (f *fakeStore) CompleteJob(_ context.Context, _ string, result transit.TransitGraph, compiledServiceIDs []string) error {
 	if f.completeErr != nil {
 		return f.completeErr
 	}
 	f.completedWith = &result
+	f.completedWithIDs = compiledServiceIDs
 	return nil
 }
 
@@ -92,12 +145,35 @@ func fixtureStore() *fakeStore {
 	}
 }
 
+// userFixtureStore adds a user-authored service and a user scenario curating
+// it, on the same route/geometry the seeded fixture uses.
+func userFixtureStore() *fakeStore {
+	f := fixtureStore()
+	usvc := transit.UserService{
+		ID: "usvc-1", Slug: "line-a", RouteID: "rt-1",
+		Vehicle: transit.VehicleParams{MaxSpeedKMH: 36, AccelerationMS2: 1, DecelerationMS2: 1, DwellS: 30},
+		Stops: []transit.ServiceStopPoint{
+			{Name: "A", Lat: 0, Lng: 0, Seq: 0, Slug: "line-a--a"},
+			{Name: "B", Lat: 0, Lng: 1, Seq: 1, Slug: "line-a--b"},
+		},
+	}
+	f.userServices = map[string]transit.UserService{usvc.ID: usvc}
+	f.userScenarios = map[string]transit.UserScenario{
+		"uscn-1": {ID: "uscn-1", Slug: "trip", ServiceIDs: []string{"usvc-1"}},
+	}
+	return f
+}
+
+func scenarioJob() transit.Job {
+	return transit.Job{ID: "job-1", Kind: transit.JobKindCompileScenario, ScenarioID: ptr("sc-1")}
+}
+
 // The headline lifecycle: queued -> running -> succeeded, with the compiled
 // graph stored on completion.
 func TestCompileRunsThenSucceeds(t *testing.T) {
 	store := fixtureStore()
 
-	if err := worker.Compile(context.Background(), store, "job-1", "sc-1"); err != nil {
+	if err := worker.Compile(context.Background(), store, scenarioJob()); err != nil {
 		t.Fatalf("Compile() error = %v, want nil", err)
 	}
 
@@ -110,6 +186,76 @@ func TestCompileRunsThenSucceeds(t *testing.T) {
 	if len(store.completedWith.Services) != 1 || store.completedWith.Services[0].ServiceID != "svc-1" {
 		t.Errorf("completed result = %+v, want one ServiceGraph for svc-1", store.completedWith)
 	}
+	// The compiled member ids are recorded for staleness detection.
+	if len(store.completedWithIDs) != 1 || store.completedWithIDs[0] != "svc-1" {
+		t.Errorf("compiled service ids = %v, want [svc-1]", store.completedWithIDs)
+	}
+}
+
+// A user scenario compiles its member services through the user-authored
+// loader, and the compiled member ids are recorded.
+func TestCompileUserScenario(t *testing.T) {
+	store := userFixtureStore()
+	job := transit.Job{ID: "job-2", Kind: transit.JobKindCompileUserScenario, UserScenarioID: ptr("uscn-1")}
+
+	if err := worker.Compile(context.Background(), store, job); err != nil {
+		t.Fatalf("Compile() error = %v, want nil", err)
+	}
+	if store.completedWith == nil || len(store.completedWith.Services) != 1 {
+		t.Fatalf("completed result = %+v, want one compiled service", store.completedWith)
+	}
+	if store.completedWith.Services[0].ServiceID != "usvc-1" {
+		t.Errorf("compiled ServiceID = %q, want usvc-1", store.completedWith.Services[0].ServiceID)
+	}
+	if len(store.completedWithIDs) != 1 || store.completedWithIDs[0] != "usvc-1" {
+		t.Errorf("compiled service ids = %v, want [usvc-1]", store.completedWithIDs)
+	}
+}
+
+// A single user service compiles alone — the degenerate scenario compile.
+func TestCompileUserService(t *testing.T) {
+	store := userFixtureStore()
+	job := transit.Job{ID: "job-3", Kind: transit.JobKindCompileUserService, UserServiceID: ptr("usvc-1")}
+
+	if err := worker.Compile(context.Background(), store, job); err != nil {
+		t.Fatalf("Compile() error = %v, want nil", err)
+	}
+	if store.completedWith == nil || len(store.completedWith.Services) != 1 {
+		t.Fatalf("completed result = %+v, want one compiled service", store.completedWith)
+	}
+	if len(store.completedWithIDs) != 1 || store.completedWithIDs[0] != "usvc-1" {
+		t.Errorf("compiled service ids = %v, want [usvc-1]", store.completedWithIDs)
+	}
+}
+
+// A job whose target no longer exists fails cleanly rather than panicking.
+func TestCompileUserServiceNotFoundFailsJob(t *testing.T) {
+	store := userFixtureStore()
+	job := transit.Job{ID: "job-4", Kind: transit.JobKindCompileUserService, UserServiceID: ptr("gone")}
+
+	if err := worker.Compile(context.Background(), store, job); err != nil {
+		t.Fatalf("Compile() error = %v, want nil (a missing target belongs on the job)", err)
+	}
+	if len(store.statusCalls) != 2 || store.statusCalls[1] != transit.JobStatusFailed {
+		t.Fatalf("status transitions = %v, want [running failed]", store.statusCalls)
+	}
+	if store.completedWith != nil {
+		t.Error("CompleteJob must not be called for a missing target")
+	}
+}
+
+// An unknown kind is a programming error on the enqueue side; it fails the job
+// rather than crashing the goroutine.
+func TestCompileUnknownKindFailsJob(t *testing.T) {
+	store := fixtureStore()
+	job := transit.Job{ID: "job-5", Kind: "compute", ScenarioID: ptr("sc-1")}
+
+	if err := worker.Compile(context.Background(), store, job); err != nil {
+		t.Fatalf("Compile() error = %v, want nil", err)
+	}
+	if len(store.statusCalls) != 2 || store.statusCalls[1] != transit.JobStatusFailed {
+		t.Fatalf("status transitions = %v, want [running failed]", store.statusCalls)
+	}
 }
 
 // A scenario whose data the physics compiler rejects (here, a service
@@ -119,7 +265,7 @@ func TestCompileRecordsFailureOnBadScenarioData(t *testing.T) {
 	store := fixtureStore()
 	store.services[0].RouteID = "no-such-route"
 
-	if err := worker.Compile(context.Background(), store, "job-1", "sc-1"); err != nil {
+	if err := worker.Compile(context.Background(), store, scenarioJob()); err != nil {
 		t.Fatalf("Compile() error = %v, want nil (failure belongs on the job)", err)
 	}
 
@@ -140,7 +286,7 @@ func TestCompileRecordsFailureWhenLoadingScenarioDataFails(t *testing.T) {
 	store := fixtureStore()
 	store.listErr = errors.New("connection reset")
 
-	if err := worker.Compile(context.Background(), store, "job-1", "sc-1"); err != nil {
+	if err := worker.Compile(context.Background(), store, scenarioJob()); err != nil {
 		t.Fatalf("Compile() error = %v, want nil", err)
 	}
 	if len(store.statusCalls) != 2 || store.statusCalls[1] != transit.JobStatusFailed {
@@ -154,7 +300,7 @@ func TestCompileReturnsErrorWhenItCannotMarkRunning(t *testing.T) {
 	store := fixtureStore()
 	store.updateErr = errors.New("database is down")
 
-	if err := worker.Compile(context.Background(), store, "job-1", "sc-1"); err == nil {
+	if err := worker.Compile(context.Background(), store, scenarioJob()); err == nil {
 		t.Error("Compile() error = nil, want an error when the job cannot be marked running")
 	}
 }
@@ -166,7 +312,7 @@ func TestCompileSucceedsForAnEmptyScenario(t *testing.T) {
 	store := fixtureStore()
 	store.services = nil
 
-	if err := worker.Compile(context.Background(), store, "job-1", "sc-1"); err != nil {
+	if err := worker.Compile(context.Background(), store, scenarioJob()); err != nil {
 		t.Fatalf("Compile() error = %v, want nil", err)
 	}
 	if store.completedWith == nil || len(store.completedWith.Services) != 0 {

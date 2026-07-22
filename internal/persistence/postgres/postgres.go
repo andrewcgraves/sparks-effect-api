@@ -212,6 +212,36 @@ func (r *Repo) ListRoutesByScenario(ctx context.Context, scenarioID string) ([]t
 	return out, wrap("ListRoutesByScenario rows", rows.Err())
 }
 
+// ListRoutesByIDs reads the routes with the given ids in one query — the whole
+// aggregate, since a compile projects stops onto their geometry. It backs the
+// user-authored compile, whose services reference routes by id rather than
+// belonging to a scenario. Ids not found are simply absent from the result; a
+// caller that needs every one present checks the count.
+func (r *Repo) ListRoutesByIDs(ctx context.Context, ids []string) ([]transit.Route, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	// id::text = ANY($1): route ids come from a uuid FK so are well-formed, but
+	// matching on text keeps this consistent with the other id-set readers and
+	// costs nothing here.
+	rows, err := r.pool.Query(ctx,
+		`SELECT `+routeColumns+` FROM routes WHERE id::text = ANY($1) ORDER BY id`, ids)
+	if err != nil {
+		return nil, wrap("ListRoutesByIDs", err)
+	}
+	defer rows.Close()
+
+	var out []transit.Route
+	for rows.Next() {
+		rt, err := scanRoute(rows)
+		if err != nil {
+			return nil, wrap("ListRoutesByIDs scan", err)
+		}
+		out = append(out, rt)
+	}
+	return out, wrap("ListRoutesByIDs rows", rows.Err())
+}
+
 // scanRoute reads one row of routeColumns. It takes a pgx.Row so both the
 // single-row and multi-row readers share one column order.
 func scanRoute(row pgx.Row) (transit.Route, error) {
@@ -646,13 +676,20 @@ func (r *Repo) DeleteExpiredSessions(ctx context.Context) (int64, error) {
 
 func (r *Repo) CreateJob(ctx context.Context, j transit.Job) error {
 	_, err := r.pool.Exec(ctx,
-		`INSERT INTO jobs (id, kind, status, scenario_id, owner_id, error)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
-		j.ID, j.Kind, j.Status, j.ScenarioID, j.OwnerID, j.Error)
+		`INSERT INTO jobs (id, kind, status, scenario_id, user_scenario_id, user_service_id, owner_id, error)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		j.ID, j.Kind, j.Status, j.ScenarioID, j.UserScenarioID, j.UserServiceID, j.OwnerID, j.Error)
 	return wrap("CreateJob", err)
 }
 
-const jobColumns = `id, kind, status, scenario_id, owner_id, error, result, created_at, updated_at`
+const jobColumns = `id, kind, status, scenario_id, user_scenario_id, user_service_id,
+	owner_id, error, result, compiled_service_ids, created_at, updated_at`
+
+// jobColumnsQualified is jobColumns with a `j.` alias prefix, for the reads that
+// join jobs against the target table to resolve a job by slug — there the
+// unqualified `id`, `owner_id`, and `created_at` would be ambiguous.
+const jobColumnsQualified = `j.id, j.kind, j.status, j.scenario_id, j.user_scenario_id, j.user_service_id,
+	j.owner_id, j.error, j.result, j.compiled_service_ids, j.created_at, j.updated_at`
 
 func (r *Repo) GetJobByID(ctx context.Context, id string) (transit.Job, bool, error) {
 	return scanJob(r.pool.QueryRow(ctx, `SELECT `+jobColumns+` FROM jobs WHERE id = $1`, id))
@@ -671,12 +708,14 @@ func (r *Repo) UpdateJobStatus(ctx context.Context, id, status, errMsg string) e
 	return nil
 }
 
-// CompleteJob marks a job succeeded and stores its compiled result in one
-// write, so a poller never observes "succeeded" with no result yet to read.
-func (r *Repo) CompleteJob(ctx context.Context, id string, result transit.TransitGraph) error {
+// CompleteJob marks a job succeeded and stores its compiled result and the
+// member service ids it compiled in one write, so a poller never observes
+// "succeeded" with no result yet to read. compiledServiceIDs may be nil (an
+// empty compile), stored as SQL NULL.
+func (r *Repo) CompleteJob(ctx context.Context, id string, result transit.TransitGraph, compiledServiceIDs []string) error {
 	tag, err := r.pool.Exec(ctx,
-		`UPDATE jobs SET status = $2, error = '', result = $3, updated_at = now() WHERE id = $1`,
-		id, transit.JobStatusSucceeded, result)
+		`UPDATE jobs SET status = $2, error = '', result = $3, compiled_service_ids = $4, updated_at = now() WHERE id = $1`,
+		id, transit.JobStatusSucceeded, result, compiledServiceIDs)
 	if err != nil {
 		return wrap("CompleteJob", err)
 	}
@@ -704,12 +743,12 @@ func (r *Repo) ListJobs(ctx context.Context) ([]transit.Job, error) {
 	return out, wrap("ListJobs rows", rows.Err())
 }
 
-// GetLatestSucceededJob is the "result, retrievable by slug" read: it joins
-// through to scenarios by slug rather than requiring the caller to know a
+// GetLatestSucceededJob is the seeded "result, retrievable by slug" read: it
+// joins through to scenarios by slug rather than requiring the caller to know a
 // scenario id, matching GetTravelTimes's slug-addressed convention.
 func (r *Repo) GetLatestSucceededJob(ctx context.Context, scenarioSlug, kind string) (transit.Job, bool, error) {
 	row := r.pool.QueryRow(ctx,
-		`SELECT j.id, j.kind, j.status, j.scenario_id, j.owner_id, j.error, j.result, j.created_at, j.updated_at
+		`SELECT `+jobColumnsQualified+`
 		 FROM jobs j JOIN scenarios s ON s.id = j.scenario_id
 		 WHERE s.slug = $1 AND j.kind = $2 AND j.status = $3
 		 ORDER BY j.created_at DESC LIMIT 1`,
@@ -717,11 +756,25 @@ func (r *Repo) GetLatestSucceededJob(ctx context.Context, scenarioSlug, kind str
 	return scanJob(row)
 }
 
+// GetLatestSucceededUserScenarioJob is the user-authored counterpart, joining
+// through user_scenarios instead of scenarios. Kind is fixed at
+// compile_user_scenario — a user scenario has exactly one compile kind — so the
+// caller addresses it by slug alone.
+func (r *Repo) GetLatestSucceededUserScenarioJob(ctx context.Context, userScenarioSlug string) (transit.Job, bool, error) {
+	row := r.pool.QueryRow(ctx,
+		`SELECT `+jobColumnsQualified+`
+		 FROM jobs j JOIN user_scenarios us ON us.id = j.user_scenario_id
+		 WHERE us.slug = $1 AND j.kind = $2 AND j.status = $3
+		 ORDER BY j.created_at DESC LIMIT 1`,
+		userScenarioSlug, transit.JobKindCompileUserScenario, transit.JobStatusSucceeded)
+	return scanJob(row)
+}
+
 // scanJob reads one jobColumns row, translating "no such row" into ok=false
 // rather than an error.
 func scanJob(row pgx.Row) (transit.Job, bool, error) {
 	var j transit.Job
-	err := row.Scan(&j.ID, &j.Kind, &j.Status, &j.ScenarioID, &j.OwnerID, &j.Error, &j.Result, &j.CreatedAt, &j.UpdatedAt)
+	err := scanJobInto(row, &j)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return transit.Job{}, false, nil
 	}
@@ -735,8 +788,15 @@ func scanJob(row pgx.Row) (transit.Job, bool, error) {
 // reader.
 func scanJobRow(rows pgx.Rows) (transit.Job, error) {
 	var j transit.Job
-	err := rows.Scan(&j.ID, &j.Kind, &j.Status, &j.ScenarioID, &j.OwnerID, &j.Error, &j.Result, &j.CreatedAt, &j.UpdatedAt)
+	err := scanJobInto(rows, &j)
 	return j, err
+}
+
+// scanJobInto is the single column order both job readers share, so a change to
+// jobColumns has one scan to keep in step rather than two.
+func scanJobInto(row pgx.Row, j *transit.Job) error {
+	return row.Scan(&j.ID, &j.Kind, &j.Status, &j.ScenarioID, &j.UserScenarioID, &j.UserServiceID,
+		&j.OwnerID, &j.Error, &j.Result, &j.CompiledServiceIDs, &j.CreatedAt, &j.UpdatedAt)
 }
 
 func wrap(op string, err error) error {

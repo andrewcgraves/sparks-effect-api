@@ -156,6 +156,52 @@ func (r *Repo) ListUserServicesByOwner(ctx context.Context, ownerID string) ([]t
 	return out, nil
 }
 
+// ListUserServicesByIDs reads the services with the given ids, whole aggregate
+// (embedded stops, inline vehicle, frequency windows) — the batch a user
+// scenario compile loads its members with, so N members cost a constant number
+// of round trips rather than N. Ownership is not filtered here: the caller (a
+// compile of an owner's own scenario) has already established that the members
+// are theirs, and ids not found are simply absent.
+func (r *Repo) ListUserServicesByIDs(ctx context.Context, ids []string) ([]transit.UserService, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	// id::text = ANY($1): consistent with UserServiceIDsOwnedBy, and tolerant of
+	// a value that is not a well-formed uuid rather than failing the query.
+	rows, err := r.pool.Query(ctx,
+		`SELECT `+userServiceColumns+` FROM user_services
+		 WHERE id::text = ANY($1) ORDER BY created_at, id`, ids)
+	if err != nil {
+		return nil, wrap("ListUserServicesByIDs", err)
+	}
+	defer rows.Close()
+
+	out := []transit.UserService{}
+	for rows.Next() {
+		svc, err := scanUserService(rows)
+		if err != nil {
+			return nil, wrap("ListUserServicesByIDs scan", err)
+		}
+		out = append(out, svc)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, wrap("ListUserServicesByIDs rows", err)
+	}
+
+	serviceIDs := make([]string, len(out))
+	for i := range out {
+		serviceIDs[i] = out[i].ID
+	}
+	windows, err := r.frequencyWindowsByService(ctx, serviceIDs)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].FrequencyWindows = windows[out[i].ID]
+	}
+	return out, nil
+}
+
 // frequencyWindowsByService reads the windows for many services in one query,
 // so listing N services costs two round trips rather than N+1.
 func (r *Repo) frequencyWindowsByService(ctx context.Context, serviceIDs []string) (map[string][]transit.FrequencyWindow, error) {
