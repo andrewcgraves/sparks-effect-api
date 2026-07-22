@@ -57,6 +57,60 @@ type InterStopSpan struct {
 	Segments   []SpanSegment
 }
 
+// SnappedStop is one stop projected onto a route line.
+type SnappedStop struct {
+	ID        string
+	Point     Point   // the snapped position on the line
+	ChainageM float64 // distance along the line from its start to the snapped point
+	OffsetM   float64 // distance from the stop's raw input position to the snapped point
+}
+
+// SnapStops projects each stop onto the route line and returns, per stop, the
+// snapped point, its chainage, and how far the raw input sat from the line.
+//
+// Distances are measured in the same local planar frame the snap itself uses,
+// so an offset can never disagree with the projection that produced it. A stop
+// beyond either end of the line snaps to that endpoint, and its offset is the
+// distance to that endpoint rather than a perpendicular.
+//
+// line is the route's coordinates in order and must have at least 2 points.
+// Results are in the order the stops were supplied, not chainage order:
+// ordering is the caller's concern, and a caller cannot notice that a stop
+// sequence runs against the route's direction if this function has already
+// sorted that disagreement away.
+//
+// Snapping has the same simple-polyline assumption as ProjectStops: on a
+// self-intersecting or switchback route, a stop can snap to the geometrically
+// closer of two passes rather than the one intended.
+//
+// SnapStops returns an error if line has fewer than 2 points. Unlike
+// ProjectStops it accepts any number of stops, including one — snapping a
+// single stop is meaningful even though a single stop forms no span.
+func SnapStops(line []Point, stops []Stop) ([]SnappedStop, error) {
+	if len(line) < 2 {
+		return nil, fmt.Errorf("line must have at least 2 points, got %d", len(line))
+	}
+	return snapStops(projectLinePlanar(line), stops), nil
+}
+
+// snapStops is the projection loop shared by SnapStops and ProjectStops. It
+// takes an already-projected line so ProjectStops, which needs the planar line
+// for its own segment splitting, does not project it twice.
+func snapStops(pl planarLine, stops []Stop) []SnappedStop {
+	out := make([]SnappedStop, len(stops))
+	for i, s := range stops {
+		p := projectPoint(s.Location, pl.refLatRad)
+		chainageM, snapped := snapToLine(pl, p)
+		out[i] = SnappedStop{
+			ID:        s.ID,
+			Point:     unprojectPoint(snapped, pl.refLatRad),
+			ChainageM: chainageM,
+			OffsetM:   planarDist(p, snapped),
+		}
+	}
+	return out
+}
+
 // ProjectStops snaps each stop onto the route line, orders the stops by
 // chainage (distance along the line from its start), and splits the line's
 // geometry and per-vertex-segment physics into the spans between consecutive
@@ -97,18 +151,9 @@ func ProjectStops(line []Point, physicsSegs []Segment, stops []Stop) ([]InterSto
 	pl := projectLinePlanar(line)
 	lineSegs := buildLineSegments(pl, physics)
 
-	type projectedStop struct {
-		Stop
-		chainageM float64
-	}
-	projected := make([]projectedStop, len(stops))
-	for i, s := range stops {
-		p := projectPoint(s.Location, pl.refLatRad)
-		projected[i] = projectedStop{Stop: s, chainageM: snapToLine(pl, p)}
-	}
-
+	projected := snapStops(pl, stops)
 	sort.SliceStable(projected, func(i, j int) bool {
-		return projected[i].chainageM < projected[j].chainageM
+		return projected[i].ChainageM < projected[j].ChainageM
 	})
 
 	spans := make([]InterStopSpan, 0, len(projected)-1)
@@ -117,8 +162,8 @@ func ProjectStops(line []Point, physicsSegs []Segment, stops []Stop) ([]InterSto
 		spans = append(spans, InterStopSpan{
 			FromStopID: from.ID,
 			ToStopID:   to.ID,
-			DistanceM:  to.chainageM - from.chainageM,
-			Segments:   splitSpan(lineSegs, from.chainageM, to.chainageM),
+			DistanceM:  to.ChainageM - from.ChainageM,
+			Segments:   splitSpan(lineSegs, from.ChainageM, to.ChainageM),
 		})
 	}
 
@@ -187,13 +232,30 @@ func projectPoint(p Point, refLatRad float64) planarPoint {
 	}
 }
 
+// unprojectPoint is the inverse of projectPoint: it converts a local planar
+// point back to WGS84 degrees around the same reference latitude. Snapped
+// positions are computed in the planar frame but returned to callers as
+// geographic coordinates.
+func unprojectPoint(p planarPoint, refLatRad float64) Point {
+	return Point{
+		Lng: radToDeg(p.X / (earthRadiusM * math.Cos(refLatRad))),
+		Lat: radToDeg(p.Y / earthRadiusM),
+	}
+}
+
+// radToDeg converts radians to degrees.
+func radToDeg(rad float64) float64 {
+	return rad * 180 / math.Pi
+}
+
 func planarDist(a, b planarPoint) float64 {
 	return math.Hypot(b.X-a.X, b.Y-a.Y)
 }
 
-// snapToLine finds the point on the polyline nearest to p and returns its
-// chainage — the distance along the line from the start to the snapped point.
-func snapToLine(pl planarLine, p planarPoint) (chainageM float64) {
+// snapToLine finds the point on the polyline nearest to p and returns it
+// alongside its chainage — the distance along the line from the start to the
+// snapped point.
+func snapToLine(pl planarLine, p planarPoint) (chainageM float64, snapped planarPoint) {
 	best := math.Inf(1)
 	for i := 0; i < len(pl.points)-1; i++ {
 		a, b := pl.points[i], pl.points[i+1]
@@ -202,9 +264,10 @@ func snapToLine(pl planarLine, p planarPoint) (chainageM float64) {
 		if d < best {
 			best = d
 			chainageM = pl.chainageM[i] + t*planarDist(a, b)
+			snapped = closest
 		}
 	}
-	return chainageM
+	return chainageM, snapped
 }
 
 // closestPointOnSegment projects p onto the segment a→b, clamped to the
