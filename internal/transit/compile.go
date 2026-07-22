@@ -21,8 +21,16 @@ type ServiceGraph struct {
 // active services — either hand-authored (Compile) or physics-derived
 // (CompileScenario) — and is what an async compile job persists as its result
 // (see Job.Result).
+//
+// Merge records how interchange was resolved when several services were
+// compiled together: which stops were folded onto one node and which nearly
+// were. It is empty for a hand-authored compile and for a physics compile with
+// nothing to merge. It rides on the job result rather than a separate endpoint
+// so the poller contract is unchanged — a client already reading the graph
+// reads the report from the same payload.
 type TransitGraph struct {
 	Services []ServiceGraph `json:"services"`
+	Merge    MergeReport    `json:"merge,omitempty"`
 }
 
 func Compile(

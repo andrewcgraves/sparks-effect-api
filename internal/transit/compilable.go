@@ -69,6 +69,16 @@ type CompilableStop struct {
 	// StopSlugs' business, and SPA-103 persists that, not this.
 	Slug string
 
+	// Name is the stop's display label, carried through so that a merge can
+	// report what it merged. When MergeColocatedStops folds two services' stops
+	// onto one key it keeps every member's name, which is what lets a caller
+	// render "Transbay (also: Salesforce Center)" rather than silently picking
+	// one and discarding the other.
+	//
+	// Nothing in the compile itself reads this — edges are keyed by Slug alone —
+	// so a caller that only wants a graph may leave it empty.
+	Name string
+
 	Lat    float64
 	Lng    float64
 	DwellS int
@@ -101,6 +111,7 @@ func CompilableFromService(route Route, stations []Station, svc Service, vt Vehi
 		}
 		compiled[i] = CompilableStop{
 			Slug:   st.Slug,
+			Name:   st.Name,
 			Lng:    st.Location.Coordinates[0],
 			Lat:    st.Location.Coordinates[1],
 			DwellS: resolveDwell(stop, st, vt),
@@ -163,6 +174,7 @@ func CompilableFromUserService(route Route, svc UserService) (CompilableService,
 		stop := svc.Stops[idx]
 		compiled[i] = CompilableStop{
 			Slug:   slugs[idx],
+			Name:   stop.Name,
 			Lat:    stop.Lat,
 			Lng:    stop.Lng,
 			DwellS: svc.Vehicle.DwellS,
