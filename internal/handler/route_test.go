@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
 
@@ -21,6 +22,7 @@ type fakeRouteStore struct {
 	scenarios map[string]transit.Scenario
 	createErr error
 	getErr    error
+	listErr   error
 }
 
 func newFakeRouteStore() *fakeRouteStore {
@@ -54,6 +56,24 @@ func (f *fakeRouteStore) GetRouteBySlug(_ context.Context, slug string) (transit
 func (f *fakeRouteStore) GetScenarioBySlug(_ context.Context, slug string) (transit.Scenario, bool, error) {
 	sc, ok := f.scenarios[slug]
 	return sc, ok, nil
+}
+
+func (f *fakeRouteStore) ListRoutes(_ context.Context) ([]transit.RouteSummary, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	slugs := make([]string, 0, len(f.routes))
+	for slug := range f.routes {
+		slugs = append(slugs, slug)
+	}
+	sort.Strings(slugs)
+
+	out := make([]transit.RouteSummary, 0, len(slugs))
+	for _, slug := range slugs {
+		rt := f.routes[slug]
+		out = append(out, transit.RouteSummary{Slug: rt.Slug, Name: rt.Name, Mode: rt.Mode})
+	}
+	return out, nil
 }
 
 // validRoute is a three-point alignment with physics on both of its segments.
@@ -316,6 +336,75 @@ func TestRouteBySlugReportsStorageFailure(t *testing.T) {
 	store.getErr = errors.New("database is down")
 
 	rec := getRoute(t, handler.RouteBySlug(store), "whatever")
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "database is down") {
+		t.Errorf("internal error leaked to client: %s", rec.Body.String())
+	}
+}
+
+func listRoutes(t *testing.T, h http.Handler) *httptest.ResponseRecorder {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/routes", http.NoBody))
+	return rec
+}
+
+// The headline acceptance criterion: the list carries exactly what a route
+// picker needs to offer a choice — slug, name, mode — and nothing else. The
+// geometry is large and irrelevant to choosing, and the internal UUID must stay
+// off the wire since routes are addressed by slug.
+func TestRoutesListsIngestedRoutesForAPicker(t *testing.T) {
+	store := newFakeRouteStore()
+	if rec := postJSON(t, handler.CreateRoute(store), "/api/admin/routes", validRoute); rec.Code != http.StatusCreated {
+		t.Fatalf("seed create: status %d", rec.Code)
+	}
+
+	rec := listRoutes(t, handler.Routes(store))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body.String())
+	}
+
+	// Decoded loosely rather than into the response type, so a field that is
+	// meant to be absent is actually proven absent rather than silently dropped.
+	var got []map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("routes = %d, want 1", len(got))
+	}
+	item := got[0]
+	if item["slug"] != "test-alignment" || item["name"] != "Test Alignment" || item["mode"] != "rail" {
+		t.Errorf("item = %+v, want slug/name/mode of the ingested route", item)
+	}
+	for _, absent := range []string{"id", "geometry", "segments", "scenario_id", "bidirectional"} {
+		if _, present := item[absent]; present {
+			t.Errorf("%q must not be sent in the picker list: %+v", absent, item)
+		}
+	}
+}
+
+// An empty collection is an empty list, not a null — a picker iterating the
+// response should not have to special-case "no routes ingested yet".
+func TestRoutesReturnsAnEmptyListWhenNothingIsIngested(t *testing.T) {
+	rec := listRoutes(t, handler.Routes(newFakeRouteStore()))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if body := strings.TrimSpace(rec.Body.String()); body != "[]" {
+		t.Errorf("body = %s, want []", body)
+	}
+}
+
+// A storage failure must surface as a 500 rather than an empty list, which a
+// picker would render as "no routes exist".
+func TestRoutesReportsStorageFailure(t *testing.T) {
+	store := newFakeRouteStore()
+	store.listErr = errors.New("database is down")
+
+	rec := listRoutes(t, handler.Routes(store))
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", rec.Code)
 	}

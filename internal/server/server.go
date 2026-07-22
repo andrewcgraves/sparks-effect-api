@@ -75,14 +75,20 @@ func New(cfg config.Config, store *transit.Store, deps AuthDeps, chainer isochro
 	}
 }
 
-// registerRouteReadRoutes wires the public route-read endpoint. Ingested
-// routes live in Postgres, not the embedded scenario store, so with no
-// database configured it answers 503 rather than 404.
+// registerRouteReadRoutes wires the public route-read endpoints: the
+// collection a picker lists from, and one route by slug. Ingested routes live
+// in Postgres, not the embedded scenario store, so with no database configured
+// they answer 503 rather than 404.
 func registerRouteReadRoutes(mux *http.ServeMux, deps AuthDeps) {
 	if deps == nil {
+		// The collection is registered separately from the subtree: a pattern of
+		// /api/routes/ does not serve /api/routes, it redirects to it, so without
+		// its own entry the list would answer 301 rather than 503.
+		mux.HandleFunc("/api/routes", serviceUnavailable("route storage is unavailable"))
 		mux.HandleFunc("/api/routes/", serviceUnavailable("route storage is unavailable"))
 		return
 	}
+	mux.HandleFunc("GET /api/routes", handler.Routes(deps))
 	mux.HandleFunc("GET /api/routes/{slug}", handler.RouteBySlug(deps))
 }
 

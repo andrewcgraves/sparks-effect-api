@@ -90,6 +90,9 @@ func (s *stubAuthDeps) CreateRoute(context.Context, transit.Route) error { retur
 func (s *stubAuthDeps) GetRouteBySlug(context.Context, string) (transit.Route, bool, error) {
 	return transit.Route{}, false, nil
 }
+func (s *stubAuthDeps) ListRoutes(context.Context) ([]transit.RouteSummary, error) {
+	return nil, nil
+}
 func (s *stubAuthDeps) GetScenarioBySlug(context.Context, string) (transit.Scenario, bool, error) {
 	return transit.Scenario{}, false, nil
 }
@@ -305,6 +308,18 @@ func TestRouteReadEndpointStaysOpenWithoutAToken(t *testing.T) {
 	}
 }
 
+// The route list shares the read endpoint's public posture: the picker that
+// consumes it runs before the user has picked anything, let alone signed in.
+// It must also not be shadowed by the sibling /api/routes/{slug} read.
+func TestRouteListEndpointStaysOpenWithoutAToken(t *testing.T) {
+	h := newTestServer(t, newStubDeps())
+
+	rec := request(t, h, http.MethodGet, "/api/routes", "")
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 without a token; body %s", rec.Code, rec.Body.String())
+	}
+}
+
 // The compiled-graph read is public, like the other scenario reads — a
 // caller checking whether a compile has finished has no session yet either.
 func TestGraphEndpointStaysOpenWithoutAToken(t *testing.T) {
@@ -354,6 +369,13 @@ func TestAuthRoutesReportUnavailableWithoutADatabase(t *testing.T) {
 	// plainly too, rather than 404ing as if the endpoint didn't exist.
 	if rec := request(t, h, http.MethodGet, "/api/routes/ca-hsr-trunk", ""); rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("route read status = %d, want 503 with no database configured", rec.Code)
+	}
+
+	// The collection needs its own registration: a subtree pattern of
+	// /api/routes/ does not cover /api/routes, it only redirects to it, so
+	// without an exact entry the list would answer 301 rather than 503.
+	if rec := request(t, h, http.MethodGet, "/api/routes", ""); rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("route list status = %d, want 503 with no database configured", rec.Code)
 	}
 
 	// The compiled graph is likewise Postgres-backed and unauthenticated, so
