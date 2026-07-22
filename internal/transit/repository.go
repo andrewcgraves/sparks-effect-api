@@ -25,6 +25,9 @@ type Repository interface {
 	GetRouteBySlug(ctx context.Context, slug string) (Route, bool, error)
 	ListRouteSummaries(ctx context.Context) ([]RouteSummary, error)
 	ListRoutesByScenario(ctx context.Context, scenarioID string) ([]Route, error)
+	// ListRoutesByIDs loads routes by id, the whole aggregate — how a
+	// user-authored compile resolves the alignments its services run on.
+	ListRoutesByIDs(ctx context.Context, ids []string) ([]Route, error)
 
 	// Stations.
 	CreateStation(ctx context.Context, st Station) error
@@ -52,6 +55,8 @@ type Repository interface {
 	GetUserServiceByID(ctx context.Context, id string) (UserService, bool, error)
 	GetUserServiceBySlug(ctx context.Context, slug string) (UserService, bool, error)
 	ListUserServicesByOwner(ctx context.Context, ownerID string) ([]UserService, error)
+	// ListUserServicesByIDs loads the members of a user scenario for a compile.
+	ListUserServicesByIDs(ctx context.Context, ids []string) ([]UserService, error)
 	UpdateUserService(ctx context.Context, svc UserService) error
 	DeleteUserService(ctx context.Context, id string) error
 
@@ -106,11 +111,15 @@ type Repository interface {
 	// UpdateJobStatus transitions a job to running or failed. Success goes
 	// through CompleteJob instead, since it also carries the result.
 	UpdateJobStatus(ctx context.Context, id, status, errMsg string) error
-	// CompleteJob marks a job succeeded and stores its compiled result.
-	CompleteJob(ctx context.Context, id string, result TransitGraph) error
+	// CompleteJob marks a job succeeded and stores its compiled result together
+	// with the member service ids it compiled (see Job.CompiledServiceIDs).
+	CompleteJob(ctx context.Context, id string, result TransitGraph, compiledServiceIDs []string) error
 	ListJobs(ctx context.Context) ([]Job, error)
 	// GetLatestSucceededJob finds the most recent succeeded job of kind for the
-	// scenario addressed by slug — the "result, retrievable by slug" path, so a
-	// caller never needs the job id once compilation has finished.
+	// seeded scenario addressed by slug — the "result, retrievable by slug" path,
+	// so a caller never needs the job id once compilation has finished.
 	GetLatestSucceededJob(ctx context.Context, scenarioSlug, kind string) (Job, bool, error)
+	// GetLatestSucceededUserScenarioJob is the user-authored counterpart: the
+	// compiled graph retrievable by a user scenario's slug.
+	GetLatestSucceededUserScenarioJob(ctx context.Context, userScenarioSlug string) (Job, bool, error)
 }

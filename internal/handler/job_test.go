@@ -25,6 +25,11 @@ type fakeCompileStore struct {
 	scenarios map[string]transit.Scenario
 	jobs      map[string]transit.Job
 
+	// User-authored targets, keyed by slug (the address the compile handlers
+	// resolve). Empty unless a test populates them.
+	userServices  map[string]transit.UserService
+	userScenarios map[string]transit.UserScenario
+
 	routes       []transit.Route
 	stations     []transit.Station
 	services     []transit.Service
@@ -45,8 +50,10 @@ func newFakeCompileStore() *fakeCompileStore {
 		scenarios: map[string]transit.Scenario{
 			"scenario-a": {ID: "sc-a", Slug: "scenario-a", Name: "Scenario A"},
 		},
-		jobs:      map[string]transit.Job{},
-		completed: make(chan transit.Job, 10),
+		jobs:          map[string]transit.Job{},
+		userServices:  map[string]transit.UserService{},
+		userScenarios: map[string]transit.UserScenario{},
+		completed:     make(chan transit.Job, 10),
 	}
 }
 
@@ -77,6 +84,32 @@ func (f *fakeCompileStore) compilableFixture() {
 		ID: "vt-1", MaxSpeedKMH: 36, AccelerationMS2: 1, DecelerationMS2: 1,
 		FloorHeight: "high", DwellLevelS: 30, DwellStepS: 60,
 	}}
+}
+
+// compilableUserFixture equips the store with a user-authored service (owned by
+// ownerID) on its own route, plus a user scenario curating it, both compilable
+// end to end. Keyed by slug — "line-a" and "trip".
+func (f *fakeCompileStore) compilableUserFixture(ownerID string) (svcID, scenarioID string) {
+	f.routes = append(f.routes, transit.Route{
+		ID:   "rt-user",
+		Slug: "rt-user",
+		Geometry: transit.GeoLineString{
+			Type:        "LineString",
+			Coordinates: [][]float64{{0, 0}, {0, 1}},
+		},
+	})
+	svc := transit.UserService{
+		ID: "usvc-1", Slug: "line-a", RouteID: "rt-user", OwnerID: ownerID,
+		Vehicle: transit.VehicleParams{MaxSpeedKMH: 36, AccelerationMS2: 1, DecelerationMS2: 1, DwellS: 30},
+		Stops: []transit.ServiceStopPoint{
+			{Name: "A", Lat: 0, Lng: 0, Seq: 0, Slug: "line-a--a"},
+			{Name: "B", Lat: 1, Lng: 0, Seq: 1, Slug: "line-a--b"},
+		},
+	}
+	f.userServices[svc.Slug] = svc
+	sc := transit.UserScenario{ID: "uscn-1", Slug: "trip", OwnerID: ownerID, ServiceIDs: []string{svc.ID}}
+	f.userScenarios[sc.Slug] = sc
+	return svc.ID, sc.ID
 }
 
 func (f *fakeCompileStore) GetScenarioBySlug(_ context.Context, slug string) (transit.Scenario, bool, error) {
@@ -165,18 +198,114 @@ func (f *fakeCompileStore) UpdateJobStatus(_ context.Context, id, status, errMsg
 	return nil
 }
 
-func (f *fakeCompileStore) CompleteJob(_ context.Context, id string, result transit.TransitGraph) error {
+func (f *fakeCompileStore) CompleteJob(_ context.Context, id string, result transit.TransitGraph, compiledServiceIDs []string) error {
 	f.mu.Lock()
 	j, ok := f.jobs[id]
 	if !ok {
 		f.mu.Unlock()
 		return errors.New("job not found")
 	}
-	j.Status, j.Result = transit.JobStatusSucceeded, &result
+	j.Status, j.Result, j.CompiledServiceIDs = transit.JobStatusSucceeded, &result, compiledServiceIDs
 	f.jobs[id] = j
 	f.mu.Unlock()
 	f.completed <- j
 	return nil
+}
+
+// --- User-authored compile surface (SPA-106). ---
+
+func (f *fakeCompileStore) GetUserServiceBySlug(_ context.Context, slug string) (transit.UserService, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	svc, ok := f.userServices[slug]
+	return svc, ok, nil
+}
+
+func (f *fakeCompileStore) GetUserScenarioBySlug(_ context.Context, slug string) (transit.UserScenario, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	sc, ok := f.userScenarios[slug]
+	return sc, ok, nil
+}
+
+func (f *fakeCompileStore) GetUserServiceByID(_ context.Context, id string) (transit.UserService, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, svc := range f.userServices {
+		if svc.ID == id {
+			return svc, true, nil
+		}
+	}
+	return transit.UserService{}, false, nil
+}
+
+func (f *fakeCompileStore) GetUserScenarioByID(_ context.Context, id string) (transit.UserScenario, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, sc := range f.userScenarios {
+		if sc.ID == id {
+			return sc, true, nil
+		}
+	}
+	return transit.UserScenario{}, false, nil
+}
+
+func (f *fakeCompileStore) ListUserServicesByIDs(_ context.Context, ids []string) ([]transit.UserService, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	want := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		want[id] = true
+	}
+	var out []transit.UserService
+	for _, svc := range f.userServices {
+		if want[svc.ID] {
+			out = append(out, svc)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeCompileStore) ListRoutesByIDs(_ context.Context, ids []string) ([]transit.Route, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	want := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		want[id] = true
+	}
+	var out []transit.Route
+	for _, rt := range f.routes {
+		if want[rt.ID] {
+			out = append(out, rt)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeCompileStore) GetLatestSucceededUserScenarioJob(_ context.Context, slug string) (transit.Job, bool, error) {
+	if f.getGraphErr != nil {
+		return transit.Job{}, false, f.getGraphErr
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	sc, ok := f.userScenarios[slug]
+	if !ok {
+		return transit.Job{}, false, nil
+	}
+	var latest transit.Job
+	found := false
+	for _, j := range f.jobs {
+		if j.UserScenarioID == nil || *j.UserScenarioID != sc.ID {
+			continue
+		}
+		if j.Kind != transit.JobKindCompileUserScenario || j.Status != transit.JobStatusSucceeded {
+			continue
+		}
+		if !found || j.CreatedAt.After(latest.CreatedAt) {
+			latest, found = j, true
+		}
+	}
+	return latest, found, nil
 }
 
 func (f *fakeCompileStore) waitForCompletion(t *testing.T) transit.Job {
@@ -378,7 +507,7 @@ func TestScenarioGraphReturnsCompiledResult(t *testing.T) {
 	store := newFakeCompileStore()
 	scenarioID := "sc-a"
 	store.jobs["job-1"] = transit.Job{
-		ID: "job-1", Kind: "compile", Status: transit.JobStatusSucceeded,
+		ID: "job-1", Kind: transit.JobKindCompileScenario, Status: transit.JobStatusSucceeded,
 		ScenarioID: &scenarioID,
 		Result:     &transit.TransitGraph{Services: []transit.ServiceGraph{{ServiceID: "svc-1"}}},
 	}

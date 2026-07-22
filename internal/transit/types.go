@@ -196,19 +196,44 @@ const (
 	JobStatusFailed    = "failed"
 )
 
+// Job kind values name what a compile job is compiling — the discriminator that
+// says which of a Job's target FKs is populated (ScenarioID, UserScenarioID, or
+// UserServiceID) and which loader the worker runs. A single-service compile is a
+// degenerate scenario compile (one member, only singleton clusters), but it
+// carries its own kind so the target FK it sets is unambiguous.
+const (
+	JobKindCompileScenario     = "compile_scenario"
+	JobKindCompileUserScenario = "compile_user_scenario"
+	JobKindCompileUserService  = "compile_user_service"
+)
+
 // Job is a unit of async work (e.g. compile or compute) whose status survives
 // restarts so callers can poll by job_id.
+//
+// Exactly one of ScenarioID / UserScenarioID / UserServiceID names the compile
+// target, chosen by Kind; the database CHECK jobs_one_target enforces at most
+// one (the seeded FK's ON DELETE SET NULL can legitimately leave none).
 type Job struct {
-	ID         string  `json:"id"`
-	Kind       string  `json:"kind"`
-	Status     string  `json:"status"`
-	ScenarioID *string `json:"scenario_id,omitempty"`
-	OwnerID    *string `json:"owner_id,omitempty"`
-	Error      string  `json:"error,omitempty"`
+	ID     string `json:"id"`
+	Kind   string `json:"kind"`
+	Status string `json:"status"`
+	// ScenarioID targets a seeded scenario; UserScenarioID a user-authored
+	// curated scenario; UserServiceID a single user-authored service compiled
+	// alone. Kind says which is set.
+	ScenarioID     *string `json:"scenario_id,omitempty"`
+	UserScenarioID *string `json:"user_scenario_id,omitempty"`
+	UserServiceID  *string `json:"user_service_id,omitempty"`
+	OwnerID        *string `json:"owner_id,omitempty"`
+	Error          string  `json:"error,omitempty"`
 	// Result is the compiled TransitGraph, set only once Status is
 	// JobStatusSucceeded. A caller can also reach it directly by scenario slug
 	// via Repository.GetLatestSucceededJob, without knowing the job id.
-	Result    *TransitGraph `json:"result,omitempty"`
-	CreatedAt time.Time     `json:"created_at"`
-	UpdatedAt time.Time     `json:"updated_at"`
+	Result *TransitGraph `json:"result,omitempty"`
+	// CompiledServiceIDs records which member service ids this job actually
+	// compiled — a snapshot taken at compile time, so a member since deleted
+	// stays listed. It backs staleness detection (SPA-116): comparing this to a
+	// user scenario's current membership reveals a member that has gone away.
+	CompiledServiceIDs []string  `json:"compiled_service_ids,omitempty"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
 }

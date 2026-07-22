@@ -100,11 +100,20 @@ func (s *stubAuthDeps) GetJobByID(context.Context, string) (transit.Job, bool, e
 	return transit.Job{}, false, nil
 }
 func (s *stubAuthDeps) UpdateJobStatus(context.Context, string, string, string) error { return nil }
-func (s *stubAuthDeps) CompleteJob(context.Context, string, transit.TransitGraph) error {
+func (s *stubAuthDeps) CompleteJob(context.Context, string, transit.TransitGraph, []string) error {
 	return nil
 }
 func (s *stubAuthDeps) GetLatestSucceededJob(context.Context, string, string) (transit.Job, bool, error) {
 	return transit.Job{}, false, nil
+}
+func (s *stubAuthDeps) GetLatestSucceededUserScenarioJob(context.Context, string) (transit.Job, bool, error) {
+	return transit.Job{}, false, nil
+}
+func (s *stubAuthDeps) ListUserServicesByIDs(context.Context, []string) ([]transit.UserService, error) {
+	return nil, nil
+}
+func (s *stubAuthDeps) ListRoutesByIDs(context.Context, []string) ([]transit.Route, error) {
+	return nil, nil
 }
 func (s *stubAuthDeps) ListRoutesByScenario(context.Context, string) ([]transit.Route, error) {
 	return nil, nil
@@ -175,11 +184,14 @@ func TestProtectedRoutesRejectAnonymousCallers(t *testing.T) {
 		{http.MethodPost, "/api/admin/routes"},
 		{http.MethodPost, "/api/scenarios/ca-hsr/compile"},
 		{http.MethodGet, "/api/jobs/some-id"},
+		{http.MethodPost, "/api/services/some-slug/compile"},
 		{http.MethodPost, "/api/user-scenarios"},
 		{http.MethodGet, "/api/user-scenarios"},
 		{http.MethodGet, "/api/user-scenarios/some-slug"},
 		{http.MethodPut, "/api/user-scenarios/some-slug"},
 		{http.MethodDelete, "/api/user-scenarios/some-slug"},
+		{http.MethodPost, "/api/user-scenarios/some-slug/compile"},
+		{http.MethodGet, "/api/user-scenarios/some-slug/graph"},
 	}
 
 	for _, p := range protected {
@@ -236,6 +248,9 @@ func TestCompileJobRoutesAdmitValidTokens(t *testing.T) {
 	for _, p := range []struct{ method, path string }{
 		{http.MethodPost, "/api/scenarios/ca-hsr/compile"},
 		{http.MethodGet, "/api/jobs/some-id"},
+		{http.MethodPost, "/api/services/some-slug/compile"},
+		{http.MethodPost, "/api/user-scenarios/some-slug/compile"},
+		{http.MethodGet, "/api/user-scenarios/some-slug/graph"},
 	} {
 		t.Run(p.method+" "+p.path, func(t *testing.T) {
 			rec := request(t, h, p.method, p.path, userToken)

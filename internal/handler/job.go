@@ -6,25 +6,26 @@ import (
 	"net/http"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
-	"github.com/andrewcgraves/sparks-effect-api/internal/ids"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 	"github.com/andrewcgraves/sparks-effect-api/internal/worker"
 )
 
-// jobKindCompile is the only Job.Kind this ticket produces. "compute" jobs
-// (the isochrone side of the async model) are a later addition.
-const jobKindCompile = "compile"
-
 // CompileStore is the slice of the repository the async compile job surface
-// needs: resolving a scenario by slug, persisting the job, and — via
-// worker.Store — the compile itself.
+// needs: resolving a compile target by slug (seeded scenario, user scenario, or
+// user service), persisting the job, and — via worker.Store — the compile
+// itself.
 type CompileStore interface {
 	GetScenarioBySlug(ctx context.Context, slug string) (transit.Scenario, bool, error)
+	GetUserScenarioBySlug(ctx context.Context, slug string) (transit.UserScenario, bool, error)
+	GetUserServiceBySlug(ctx context.Context, slug string) (transit.UserService, bool, error)
 	CreateJob(ctx context.Context, j transit.Job) error
 	GetJobByID(ctx context.Context, id string) (transit.Job, bool, error)
-	// GetLatestSucceededJob backs ScenarioGraph: the result, retrievable by
-	// scenario slug, without the caller ever needing a job id.
+	// GetLatestSucceededJob backs ScenarioGraph: the seeded scenario's result,
+	// retrievable by slug without the caller ever needing a job id.
 	GetLatestSucceededJob(ctx context.Context, scenarioSlug, kind string) (transit.Job, bool, error)
+	// GetLatestSucceededUserScenarioJob is its user-authored counterpart,
+	// backing UserScenarioGraph.
+	GetLatestSucceededUserScenarioJob(ctx context.Context, userScenarioSlug string) (transit.Job, bool, error)
 	worker.Store
 }
 
@@ -43,8 +44,7 @@ func CompileScenario(store CompileStore) http.HandlerFunc {
 		slug := r.PathValue("slug")
 		sc, found, err := store.GetScenarioBySlug(r.Context(), slug)
 		if err != nil {
-			log.Printf("handler: looking up scenario failed: %v", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
+			writeInternalError(w, "looking up scenario", err)
 			return
 		}
 		if !found {
@@ -52,37 +52,35 @@ func CompileScenario(store CompileStore) http.HandlerFunc {
 			return
 		}
 
-		id, err := ids.NewUUID()
-		if err != nil {
-			log.Printf("handler: generating job id failed: %v", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
-			return
-		}
-
-		job := transit.Job{
-			ID:         id,
-			Kind:       jobKindCompile,
-			Status:     transit.JobStatusQueued,
+		job, ok := createCompileJob(w, r, store, transit.Job{
+			Kind:       transit.JobKindCompileScenario,
 			ScenarioID: &sc.ID,
 			OwnerID:    &user.ID,
-		}
-		if err := store.CreateJob(r.Context(), job); err != nil {
-			log.Printf("handler: creating job failed: %v", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
+		})
+		if !ok {
 			return
 		}
-
-		// Detached from the request context: the compile must run to
-		// completion regardless of whether the triggering client is still
-		// connected by the time it finishes.
-		go func() {
-			if err := worker.Compile(context.Background(), store, job.ID, sc.ID); err != nil {
-				log.Printf("worker: compile job %s: %v", job.ID, err)
-			}
-		}()
-
+		enqueueCompile(store, job)
 		writeJSON(w, http.StatusAccepted, job)
 	}
+}
+
+// enqueueCompile hands a persisted, queued job off to a background goroutine so
+// the triggering caller gets its job id back immediately rather than waiting
+// for the physics compile and graph build to finish.
+//
+// The goroutine is detached from the request context: the compile must run to
+// completion regardless of whether the triggering client is still connected by
+// the time it finishes. Shared by every compile trigger — seeded scenario, user
+// scenario, and single user service — since the queued → running →
+// succeeded/failed surface is identical across them; only the job's kind and
+// target differ, and worker.Compile switches on that.
+func enqueueCompile(store CompileStore, job transit.Job) {
+	go func() {
+		if err := worker.Compile(context.Background(), store, job); err != nil {
+			log.Printf("worker: compile job %s: %v", job.ID, err)
+		}
+	}()
 }
 
 // JobStatus returns a handler for GET /api/jobs/{id}: the queued -> running ->
@@ -100,8 +98,7 @@ func JobStatus(store CompileStore) http.HandlerFunc {
 		id := r.PathValue("id")
 		job, found, err := store.GetJobByID(r.Context(), id)
 		if err != nil {
-			log.Printf("handler: looking up job failed: %v", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
+			writeInternalError(w, "looking up job", err)
 			return
 		}
 		if !found || (!user.IsAdmin && (job.OwnerID == nil || *job.OwnerID != user.ID)) {
@@ -120,10 +117,9 @@ func JobStatus(store CompileStore) http.HandlerFunc {
 func ScenarioGraph(store CompileStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		slug := r.PathValue("slug")
-		job, found, err := store.GetLatestSucceededJob(r.Context(), slug, jobKindCompile)
+		job, found, err := store.GetLatestSucceededJob(r.Context(), slug, transit.JobKindCompileScenario)
 		if err != nil {
-			log.Printf("handler: looking up compiled graph failed: %v", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
+			writeInternalError(w, "looking up compiled graph", err)
 			return
 		}
 		if !found || job.Result == nil {
