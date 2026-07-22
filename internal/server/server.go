@@ -75,20 +75,26 @@ func New(cfg config.Config, store *transit.Store, deps AuthDeps, chainer isochro
 	}
 }
 
-// registerRouteRoutes wires the public route-read endpoint and the
-// stop-snapping preview built on the same geometry. Ingested routes live in
-// Postgres, not the embedded scenario store, so with no database configured
-// both answer 503 rather than 404 — the /api/routes/ prefix below covers every
-// path under it, including snap-stops.
+// registerRouteRoutes wires the public route surface: the collection a picker
+// lists from, one route by slug, and the stop-snapping preview built on that
+// same geometry. Ingested routes live in Postgres, not the embedded scenario
+// store, so with no database configured they answer 503 rather than 404.
 //
-// The preview is public for the same reason the read is: it projects onto an
+// The preview is public for the same reason the reads are: it projects onto an
 // alignment anyone may already fetch, and tells a caller nothing that geometry
-// does not.
+// does not. It is a POST only because it carries a body — hence the name here
+// is not "read routes", though nothing registered below writes anything.
 func registerRouteRoutes(mux *http.ServeMux, deps AuthDeps) {
 	if deps == nil {
+		// The collection needs its own entry alongside the subtree: /api/routes/
+		// does not serve /api/routes, it makes the mux answer that path with a
+		// 307 to the trailing-slash form. Without this the list would redirect
+		// rather than report itself unavailable.
+		mux.HandleFunc("/api/routes", serviceUnavailable("route storage is unavailable"))
 		mux.HandleFunc("/api/routes/", serviceUnavailable("route storage is unavailable"))
 		return
 	}
+	mux.HandleFunc("GET /api/routes", handler.Routes(deps))
 	mux.HandleFunc("GET /api/routes/{slug}", handler.RouteBySlug(deps))
 	mux.HandleFunc("POST /api/routes/{slug}/snap-stops", handler.SnapStops(deps))
 }

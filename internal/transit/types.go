@@ -59,6 +59,17 @@ type Route struct {
 	Segments []RouteSegment `yaml:"segments,omitempty"     json:"segments"`
 }
 
+// RouteSummary is a route reduced to what is needed to *choose* one: how it is
+// addressed, what it is called, and what it is. Geometry and per-segment
+// physics are deliberately absent — they dominate a route's size and nothing
+// about picking one depends on them. The internal ID is absent too, since a
+// route is addressed by slug everywhere on the wire.
+type RouteSummary struct {
+	Slug string `json:"slug"`
+	Name string `json:"name"`
+	Mode string `json:"mode"`
+}
+
 // Station is a named boarding point owned by a scenario.
 type Station struct {
 	ID             string   `yaml:"id"              json:"id"`
