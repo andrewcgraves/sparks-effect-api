@@ -305,6 +305,24 @@ func TestRouteReadEndpointStaysOpenWithoutAToken(t *testing.T) {
 	}
 }
 
+// The snap preview is public for the same reason as the route read it
+// projects against, and it is registered under POST — a client sending one
+// must not be met with a 405 from the GET-only read pattern.
+func TestSnapStopsEndpointStaysOpenWithoutAToken(t *testing.T) {
+	h := newTestServer(t, newStubDeps())
+
+	rec := request(t, h, http.MethodPost, "/api/routes/no-such-route/snap-stops", "",
+		`{"stops":[{"lat":37.79,"lng":-122.4}]}`)
+	if rec.Code == http.StatusUnauthorized || rec.Code == http.StatusForbidden {
+		t.Errorf("status = %d, the snap preview must not require auth", rec.Code)
+	}
+	// stubAuthDeps has no routes, so an anonymous caller should see the
+	// ordinary not-found response rather than an auth rejection or a 405.
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 for an unknown slug", rec.Code)
+	}
+}
+
 // The compiled-graph read is public, like the other scenario reads — a
 // caller checking whether a compile has finished has no session yet either.
 func TestGraphEndpointStaysOpenWithoutAToken(t *testing.T) {
@@ -354,6 +372,12 @@ func TestAuthRoutesReportUnavailableWithoutADatabase(t *testing.T) {
 	// plainly too, rather than 404ing as if the endpoint didn't exist.
 	if rec := request(t, h, http.MethodGet, "/api/routes/ca-hsr-trunk", ""); rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("route read status = %d, want 503 with no database configured", rec.Code)
+	}
+
+	// The snap preview reads the same Postgres-backed geometry, so it must
+	// answer 503 too rather than 404 as if it were never deployed.
+	if rec := request(t, h, http.MethodPost, "/api/routes/ca-hsr-trunk/snap-stops", ""); rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("snap-stops status = %d, want 503 with no database configured", rec.Code)
 	}
 
 	// The compiled graph is likewise Postgres-backed and unauthenticated, so

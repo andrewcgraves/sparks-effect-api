@@ -75,15 +75,22 @@ func New(cfg config.Config, store *transit.Store, deps AuthDeps, chainer isochro
 	}
 }
 
-// registerRouteReadRoutes wires the public route-read endpoint. Ingested
-// routes live in Postgres, not the embedded scenario store, so with no
-// database configured it answers 503 rather than 404.
+// registerRouteReadRoutes wires the public route-read endpoint and the
+// stop-snapping preview built on the same geometry. Ingested routes live in
+// Postgres, not the embedded scenario store, so with no database configured
+// both answer 503 rather than 404 — the /api/routes/ prefix below covers every
+// path under it, including snap-stops.
+//
+// The preview is public for the same reason the read is: it projects onto an
+// alignment anyone may already fetch, and tells a caller nothing that geometry
+// does not.
 func registerRouteReadRoutes(mux *http.ServeMux, deps AuthDeps) {
 	if deps == nil {
 		mux.HandleFunc("/api/routes/", serviceUnavailable("route storage is unavailable"))
 		return
 	}
 	mux.HandleFunc("GET /api/routes/{slug}", handler.RouteBySlug(deps))
+	mux.HandleFunc("POST /api/routes/{slug}/snap-stops", handler.SnapStops(deps))
 }
 
 // registerCompileRoutes wires the public read half of the async compile job

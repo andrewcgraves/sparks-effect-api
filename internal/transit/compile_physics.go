@@ -29,7 +29,7 @@ import (
 // hand-authored-table compiler's convention — see TravelTimes), varying only by
 // which end's dwell they carry, matching pathDwellSecs in compile.go.
 func CompileServicePhysics(svc CompilableService) (ServiceGraph, error) {
-	line, err := toPhysicsLine(svc.Route.Geometry)
+	line, err := ToPhysicsLine(svc.Route.Geometry)
 	if err != nil {
 		return ServiceGraph{}, fmt.Errorf("compile: service %q: %w", svc.ID, err)
 	}
@@ -92,10 +92,14 @@ func CompileServicePhysics(svc CompilableService) (ServiceGraph, error) {
 	return sg, nil
 }
 
-// toPhysicsLine converts a route's GeoJSON LineString to physics.Point
+// ToPhysicsLine converts a route's GeoJSON LineString to physics.Point
 // coordinates, erroring the way physics.ProjectStops itself would (fewer
 // than 2 points) so the caller gets one consistent error path.
-func toPhysicsLine(g GeoLineString) ([]physics.Point, error) {
+//
+// It is exported for the snap-stops preview endpoint, which projects onto the
+// same geometry this compiler does and must not carry a second, drifting copy
+// of the conversion.
+func ToPhysicsLine(g GeoLineString) ([]physics.Point, error) {
 	if len(g.Coordinates) < 2 {
 		return nil, fmt.Errorf("route geometry must have at least 2 points, got %d", len(g.Coordinates))
 	}
