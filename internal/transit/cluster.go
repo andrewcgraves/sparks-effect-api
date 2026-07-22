@@ -150,8 +150,16 @@ type MergeReport struct {
 // durable address — but nothing may deep-link a cluster key as though it were
 // permanent.
 //
+// It also returns the graph's node set: one GraphNode per cluster, singletons
+// included. Nodes are built here rather than re-derived later because the
+// clusters are the node set — every cluster is a graph key and every graph key
+// is a cluster — and this is the one place they exist. Reconstructing them
+// after the fact would mean re-clustering, which the compiled graph exists
+// precisely to avoid: the key is stable per compile, not across membership
+// changes.
+//
 // Input is not mutated; the returned services carry fresh stop slices.
-func MergeColocatedStops(svcs []CompilableService) ([]CompilableService, MergeReport) {
+func MergeColocatedStops(svcs []CompilableService) ([]CompilableService, MergeReport, []GraphNode) {
 	stops := flattenStops(svcs)
 	clusters, clusterOf := clusterStops(stops)
 
@@ -164,10 +172,11 @@ func MergeColocatedStops(svcs []CompilableService) ([]CompilableService, MergeRe
 		merged[s.svcIdx].Stops[s.stopIdx].Slug = clusters[clusterOf[i]].key()
 	}
 
-	return merged, MergeReport{
+	report := MergeReport{
 		Clusters:   realisedClusters(clusters),
 		NearMisses: nearMisses(stops, clusterOf),
 	}
+	return merged, report, clusterNodes(clusters)
 }
 
 // mergeStop is one stop lifted out of its service and given everything the
@@ -265,11 +274,51 @@ func clusterStops(stops []mergeStop) ([]pendingCluster, []int) {
 	return clusters, clusterOf
 }
 
-// realisedClusters reports the clusters that actually merged something.
+// clusterNames returns a cluster's distinct member names in member order, so
+// the key member's own name — the anchor, appended first — comes first.
 //
-// Names are deduplicated: two services calling the same place "Transbay" have
-// stated one name, not two, and "Transbay (also: Transbay)" would be noise.
-// Order follows the members, so the key's own name comes first.
+// It is the single source of that ordered, deduplicated name list, shared by
+// the merge report (StopCluster.Names) and the graph nodes (GraphNode.Names) so
+// the two can never disagree about what a cluster is called. Two services
+// calling the same place "Transbay" have stated one name, not two, and
+// "Transbay (also: Transbay)" would be noise.
+func clusterNames(c pendingCluster) []string {
+	var names []string
+	seen := make(map[string]bool, len(c.members))
+	for _, m := range c.members {
+		if seen[m.ref.Name] {
+			continue
+		}
+		seen[m.ref.Name] = true
+		names = append(names, m.ref.Name)
+	}
+	return names
+}
+
+// node projects a cluster onto the one addressable point the graph's edges
+// name: its key, the anchor's persisted-snapped position — which is the key
+// member's, and deliberately not a centroid (see GraphNode) — and the member
+// names for display.
+func (c pendingCluster) node() GraphNode {
+	at := c.anchor()
+	return GraphNode{Slug: c.key(), Lat: at.Lat, Lng: at.Lng, Names: clusterNames(c)}
+}
+
+// clusterNodes turns every cluster into one GraphNode, singletons included.
+// Every cluster is a graph key and every graph key is a cluster, so this is
+// exactly the node set the compiled edges address — one node per key, no
+// dangling edge key and no orphan node. Singletons are kept precisely because a
+// lone stop is still a node its own service's edges name; only realisedClusters
+// drops them, because a singleton is not an interchange to report.
+func clusterNodes(clusters []pendingCluster) []GraphNode {
+	nodes := make([]GraphNode, len(clusters))
+	for i, c := range clusters {
+		nodes[i] = c.node()
+	}
+	return nodes
+}
+
+// realisedClusters reports the clusters that actually merged something.
 func realisedClusters(clusters []pendingCluster) []StopCluster {
 	var out []StopCluster
 	for _, c := range clusters {
@@ -277,16 +326,10 @@ func realisedClusters(clusters []pendingCluster) []StopCluster {
 			continue
 		}
 		members := make([]StopRef, len(c.members))
-		var names []string
-		seen := make(map[string]bool, len(c.members))
 		for i, m := range c.members {
 			members[i] = m.ref
-			if !seen[m.ref.Name] {
-				seen[m.ref.Name] = true
-				names = append(names, m.ref.Name)
-			}
 		}
-		out = append(out, StopCluster{Key: c.key(), Names: names, Members: members})
+		out = append(out, StopCluster{Key: c.key(), Names: clusterNames(c), Members: members})
 	}
 	return out
 }

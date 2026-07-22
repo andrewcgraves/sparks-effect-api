@@ -55,7 +55,7 @@ func TestMergeColocatedStops_colocatedCrossServiceStopsShareOneKey(t *testing.T)
 		svcOf("svc-b", stop("b--salesforce", "Salesforce Center", latDeltaMerges)),
 	}
 
-	got, _ := MergeColocatedStops(svcs)
+	got, _, _ := MergeColocatedStops(svcs)
 
 	keys := keysOf(got)
 	if keys[0][0] != keys[1][0] {
@@ -83,7 +83,7 @@ func TestMergeColocatedStops_separatedStopsKeepTheirOwnKeys(t *testing.T) {
 }
 
 // mergedOnly drops the report, for tests that assert only on keys.
-func mergedOnly(svcs []CompilableService, _ MergeReport) []CompilableService {
+func mergedOnly(svcs []CompilableService, _ MergeReport, _ []GraphNode) []CompilableService {
 	return svcs
 }
 
@@ -102,7 +102,7 @@ func TestMergeColocatedStops_chainDoesNotPropagateThroughANonAnchor(t *testing.T
 		svcOf("svc-c", stop("c", "C", 2*latDeltaMerges)),
 	}
 
-	got, report := MergeColocatedStops(svcs)
+	got, report, _ := MergeColocatedStops(svcs)
 	keys := keysOf(got)
 
 	// A and B share A's key; C keeps its own.
@@ -141,7 +141,7 @@ func TestMergeColocatedStops_isDeterministicUnderShuffle(t *testing.T) {
 		svcOf("svc-d", stop("d", "D", latDeltaFar)),
 	}
 
-	_, want := MergeColocatedStops(base)
+	_, want, _ := MergeColocatedStops(base)
 
 	// Every permutation of the four services.
 	perms := permute([]int{0, 1, 2, 3})
@@ -150,7 +150,7 @@ func TestMergeColocatedStops_isDeterministicUnderShuffle(t *testing.T) {
 		for i, idx := range p {
 			shuffled[i] = base[idx]
 		}
-		_, got := MergeColocatedStops(shuffled)
+		_, got, _ := MergeColocatedStops(shuffled)
 		if !reflect.DeepEqual(clusterKeys(got), clusterKeys(want)) {
 			t.Fatalf("permutation %v gave clusters %+v, want %+v — merge must not depend on service order",
 				p, clusterKeys(got), clusterKeys(want))
@@ -201,7 +201,7 @@ func TestMergeColocatedStops_neverMergesWithinOneService(t *testing.T) {
 		),
 	}
 
-	got, report := MergeColocatedStops(svcs)
+	got, report, _ := MergeColocatedStops(svcs)
 	keys := keysOf(got)
 	if keys[0][0] == keys[0][1] {
 		t.Errorf("keys = %q, want two distinct keys — a service's own stops must not merge", keys[0])
@@ -229,7 +229,7 @@ func TestMergeColocatedStops_singleServiceKeysAreUnchanged(t *testing.T) {
 		),
 	}
 
-	got, report := MergeColocatedStops(svcs)
+	got, report, _ := MergeColocatedStops(svcs)
 	want := []string{"a--north", "a--mid", "a--south"}
 	if !reflect.DeepEqual(keysOf(got)[0], want) {
 		t.Errorf("keys = %q, want %q unchanged", keysOf(got)[0], want)
@@ -248,7 +248,7 @@ func TestMergeColocatedStops_clusterCarriesAllMemberNames(t *testing.T) {
 		svcOf("svc-c", stop("c--transbay", "Transbay", latDeltaMerges)),
 	}
 
-	_, report := MergeColocatedStops(svcs)
+	_, report, _ := MergeColocatedStops(svcs)
 	if len(report.Clusters) != 1 {
 		t.Fatalf("clusters = %+v, want exactly one", report.Clusters)
 	}
@@ -269,7 +269,7 @@ func TestMergeColocatedStops_reportsSameNamedNearMiss(t *testing.T) {
 		svcOf("svc-b", stop("b--transbay", "Transbay", latDeltaNearMiss)),
 	}
 
-	got, report := MergeColocatedStops(svcs)
+	got, report, _ := MergeColocatedStops(svcs)
 	// Did not merge.
 	if keysOf(got)[0][0] == keysOf(got)[1][0] {
 		t.Fatal("stops merged, want them left separate at 77.8 m")
