@@ -2,6 +2,7 @@ package transit_test
 
 import (
 	"errors"
+	"maps"
 	"math"
 	"strings"
 	"testing"
@@ -260,4 +261,69 @@ func TestSnapToRouteReportsUnusableGeometry(t *testing.T) {
 	if err := svc.SnapToRoute(rt); !errors.Is(err, transit.ErrRouteGeometry) {
 		t.Fatalf("SnapToRoute error = %v, want it to wrap ErrRouteGeometry", err)
 	}
+}
+
+// TestAWestboundServiceCompilesToTheSameGraphAsItsEastboundTwin is the proof
+// behind the monotonicity rule in FirstChainageOrderFault, which accepts a
+// service whose chainage descends the whole way even though physics.ProjectStops
+// sorts it back into ascending order before building spans.
+//
+// The claim is that the sort cannot change the graph for a monotonic sequence:
+// reversing a list preserves every adjacent pair, and compiled edges are emitted
+// in both directions carrying the dwell of the end they arrive at. If that ever
+// stops being true — a directional edge weight, an order-sensitive consumer —
+// this test fails and the rule has to tighten to strict ascent.
+func TestAWestboundServiceCompilesToTheSameGraphAsItsEastboundTwin(t *testing.T) {
+	rt := transit.Route{
+		ID: "route-1", Slug: "line", Name: "Line",
+		Geometry: transit.GeoLineString{
+			Type:        "LineString",
+			Coordinates: [][]float64{{-122.0, 37.0}, {-121.0, 37.0}},
+		},
+	}
+
+	// The same three physical stops, authored in opposite orders.
+	eastbound := serviceOnSnapRoute(0, -121.8, -121.6, -121.4)
+	eastbound.ID = "svc-1"
+	eastbound.Stops[0].Name, eastbound.Stops[1].Name, eastbound.Stops[2].Name = "A", "B", "C"
+
+	westbound := serviceOnSnapRoute(0, -121.4, -121.6, -121.8)
+	westbound.ID = "svc-1"
+	westbound.Stops[0].Name, westbound.Stops[1].Name, westbound.Stops[2].Name = "C", "B", "A"
+
+	for _, svc := range []*transit.UserService{&eastbound, &westbound} {
+		if err := svc.SnapToRoute(rt); err != nil {
+			t.Fatalf("SnapToRoute(%s): %v", svc.Stops[0].Name, err)
+		}
+	}
+
+	if eastbound.Stops[0].ChainageM >= eastbound.Stops[2].ChainageM {
+		t.Fatal("eastbound fixture does not ascend along the line")
+	}
+	if westbound.Stops[0].ChainageM <= westbound.Stops[2].ChainageM {
+		t.Fatal("westbound fixture does not descend along the line")
+	}
+
+	if got, want := compiledEdges(t, rt, westbound), compiledEdges(t, rt, eastbound); !maps.Equal(got, want) {
+		t.Errorf("westbound compiled to a different graph:\n west = %v\n east = %v", got, want)
+	}
+}
+
+// compiledEdges compiles svc and returns its edges as a set keyed "from->to",
+// so two graphs compare regardless of the order spans happened to be built in.
+func compiledEdges(t *testing.T, rt transit.Route, svc transit.UserService) map[string]int {
+	t.Helper()
+	compilable, err := transit.CompilableFromUserService(rt, svc)
+	if err != nil {
+		t.Fatalf("CompilableFromUserService: %v", err)
+	}
+	sg, err := transit.CompileServicePhysics(compilable)
+	if err != nil {
+		t.Fatalf("CompileServicePhysics: %v", err)
+	}
+	edges := make(map[string]int, len(sg.Edges))
+	for _, e := range sg.Edges {
+		edges[e.FromSlug+"->"+e.ToSlug] = e.Seconds
+	}
+	return edges
 }

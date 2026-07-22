@@ -53,7 +53,7 @@ type serviceRequest struct {
 
 // applyTo copies the client-writable fields onto svc, leaving ID, Slug, and
 // OwnerID untouched. RouteID is not among them: it is resolved from the request
-// slug by prepareService, which needs the route itself anyway.
+// slug by validateAndSnapService, which needs the route itself anyway.
 func (req serviceRequest) applyTo(svc *transit.UserService) {
 	svc.Name = req.Name
 	svc.Description = req.Description
@@ -90,7 +90,7 @@ func CreateService(store ServiceStore) http.HandlerFunc {
 		svc := transit.UserService{ID: id, OwnerID: user.ID}
 		req.applyTo(&svc)
 
-		if !prepareService(w, r, store, &svc, req.RouteSlug) {
+		if !validateAndSnapService(w, r, store, &svc, req.RouteSlug) {
 			return
 		}
 
@@ -177,7 +177,7 @@ func UpdateService(store ServiceStore) http.HandlerFunc {
 		// carry over from the stored service.
 		req.applyTo(&svc)
 
-		if !prepareService(w, r, store, &svc, req.RouteSlug) {
+		if !validateAndSnapService(w, r, store, &svc, req.RouteSlug) {
 			return
 		}
 		if err := store.UpdateUserService(r.Context(), svc); err != nil {
@@ -261,16 +261,16 @@ func decodeServiceRequest(w http.ResponseWriter, r *http.Request) (serviceReques
 	return req, true
 }
 
-// prepareService resolves the route the request names, validates the service
-// against it, and snaps its stops onto that route's alignment — after which svc
-// holds the coordinates that will be stored.
+// validateAndSnapService resolves the route the request names, validates the
+// service against it, and snaps its stops onto that route's alignment — after
+// which svc holds the coordinates that will be stored.
 //
 // Resolving the route also settles what would otherwise be a foreign-key 500:
 // an unknown slug is a 422 the client can act on. Snapping happens here rather
 // than in the store because it is a validation step as much as a normalisation
 // one: a stop the route does not pass anywhere near, or a sequence that runs
 // against the alignment, is refused rather than quietly stored.
-func prepareService(w http.ResponseWriter, r *http.Request, store ServiceStore, svc *transit.UserService, routeSlug string) bool {
+func validateAndSnapService(w http.ResponseWriter, r *http.Request, store ServiceStore, svc *transit.UserService, routeSlug string) bool {
 	routeSlug = strings.TrimSpace(routeSlug)
 	if routeSlug == "" {
 		writeError(w, http.StatusUnprocessableEntity, "route_slug is required")

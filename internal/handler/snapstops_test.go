@@ -20,7 +20,7 @@ type snapResponse struct {
 	RouteSlug          string  `json:"route_slug"`
 	OffRouteThresholdM float64 `json:"off_route_threshold_m"`
 	ChainageOrder      []int   `json:"chainage_order"`
-	OrderMatchesInput  bool    `json:"order_matches_input"`
+	OrderIsConsistent  bool    `json:"order_is_consistent"`
 	Stops              []struct {
 		ID        string        `json:"id"`
 		Input     snapCoordJSON `json:"input"`
@@ -223,8 +223,8 @@ func TestSnapStopsPreservesInputOrderAndReportsChainageOrder(t *testing.T) {
 			t.Fatalf("chainage_order = %v, want %v", got.ChainageOrder, want)
 		}
 	}
-	if got.OrderMatchesInput {
-		t.Error("order_matches_input = true, but the stops were supplied against the line's direction")
+	if got.OrderIsConsistent {
+		t.Error("order_is_consistent = true, but the stops double back along the line")
 	}
 }
 
@@ -240,8 +240,8 @@ func TestSnapStopsReportsAgreementWhenStopsAreInChainageOrder(t *testing.T) {
 	}
 
 	got := decodeSnap(t, rec)
-	if !got.OrderMatchesInput {
-		t.Error("order_matches_input = false for stops supplied along the line's direction")
+	if !got.OrderIsConsistent {
+		t.Error("order_is_consistent = false for stops supplied along the line's direction")
 	}
 	if len(got.ChainageOrder) != 2 || got.ChainageOrder[0] != 0 || got.ChainageOrder[1] != 1 {
 		t.Errorf("chainage_order = %v, want [0 1]", got.ChainageOrder)
@@ -266,8 +266,8 @@ func TestSnapStopsAcceptsASingleStop(t *testing.T) {
 	if len(got.ChainageOrder) != 1 || got.ChainageOrder[0] != 0 {
 		t.Errorf("chainage_order = %v, want [0]", got.ChainageOrder)
 	}
-	if !got.OrderMatchesInput {
-		t.Error("a lone stop is trivially in chainage order")
+	if !got.OrderIsConsistent {
+		t.Error("a lone stop is trivially consistent")
 	}
 }
 
@@ -350,5 +350,30 @@ func TestSnapStopsRejectsUnusableRouteGeometry(t *testing.T) {
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("status = %d, want 500 for a route whose geometry cannot be snapped to; body %s",
 			rec.Code, rec.Body.String())
+	}
+}
+
+// TestSnapStopsCallsAWestboundServiceConsistent is the divergence guard: the
+// preview must not flag an ordering problem the save would accept. Stops
+// supplied against the direction the route was drawn in run descending the
+// whole way, which the write path stores happily, so the preview reports them
+// as consistent even though chainage_order comes back reversed.
+func TestSnapStopsCallsAWestboundServiceConsistent(t *testing.T) {
+	store := seedSnapRoute(t)
+
+	rec := postSnapStops(t, handler.SnapStops(store), "test-alignment", `{"stops":[
+		{"lat":37.70,"lng":-122.3},
+		{"lat":37.79,"lng":-122.4}
+	]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body.String())
+	}
+
+	got := decodeSnap(t, rec)
+	if !got.OrderIsConsistent {
+		t.Error("order_is_consistent = false for a service authored against the line's direction, which saves fine")
+	}
+	if len(got.ChainageOrder) != 2 || got.ChainageOrder[0] != 1 || got.ChainageOrder[1] != 0 {
+		t.Errorf("chainage_order = %v, want [1 0] — the stops do fall in reverse along the line", got.ChainageOrder)
 	}
 }

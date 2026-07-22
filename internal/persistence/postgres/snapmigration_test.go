@@ -78,6 +78,27 @@ func TestSnapMigrationRefusesAPreSnapRow(t *testing.T) {
 	}
 }
 
+// TestSnapMigrationRefusesAnOnRouteRowToo pins the other half of the choice:
+// the migration stops for *any* pre-snap row, not only for one the 500 m rule
+// would reject. Distance does not enter into it, because the coordinates it
+// would have to measure are the ones it cannot compute without the projection
+// in internal/physics. Without this test the pairing with the over-threshold
+// case above would read as if the threshold were what triggered the refusal.
+func TestSnapMigrationRefusesAnOnRouteRowToo(t *testing.T) {
+	_, _, url := userServiceFixture(t)
+	rewindSnapMigration(t, url)
+	// Both stops sit exactly on route us-route-0 (the line lat 37, west to east).
+	insertLegacyUserService(t, url, `[
+		{"name":"A","lat":37.0,"lng":-121.8,"seq":0},
+		{"name":"B","lat":37.0,"lng":-121.4,"seq":1}
+	]`)
+
+	if err := postgres.Migrate(context.Background(), url); err == nil {
+		t.Fatal("migration accepted a pre-snap row because its stops were on the alignment; " +
+			"the rule is that no pre-snap row passes, whatever its coordinates")
+	}
+}
+
 // TestSnapMigrationRunsOnAnEmptyTable is the case actually expected in every
 // environment: nothing to backfill, so the migration is just the invariant.
 func TestSnapMigrationRunsOnAnEmptyTable(t *testing.T) {

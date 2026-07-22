@@ -74,8 +74,18 @@ func (s *UserService) SnapToRoute(rt Route) error {
 				s.Stops[i].Name, formatDistance(sn.OffsetM), rt.Slug)
 		}
 	}
-	if err := checkChainageOrder(s.Stops, snapped); err != nil {
-		return err
+	chainages := make([]float64, len(snapped))
+	for i, sn := range snapped {
+		chainages[i] = sn.ChainageM
+	}
+	if i, backwards, faulty := FirstChainageOrderFault(chainages); faulty {
+		from, to := s.Stops[i], s.Stops[i+1]
+		relation := "after"
+		if backwards {
+			relation = "before"
+		}
+		return fmt.Errorf("stop %q (seq %d) lies %s %q (seq %d) along this route",
+			from.Name, from.Seq, relation, to.Name, to.Seq)
 	}
 
 	// Every check has passed, so committing the rewrite cannot leave the
@@ -89,40 +99,57 @@ func (s *UserService) SnapToRoute(rt Route) error {
 	return nil
 }
 
-// checkChainageOrder reports whether the stops' distances along the line agree
-// with the order they were authored in.
+// FirstChainageOrderFault finds the first place a sequence of chainages
+// contradicts the direction the sequence itself established. It reports the
+// index i of the earlier stop of the offending pair (so the pair is i, i+1),
+// whether the established direction was backwards along the line (which decides
+// only how the fault reads), and whether there is a fault at all.
 //
-// The rule is monotonicity, not ascent. A service authored east-to-west along a
-// line drawn west-to-east has chainage descending throughout, and that is a
-// perfectly ordinary service — the adjacent pairs the compiler builds are
-// exactly the authored ones, just walked the other way. What is not ordinary is
-// a sequence that doubles back: there the compiler's chainage-sorted pattern
-// and the authored pattern genuinely differ, and nothing would report it.
+// The rule is monotonicity, not ascent, and the distinction is load-bearing:
+//
+// physics.ProjectStops sorts stops by chainage before building spans, so the
+// pattern the compiler builds is the chainage-sorted one whatever order the
+// author gave. That is only safe when sorting cannot change which stops are
+// adjacent. For a monotonic sequence it cannot: sorting a descending sequence
+// reverses it, and reversing a list preserves every adjacent pair. Compiled
+// edges are emitted in both directions, each carrying the dwell of the end it
+// arrives at, so a reversed span list yields the same graph. A service authored
+// east-to-west along a line drawn west-to-east is therefore an ordinary
+// service, not a mistake, and rejecting it would make westbound patterns
+// unauthorable on an eastward-drawn alignment.
+//
+// A sequence that doubles back is the case that genuinely breaks: authored
+// A→C→B has adjacent pairs {A,C} and {C,B}, while sorting yields A→B→C with
+// pairs {A,B} and {B,C}. Different pairs, so a different graph — the service
+// says one thing and the compiler builds another, with nothing reporting it.
+// That is what this refuses.
 //
 // Stops at equal chainage neither set nor break the direction. Two stops
-// projecting to the same point on the line is its own problem (it compiles to a
-// zero-length span), but it is not an ordering disagreement, and reporting it as
-// one would name the wrong fault.
-func checkChainageOrder(stops []ServiceStopPoint, snapped []physics.SnappedStop) error {
-	ascending := 0 // 0 until a pair with distinct chainage establishes a direction
-	for i := 0; i < len(snapped)-1; i++ {
-		delta := snapped[i+1].ChainageM - snapped[i].ChainageM
+// projecting to the same point is its own problem (it compiles to a zero-length
+// span), but it is not an ordering disagreement, and reporting it as one would
+// name the wrong fault.
+//
+// It is exported so the snap preview reports against the same rule the write
+// path enforces. A preview that called a westbound service out of order would
+// send the user to fix something that was never going to be refused.
+func FirstChainageOrderFault(chainageM []float64) (i int, backwards, faulty bool) {
+	direction := 0 // 0 until a pair with distinct chainage establishes one
+	for i := 0; i < len(chainageM)-1; i++ {
+		delta := chainageM[i+1] - chainageM[i]
 		switch {
 		case delta == 0:
 			continue
-		case ascending == 0:
+		case direction == 0:
 			if delta > 0 {
-				ascending = 1
+				direction = 1
 			} else {
-				ascending = -1
+				direction = -1
 			}
-		case (delta > 0) != (ascending > 0):
-			from, to := stops[i], stops[i+1]
-			return fmt.Errorf("stop %q (seq %d) lies after %q (seq %d) along this route",
-				from.Name, from.Seq, to.Name, to.Seq)
+		case (delta > 0) != (direction > 0):
+			return i, direction < 0, true
 		}
 	}
-	return nil
+	return 0, false, false
 }
 
 // formatDistance renders a distance for a user-facing message: metres up close,

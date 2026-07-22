@@ -14,6 +14,12 @@
 -- and the assertion below that no pre-snap row is left behind carrying raw
 -- coordinates the invariant would silently bless.
 --
+-- Scope: `user_services` only. The `service_stops` table from 00001 belongs to
+-- the seeded `Service` aggregate, whose stops reference shared `stations` rows
+-- and are compiled through the hand-authored run-time table rather than by
+-- projecting onto route geometry. Nothing snaps them, so there is nothing here
+-- for them to hold.
+--
 -- ## Why offset_m is persisted and not merely returned
 --
 -- SPA-108's own acceptance criteria only need chainage. offset_m is here for

@@ -810,3 +810,52 @@ func TestUnusableRouteGeometryIs500(t *testing.T) {
 		t.Fatalf("got %d, want %d (body %s)", rec.Code, http.StatusInternalServerError, rec.Body)
 	}
 }
+
+// TestEditingOneStopOverTheAPIDoesNotMoveTheOthers is the second half of the
+// idempotency guarantee: not "resave everything unchanged" but "change one stop
+// and the rest stay put", which is what a user dragging a single marker does.
+func TestEditingOneStopOverTheAPIDoesNotMoveTheOthers(t *testing.T) {
+	store := newFakeServiceStore()
+	rec := serveAs(t, store, svcOwner, http.MethodPost, "/api/services",
+		snapPayload("diagonal",
+			[3]string{"A", "1.0", "1.001"}, [3]string{"B", "2.0", "2.001"}, [3]string{"C", "3.0", "3.001"}))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: got %d, want %d (body %s)", rec.Code, http.StatusCreated, rec.Body)
+	}
+	created := decodeService(t, rec)
+
+	// Drag the middle stop only; A and C go back exactly as they were returned.
+	edited := append([]transit.ServiceStopPoint(nil), created.Stops...)
+	edited[1] = transit.ServiceStopPoint{Name: "B moved", Lat: 2.4, Lng: 2.401}
+
+	body, err := json.Marshal(map[string]any{
+		"route_slug": "diagonal",
+		"name":       created.Name,
+		"vehicle":    created.Vehicle,
+		"stops":      edited,
+	})
+	if err != nil {
+		t.Fatalf("marshalling update: %v", err)
+	}
+
+	rec = serveAs(t, store, svcOwner, http.MethodPut, "/api/services/"+created.Slug, string(body))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update: got %d, want %d (body %s)", rec.Code, http.StatusOK, rec.Body)
+	}
+
+	updated := decodeService(t, rec)
+	for _, i := range []int{0, 2} {
+		was, now := created.Stops[i], updated.Stops[i]
+		if math.Abs(now.Lat-was.Lat) > 1e-9 || math.Abs(now.Lng-was.Lng) > 1e-9 {
+			t.Errorf("untouched stop %q moved: %v,%v became %v,%v",
+				was.Name, was.Lat, was.Lng, now.Lat, now.Lng)
+		}
+		if math.Abs(now.ChainageM-was.ChainageM) > 1e-6 {
+			t.Errorf("untouched stop %q changed chainage: %v became %v",
+				was.Name, was.ChainageM, now.ChainageM)
+		}
+	}
+	if updated.Stops[1].Name != "B moved" {
+		t.Errorf("the edited stop was not applied: %+v", updated.Stops[1])
+	}
+}
