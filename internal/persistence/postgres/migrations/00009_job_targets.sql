@@ -47,12 +47,15 @@ ALTER TABLE jobs ADD CONSTRAINT jobs_one_target CHECK (
   + (user_service_id IS NOT NULL)::int <= 1
 );
 
-CREATE INDEX jobs_user_scenario_id_idx ON jobs (user_scenario_id);
-CREATE INDEX jobs_user_service_id_idx  ON jobs (user_service_id);
+-- Kind moves from the single value 'compile' to 'compile_scenario' (see the
+-- Job kind constants). Backfill any existing seeded compile rows so a graph
+-- already compiled stays reachable by GetLatestSucceededJob, which now filters
+-- on the new value. (No FK indexes are added here, matching the jobs table's
+-- existing convention of indexing none of its FKs.)
+UPDATE jobs SET kind = 'compile_scenario' WHERE kind = 'compile';
 
 -- +goose Down
-DROP INDEX IF EXISTS jobs_user_service_id_idx;
-DROP INDEX IF EXISTS jobs_user_scenario_id_idx;
+UPDATE jobs SET kind = 'compile' WHERE kind = 'compile_scenario';
 ALTER TABLE jobs DROP CONSTRAINT IF EXISTS jobs_one_target;
 ALTER TABLE jobs DROP COLUMN IF EXISTS compiled_service_ids;
 ALTER TABLE jobs DROP COLUMN IF EXISTS user_service_id;
