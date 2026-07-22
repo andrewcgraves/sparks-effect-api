@@ -7,7 +7,7 @@ import (
 
 // CompilableService is the narrow input the physics compiler actually needs:
 // an alignment to project onto, kinematic limits, an ordered list of stops that
-// each have an identity and a position, and the headways that set wait time.
+// each have a node key and a position, and the headways that set wait time.
 //
 // It exists so there is one physics compiler rather than one per domain model.
 // The project grew two parallel service models — the seeded Service, which
@@ -18,7 +18,8 @@ import (
 //
 // Stops are in stopping order; the adapters do the ordering, since Sequence
 // (seeded) and Seq (authored) are different fields. Their slugs must be
-// distinct within the service — see CompilableStop.Slug.
+// distinct; CompileServicePhysics rejects duplicates rather than compile a
+// graph with a span missing.
 type CompilableService struct {
 	ID      string
 	Route   Route
@@ -41,7 +42,7 @@ type Kinematics struct {
 }
 
 // CompilableStop is one stop with everything the compiler needs already
-// decided: an identity, a position to project onto the alignment, and a dwell
+// decided: a node key, a position to project onto the alignment, and a dwell
 // to add.
 //
 // DwellS is resolved, not a hint: the two models disagree about where dwell
@@ -50,22 +51,22 @@ type Kinematics struct {
 // an authored service has one flat VehicleParams.DwellS — so each adapter
 // settles it and the compiler just adds the number.
 type CompilableStop struct {
-	// Slug is the stop's identity: its provenance and display name within the
-	// service that authored it. It is deliberately *not* the graph edge key,
-	// even though a single-service compile emits it as one.
+	// Slug is the graph node key the compiler emits edges under. It is not, in
+	// general, the stop's own identity, even though the adapters fill it with
+	// exactly that today and for a single-service compile the two coincide.
 	//
-	// Interchange in this system is only ever two services emitting an edge
-	// under the same key — graphDijkstra pools every ServiceGraph's edges into
-	// one adjacency map keyed by slug — so keying the graph on a per-service
-	// namespaced identity would make interchange structurally impossible: N
-	// services would compile to N disconnected components, silently.
+	// They part at the second service. Interchange here is only ever two
+	// services emitting an edge under one key — graphDijkstra pools every
+	// ServiceGraph's edges into a single adjacency map keyed by slug — so a
+	// per-service namespaced identity used as the key makes interchange
+	// structurally impossible: N services, N disconnected components, silently.
+	// SPA-109 resolves the real key by clustering co-located stops across a
+	// scenario's member services and assigning the cluster key into this field,
+	// the way the adapters already pre-resolve DwellS. Single-service clusters
+	// are singletons, which is why an identity serves as the key today.
 	//
-	// SPA-109 owns the graph key. It clusters co-located stops across a
-	// scenario's member services and writes the cluster key into this field
-	// before the compiler runs, the same way the adapters pre-resolve DwellS.
-	// A single-service compile has only singleton clusters, so there the key is
-	// exactly this identity — which is why the two look like one thing and stop
-	// being one at the second service.
+	// So write a decided key in; do not read provenance out. Identity is
+	// StopSlugs' business, and SPA-103 persists that, not this.
 	Slug string
 
 	Lat    float64
@@ -181,9 +182,11 @@ func CompilableFromUserService(route Route, svc UserService) (CompilableService,
 	}, nil
 }
 
-// StopSlugs mints the identity (see CompilableStop.Slug) of every stop of a
-// user-authored service — `{service}--{stop}` — returning one slug per stop,
-// positionally aligned with svc.Stops.
+// StopSlugs mints the identity of every stop of a user-authored service —
+// `{service}--{stop}` — returning one slug per stop, positionally aligned with
+// svc.Stops. Identity, not graph node key: for a single-service compile the
+// adapter uses these as keys and the two coincide, but the key is SPA-109's to
+// decide (see CompilableStop.Slug).
 //
 // This is the only place those identities are minted, and it is exported
 // because the slug is a persistence contract rather than a compile detail:

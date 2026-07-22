@@ -45,13 +45,13 @@ func CompileServicePhysics(svc CompilableService) (ServiceGraph, error) {
 	// reject it rather than compile a quietly wrong graph.
 	//
 	// SPA-109 merges co-located stops onto one node, which is the same collapse
-	// this rejects — the two coexist because that clustering is scoped to
-	// cross-service pairs only. It may hand two different services' stops one
-	// key; it never merges two stops of a single service, so what arrives here
-	// is always distinct. A lone service stopping twice within the merge radius
-	// is a loop or a switchback, not an interchange, and merging it really would
-	// delete a span. Decision recorded on SPA-115: clustering stays cross-service
-	// and this check does not relax.
+	// this rejects. The two coexist because that clustering is scoped to
+	// cross-service pairs only: it may hand two different services' stops one
+	// key, but never two stops of a single service, so it cannot be what puts a
+	// duplicate in front of this check. A lone service stopping twice within the
+	// merge radius is a loop or a switchback, not an interchange, and merging it
+	// really would delete a span. Decided on SPA-115 — clustering stays
+	// cross-service and this check does not relax to accommodate it.
 	stopBySlug := make(map[string]CompilableStop, len(svc.Stops))
 	physicsStops := make([]physics.Stop, len(svc.Stops))
 	for i, stop := range svc.Stops {
