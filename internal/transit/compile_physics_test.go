@@ -276,7 +276,8 @@ func TestCompileServicePhysics_errorsOnRouteWithFewerThanTwoPoints(t *testing.T)
 // Slug uniqueness is load-bearing: physics.Stop.ID is the stop slug, so a
 // duplicate would collapse two stops onto one graph node and silently drop a
 // span. The seeded adapter cannot guarantee it — Station.Slug is whatever the
-// scenario data says — so the compiler checks.
+// scenario data says — so the compiler checks. SPA-109 merges co-located stops
+// across services and so never produces this case; see the check itself.
 func TestCompileServicePhysics_errorsOnDuplicateStopSlug(t *testing.T) {
 	svc := CompilableService{
 		ID:    "svc-1",

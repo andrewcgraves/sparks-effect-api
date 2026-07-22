@@ -189,7 +189,8 @@ func TestCompilableFromUserService_projectsEmbeddedStops(t *testing.T) {
 }
 
 // Stop slugs are namespaced by the owning service, so the same stop name in two
-// services stays distinct in a graph assembled from both.
+// services stays two identities. Whether they become one graph node is SPA-109's
+// clustering decision, made on position, not this one.
 func TestCompilableFromUserService_namespacesStopSlugsPerService(t *testing.T) {
 	stops := []ServiceStopPoint{{Name: "Downtown", Seq: 0}, {Name: "Airport", Seq: 1}}
 	a := mustCompilableFromUserService(t, adapterRoute(), UserService{Slug: "line-a", RouteID: "rt-1", Stops: stops})
@@ -252,7 +253,7 @@ func TestCompilableFromUserService_ordersStopsBySeq(t *testing.T) {
 
 // The defect StopSlugs exists to prevent: a persistence path deriving a stop's
 // slug on its own disagrees with the compiler the moment a name repeats, and
-// SPA-103 would then store node keys naming the wrong stop. One minter, so the
+// SPA-103 would then store identities naming the wrong stop. One minter, so the
 // two cannot drift.
 func TestStopSlugs_matchTheSlugsTheAdapterMints(t *testing.T) {
 	// "Central 2" is the trap: it collides with the disambiguated form of a

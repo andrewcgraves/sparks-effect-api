@@ -38,11 +38,20 @@ func CompileServicePhysics(svc CompilableService) (ServiceGraph, error) {
 		return ServiceGraph{}, fmt.Errorf("compile: service %q: %w", svc.ID, err)
 	}
 
-	// physics.Stop.ID is keyed by stop slug, which is also the graph edge key,
-	// so the span results below map straight back onto stops with no
-	// intermediate lookup table. That makes slug uniqueness load-bearing: two
-	// stops sharing one would silently collapse into a single graph node and
-	// lose a span, so reject it rather than compile a quietly wrong graph.
+	// physics.Stop.ID is keyed by stop slug, and edges are emitted under it, so
+	// the span results below map straight back onto stops with no intermediate
+	// lookup table. That makes slug uniqueness load-bearing: two stops sharing
+	// one would silently collapse into a single graph node and lose a span, so
+	// reject it rather than compile a quietly wrong graph.
+	//
+	// SPA-109 merges co-located stops onto one node, which is the same collapse
+	// this rejects — the two coexist because that clustering is scoped to
+	// cross-service pairs only. It may hand two different services' stops one
+	// key; it never merges two stops of a single service, so what arrives here
+	// is always distinct. A lone service stopping twice within the merge radius
+	// is a loop or a switchback, not an interchange, and merging it really would
+	// delete a span. Decision recorded on SPA-115: clustering stays cross-service
+	// and this check does not relax.
 	stopBySlug := make(map[string]CompilableStop, len(svc.Stops))
 	physicsStops := make([]physics.Stop, len(svc.Stops))
 	for i, stop := range svc.Stops {

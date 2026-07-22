@@ -18,7 +18,7 @@ import (
 //
 // Stops are in stopping order; the adapters do the ordering, since Sequence
 // (seeded) and Seq (authored) are different fields. Their slugs must be
-// distinct — they are the graph's node keys.
+// distinct within the service — see CompilableStop.Slug.
 type CompilableService struct {
 	ID      string
 	Route   Route
@@ -41,8 +41,8 @@ type Kinematics struct {
 }
 
 // CompilableStop is one stop with everything the compiler needs already
-// decided: an identity to key edges on, a position to project onto the
-// alignment, and a dwell to add.
+// decided: an identity, a position to project onto the alignment, and a dwell
+// to add.
 //
 // DwellS is resolved, not a hint: the two models disagree about where dwell
 // comes from — seeded compares a Station's platform height to the vehicle's
@@ -50,7 +50,24 @@ type Kinematics struct {
 // an authored service has one flat VehicleParams.DwellS — so each adapter
 // settles it and the compiler just adds the number.
 type CompilableStop struct {
-	Slug   string
+	// Slug is the stop's identity: its provenance and display name within the
+	// service that authored it. It is deliberately *not* the graph edge key,
+	// even though a single-service compile emits it as one.
+	//
+	// Interchange in this system is only ever two services emitting an edge
+	// under the same key — graphDijkstra pools every ServiceGraph's edges into
+	// one adjacency map keyed by slug — so keying the graph on a per-service
+	// namespaced identity would make interchange structurally impossible: N
+	// services would compile to N disconnected components, silently.
+	//
+	// SPA-109 owns the graph key. It clusters co-located stops across a
+	// scenario's member services and writes the cluster key into this field
+	// before the compiler runs, the same way the adapters pre-resolve DwellS.
+	// A single-service compile has only singleton clusters, so there the key is
+	// exactly this identity — which is why the two look like one thing and stop
+	// being one at the second service.
+	Slug string
+
 	Lat    float64
 	Lng    float64
 	DwellS int
@@ -104,21 +121,21 @@ func CompilableFromService(route Route, stations []Station, svc Service, vt Vehi
 
 // CompilableFromUserService adapts the user-authored model. An embedded stop
 // already carries its own position and the vehicle params are already inline,
-// so the only real work is minting a stop identity — graph edges are keyed by
-// slug and a ServiceStopPoint has none.
+// so the only real work is minting a stop identity, which a ServiceStopPoint
+// has none of.
 //
 // route must be the one svc references. Projecting stops onto an alignment they
 // were never authored against would produce a plausible-looking wrong graph
 // rather than an error, so the mismatch is rejected here.
 //
-// Namespacing slugs by the owning service (see StopSlugs) is a trade, not a
-// free win. It stops two unrelated services that each have a "Downtown" from
-// fusing into one node and inventing a transfer between places 50km apart — but
-// it equally means two services stopping at the *same* place cannot interchange
-// there, because graphDijkstra pools edges by slug and namespaced stops are
-// separate nodes. Until user services can share a stop identity, the services in
-// a user scenario do not connect to each other. SPA-83 consumes these graphs and
-// is where that surfaces.
+// Namespacing slugs by the owning service (see StopSlugs) keeps two unrelated
+// services that each have a "Downtown" from claiming one identity and inventing
+// a transfer between places 50km apart. That is a statement about identity, not
+// about the graph: compiled as-is these services share no keys and so do not
+// connect to each other, which is why SPA-109 assigns the graph key over the
+// top by clustering co-located stops across a scenario's members. Anything that
+// compiles a multi-service scenario before then — SPA-83 consumes these graphs —
+// gets N disconnected components.
 //
 // No Station row is created: stops stay embedded, which is the decision
 // UserService was built around.
@@ -164,14 +181,16 @@ func CompilableFromUserService(route Route, svc UserService) (CompilableService,
 	}, nil
 }
 
-// StopSlugs mints the graph node key for every stop of a user-authored service —
-// `{service}--{stop}` — returning one slug per stop, positionally aligned with
-// svc.Stops.
+// StopSlugs mints the identity (see CompilableStop.Slug) of every stop of a
+// user-authored service — `{service}--{stop}` — returning one slug per stop,
+// positionally aligned with svc.Stops.
 //
-// This is the only place those keys are minted, and it is exported because the
-// slug is a persistence contract rather than a compile detail: SPA-103 stores it
-// on the stop row, and a stored slug that disagreed with a derived one would
-// shift a service's graph node keys underneath the backfill. Taking the whole
+// This is the only place those identities are minted, and it is exported
+// because the slug is a persistence contract rather than a compile detail:
+// SPA-103 stores it on the stop row, and a stored slug that disagreed with a
+// derived one would leave one stop answering to two identities — a difference
+// that surfaces as the wrong stop being named, in a compile result or in
+// anything else that resolves a slug back to a stop. Taking the whole
 // service rather than a single name is what makes that guarantee keepable — the
 // suffix a repeated name gets depends on the stops before it, so no per-name
 // function could return the same answer the compiler uses.
