@@ -3,7 +3,6 @@ package transit
 import (
 	"fmt"
 	"math"
-	"sort"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/physics"
 )
@@ -16,50 +15,51 @@ import (
 // remains how seeded scenarios (with no per-service route geometry to
 // project stops onto) are compiled.
 //
-// route must have at least 2 geometry coordinates. svc's stops, ordered by
-// Sequence, must each reference a station in stations; there must be at
-// least 2. Edges reuse the same forward motion time in both directions (the
-// existing hand-authored-table compiler's convention — see TravelTimes),
-// varying only by which end's dwell they carry, matching pathDwellSecs in
-// compile.go.
+// It takes a CompilableService rather than any one domain model, so the seeded
+// Service and the user-authored UserService compile through the same code —
+// see the adapters in compilable.go. svc.Route must have at least 2 geometry
+// coordinates, and svc.Stops must have at least 2 entries, already ordered and
+// with distinct slugs.
 //
-// An inactive svc compiles to an empty ServiceGraph (no edges), the same
-// as Compile's `if !svc.Active { continue }` — contributing nothing to a
-// TransitGraph a caller assembles from the result.
-func CompileServicePhysics(route Route, stations []Station, svc Service, vt VehicleType) (ServiceGraph, error) {
-	if !svc.Active {
-		return ServiceGraph{}, nil
-	}
-
-	line, err := toPhysicsLine(route.Geometry)
+// An inactive seeded service is not special-cased here: whether a service
+// belongs in a graph at all is scenario-assembly semantics, and CompileScenario
+// already skips it before reaching this.
+//
+// Edges reuse the same forward motion time in both directions (the existing
+// hand-authored-table compiler's convention — see TravelTimes), varying only by
+// which end's dwell they carry, matching pathDwellSecs in compile.go.
+func CompileServicePhysics(svc CompilableService) (ServiceGraph, error) {
+	line, err := toPhysicsLine(svc.Route.Geometry)
 	if err != nil {
 		return ServiceGraph{}, fmt.Errorf("compile: service %q: %w", svc.ID, err)
 	}
-	physicsSegs, err := toPhysicsSegments(route.Segments, len(line))
+	physicsSegs, err := toPhysicsSegments(svc.Route.Segments, len(line))
 	if err != nil {
 		return ServiceGraph{}, fmt.Errorf("compile: service %q: %w", svc.ID, err)
 	}
 
-	stationsByID := make(map[string]Station, len(stations))
-	for _, st := range stations {
-		stationsByID[st.ID] = st
-	}
-
-	stops := append([]ServiceStop(nil), svc.Stops...)
-	sort.Slice(stops, func(i, j int) bool { return stops[i].Sequence < stops[j].Sequence })
-
-	// physics.Stop.ID is keyed by station ID (not slug) so the span results
-	// below can look stations and stops back up in stationsByID /
-	// stopByStationID directly, with no reverse slug->ID map in between.
-	stopByStationID := make(map[string]ServiceStop, len(stops))
-	physicsStops := make([]physics.Stop, len(stops))
-	for i, stop := range stops {
-		st, ok := stationsByID[stop.StationID]
-		if !ok {
-			return ServiceGraph{}, fmt.Errorf("compile: service %q references unknown station id %q", svc.ID, stop.StationID)
+	// physics.Stop.ID is keyed by stop slug, and edges are emitted under it, so
+	// the span results below map straight back onto stops with no intermediate
+	// lookup table. That makes slug uniqueness load-bearing: two stops sharing
+	// one would silently collapse into a single graph node and lose a span, so
+	// reject it rather than compile a quietly wrong graph.
+	//
+	// SPA-109 merges co-located stops onto one node, which is the same collapse
+	// this rejects. The two coexist because that clustering is scoped to
+	// cross-service pairs only: it may hand two different services' stops one
+	// key, but never two stops of a single service, so it cannot be what puts a
+	// duplicate in front of this check. A lone service stopping twice within the
+	// merge radius is a loop or a switchback, not an interchange, and merging it
+	// really would delete a span. Decided on SPA-115 — clustering stays
+	// cross-service and this check does not relax to accommodate it.
+	stopBySlug := make(map[string]CompilableStop, len(svc.Stops))
+	physicsStops := make([]physics.Stop, len(svc.Stops))
+	for i, stop := range svc.Stops {
+		if _, dup := stopBySlug[stop.Slug]; dup {
+			return ServiceGraph{}, fmt.Errorf("compile: service %q has two stops with slug %q", svc.ID, stop.Slug)
 		}
-		stopByStationID[stop.StationID] = stop
-		physicsStops[i] = physics.Stop{ID: st.ID, Location: toPhysicsPoint(st.Location)}
+		stopBySlug[stop.Slug] = stop
+		physicsStops[i] = physics.Stop{ID: stop.Slug, Location: physics.Point{Lng: stop.Lng, Lat: stop.Lat}}
 	}
 
 	spans, err := physics.ProjectStops(line, physicsSegs, physicsStops)
@@ -68,12 +68,12 @@ func CompileServicePhysics(route Route, stations []Station, svc Service, vt Vehi
 	}
 
 	vehicle := physics.VehicleLimits{
-		MaxSpeedKMH:     vt.MaxSpeedKMH,
-		AccelerationMS2: vt.AccelerationMS2,
-		DecelerationMS2: vt.DecelerationMS2,
+		MaxSpeedKMH:     svc.Vehicle.MaxSpeedKMH,
+		AccelerationMS2: svc.Vehicle.AccelerationMS2,
+		DecelerationMS2: svc.Vehicle.DecelerationMS2,
 	}
 
-	sg := ServiceGraph{ServiceID: svc.ID, WaitSecs: bestHeadwayOver2(svc.FrequencyWindows)}
+	sg := ServiceGraph{ServiceID: svc.ID, WaitSecs: bestHeadwayOver2(svc.Windows)}
 	for _, span := range spans {
 		runSecsF, err := physics.SpanRunSeconds(span, vehicle)
 		if err != nil {
@@ -82,12 +82,11 @@ func CompileServicePhysics(route Route, stations []Station, svc Service, vt Vehi
 		}
 		runSecs := int(math.Round(runSecsF))
 
-		fromStop, toStop := stopByStationID[span.FromStopID], stopByStationID[span.ToStopID]
-		fromStation, toStation := stationsByID[span.FromStopID], stationsByID[span.ToStopID]
+		from, to := stopBySlug[span.FromStopID], stopBySlug[span.ToStopID]
 
 		sg.Edges = append(sg.Edges,
-			Edge{FromSlug: fromStation.Slug, ToSlug: toStation.Slug, Seconds: runSecs + resolveDwell(toStop, toStation, vt)},
-			Edge{FromSlug: toStation.Slug, ToSlug: fromStation.Slug, Seconds: runSecs + resolveDwell(fromStop, fromStation, vt)},
+			Edge{FromSlug: from.Slug, ToSlug: to.Slug, Seconds: runSecs + to.DwellS},
+			Edge{FromSlug: to.Slug, ToSlug: from.Slug, Seconds: runSecs + from.DwellS},
 		)
 	}
 	return sg, nil
@@ -123,8 +122,4 @@ func toPhysicsSegments(segs []RouteSegment, lineLen int) ([]physics.Segment, err
 		out[i] = physics.Segment{CantMM: s.CantMM, CurveRadiusM: s.CurveRadiusM, GradePct: s.GradePct}
 	}
 	return out, nil
-}
-
-func toPhysicsPoint(p GeoPoint) physics.Point {
-	return physics.Point{Lng: p.Coordinates[0], Lat: p.Coordinates[1]}
 }

@@ -54,6 +54,10 @@ func TestCompileScenario_compilesActiveServices(t *testing.T) {
 }
 
 // An inactive service contributes nothing, matching Compile's own convention.
+//
+// This is now the only place Active is honoured on the physics path: the
+// compiler takes a CompilableService and never sees a Service, so scenario
+// assembly is where membership is decided.
 func TestCompileScenario_skipsInactiveServices(t *testing.T) {
 	routes, stations, services, vehicleTypes := scenarioFixture()
 	services[0].Active = false
