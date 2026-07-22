@@ -14,10 +14,14 @@ import (
 // offRouteThresholdM is how far a stop may sit from an alignment before the
 // preview flags it as implausible.
 //
-// It is deliberately the same distance the write path rejects at: a preview
-// that warned at a different distance from the one the save enforces would be
-// worse than no warning, since the user would fix what it complained about and
-// still be refused.
+// Nothing rejects at this distance yet — write-time enforcement is SPA-108,
+// and when it lands it belongs in this package too, so it should read this
+// constant rather than declare its own. A preview that warned at a different
+// distance from the one the save enforced would be worse than no warning, since
+// the user would fix what it complained about and still be refused.
+//
+// The comparison is strict (offset > threshold), so a stop exactly on the
+// boundary previews as acceptable; enforcement must draw the line the same way.
 const offRouteThresholdM = 500.0
 
 // maxSnapStopsBodyBytes caps a request body. A pattern of a few hundred stops
@@ -48,8 +52,10 @@ type snapCoord struct {
 
 // snappedStopResult is one stop's projection: where it landed, how far along
 // the route that is, and how far it moved to get there.
+//
+// There is no index field: results are in input order, so a stop's position in
+// the array is its index, and that is what chainage_order refers to.
 type snappedStopResult struct {
-	Index     int       `json:"index"`
 	ID        string    `json:"id,omitempty"`
 	Input     snapCoord `json:"input"`
 	Snapped   snapCoord `json:"snapped"`
@@ -134,7 +140,6 @@ func buildSnapStopsResponse(slug string, inputs []snapStopInput, snapped []physi
 	results := make([]snappedStopResult, len(snapped))
 	for i, s := range snapped {
 		results[i] = snappedStopResult{
-			Index:     i,
 			ID:        inputs[i].ID,
 			Input:     snapCoord{Lat: inputs[i].Lat, Lng: inputs[i].Lng},
 			Snapped:   snapCoord{Lat: s.Point.Lat, Lng: s.Point.Lng},

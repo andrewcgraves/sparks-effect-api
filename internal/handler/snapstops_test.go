@@ -1,6 +1,7 @@
 package handler_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"math"
@@ -21,17 +22,16 @@ type snapResponse struct {
 	ChainageOrder      []int   `json:"chainage_order"`
 	OrderMatchesInput  bool    `json:"order_matches_input"`
 	Stops              []struct {
-		Index     int     `json:"index"`
-		ID        string  `json:"id"`
-		Input     coord   `json:"input"`
-		Snapped   coord   `json:"snapped"`
-		ChainageM float64 `json:"chainage_m"`
-		OffsetM   float64 `json:"offset_m"`
-		OffRoute  bool    `json:"off_route"`
+		ID        string        `json:"id"`
+		Input     snapCoordJSON `json:"input"`
+		Snapped   snapCoordJSON `json:"snapped"`
+		ChainageM float64       `json:"chainage_m"`
+		OffsetM   float64       `json:"offset_m"`
+		OffRoute  bool          `json:"off_route"`
 	} `json:"stops"`
 }
 
-type coord struct {
+type snapCoordJSON struct {
 	Lat float64 `json:"lat"`
 	Lng float64 `json:"lng"`
 }
@@ -98,9 +98,6 @@ func TestSnapStopsReturnsSnappedPointChainageAndOffset(t *testing.T) {
 	onLine := got.Stops[0]
 	if onLine.ID != "on-line" {
 		t.Errorf("stops[0].id = %q, want the id the client supplied", onLine.ID)
-	}
-	if onLine.Index != 0 {
-		t.Errorf("stops[0].index = %d, want 0", onLine.Index)
 	}
 	if onLine.Input.Lat != 37.79 || onLine.Input.Lng != -122.4 {
 		t.Errorf("stops[0].input = %+v, want the raw point echoed back", onLine.Input)
@@ -307,6 +304,20 @@ func TestSnapStopsRejectsInvalidPayloads(t *testing.T) {
 				t.Errorf("status = %d, want 400; body %s", rec.Code, rec.Body.String())
 			}
 		})
+	}
+}
+
+// The body cap must actually fire: a client that posts a huge stop list gets a
+// bounded refusal rather than the server reading it all into memory.
+func TestSnapStopsRejectsAnOversizedBody(t *testing.T) {
+	store := seedSnapRoute(t)
+
+	big := bytes.Repeat([]byte(`{"lat":37.79,"lng":-122.4},`), 60000)
+	body := `{"stops":[` + string(big) + `{"lat":37.79,"lng":-122.4}]}`
+
+	rec := postSnapStops(t, handler.SnapStops(store), "test-alignment", body)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("status = %d, want 413 for a body past the cap; body %s", rec.Code, rec.Body.String())
 	}
 }
 
