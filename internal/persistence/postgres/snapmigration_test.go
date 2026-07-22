@@ -32,6 +32,26 @@ func rewindSnapMigration(t *testing.T, url string) {
 		`ALTER TABLE user_services DROP CONSTRAINT IF EXISTS user_services_stops_have_slugs`,
 		`ALTER TABLE user_services DROP CONSTRAINT IF EXISTS user_services_stops_are_snapped`,
 		`DELETE FROM goose_db_version WHERE version_id IN (7, 8)`)
+	rewindJobTargetsMigration(t, url)
+}
+
+// rewindJobTargetsMigration unwinds 00009 (the job-targets columns) alongside
+// the migration under test, for the same reason 00008 is unwound with 00007: a
+// state before 00007/00008 is necessarily before 00009 too, and goose refuses
+// to re-apply an earlier migration while a later one (version 9) is still
+// recorded as applied. 00009 touches only the jobs table — empty in these
+// user_services tests — so dropping and re-applying it changes nothing under
+// test; it just keeps the migration order goose insists on intact.
+func rewindJobTargetsMigration(t *testing.T, url string) {
+	t.Helper()
+	exec(t, url,
+		`DROP INDEX IF EXISTS jobs_user_service_id_idx`,
+		`DROP INDEX IF EXISTS jobs_user_scenario_id_idx`,
+		`ALTER TABLE jobs DROP CONSTRAINT IF EXISTS jobs_one_target`,
+		`ALTER TABLE jobs DROP COLUMN IF EXISTS compiled_service_ids`,
+		`ALTER TABLE jobs DROP COLUMN IF EXISTS user_service_id`,
+		`ALTER TABLE jobs DROP COLUMN IF EXISTS user_scenario_id`,
+		`DELETE FROM goose_db_version WHERE version_id = 9`)
 }
 
 func exec(t *testing.T, url string, statements ...string) {

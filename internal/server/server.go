@@ -168,6 +168,9 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps) {
 	mux.Handle("GET /api/services/{slug}", authenticated(handler.GetService(deps)))
 	mux.Handle("PUT /api/services/{slug}", authenticated(handler.UpdateService(deps)))
 	mux.Handle("DELETE /api/services/{slug}", authenticated(handler.DeleteService(deps)))
+	// Compiling a single service is the degenerate scenario compile; owner-scoped
+	// like the rest of the authored surface.
+	mux.Handle("POST /api/services/{slug}/compile", authenticated(handler.CompileUserService(deps)))
 
 	// User-owned scenarios: owner-scoped CRUD over a curated set of UserService
 	// ids. Named /api/user-scenarios, distinct from the public /api/scenarios
@@ -178,6 +181,10 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps) {
 	mux.Handle("GET /api/user-scenarios/{slug}", authenticated(handler.GetUserScenario(deps)))
 	mux.Handle("PUT /api/user-scenarios/{slug}", authenticated(handler.UpdateUserScenario(deps)))
 	mux.Handle("DELETE /api/user-scenarios/{slug}", authenticated(handler.DeleteUserScenario(deps)))
+	// Compile a user scenario's curated members into one graph, then read it back
+	// by slug. Both owner-scoped, unlike the public seeded /api/scenarios/{slug}/graph.
+	mux.Handle("POST /api/user-scenarios/{slug}/compile", authenticated(handler.CompileUserScenario(deps)))
+	mux.Handle("GET /api/user-scenarios/{slug}/graph", authenticated(handler.UserScenarioGraph(deps)))
 
 	// Admin-only.
 	mux.Handle("POST /api/admin/users", adminOnly(handler.CreateUser(deps)))
