@@ -14,15 +14,15 @@ import (
 // offRouteThresholdM is how far a stop may sit from an alignment before the
 // preview flags it as implausible.
 //
-// Nothing rejects at this distance yet — write-time enforcement is SPA-108,
-// and when it lands it belongs in this package too, so it should read this
-// constant rather than declare its own. A preview that warned at a different
-// distance from the one the save enforced would be worse than no warning, since
-// the user would fix what it complained about and still be refused.
+// It is an alias for the write path's threshold, not a second copy: SPA-108
+// enforces the same distance when a service is saved, and a preview that warned
+// at a different distance from the one the save enforced would be worse than no
+// warning — the user would fix what it complained about and still be refused.
+// The rule lives in internal/transit, next to the model it constrains.
 //
 // The comparison is strict (offset > threshold), so a stop exactly on the
-// boundary previews as acceptable; enforcement must draw the line the same way.
-const offRouteThresholdM = 500.0
+// boundary previews as acceptable, and the write path saves it.
+const offRouteThresholdM = transit.OffRouteThresholdM
 
 // maxSnapStopsBodyBytes caps a request body. A pattern of a few hundred stops
 // stays well under this; anything larger is a client bug or an attack.
@@ -77,7 +77,16 @@ type snapStopsResponse struct {
 	OffRouteThresholdM float64             `json:"off_route_threshold_m"`
 	Stops              []snappedStopResult `json:"stops"`
 	ChainageOrder      []int               `json:"chainage_order"`
-	OrderMatchesInput  bool                `json:"order_matches_input"`
+	// OrderIsConsistent answers the question the write path will ask: does the
+	// authored sequence run one way along the line, or does it double back?
+	//
+	// It deliberately does not report "the stops are in ascending chainage
+	// order". A service authored against the direction its route was drawn in
+	// runs descending the whole way and saves perfectly well, so flagging it
+	// here would send the user to fix something that was never going to be
+	// refused. The rule is transit.FirstChainageOrderFault, shared with the
+	// save so the two cannot drift.
+	OrderIsConsistent bool `json:"order_is_consistent"`
 }
 
 // SnapStops previews where a set of raw, user-placed points land on a route:
@@ -149,35 +158,38 @@ func buildSnapStopsResponse(slug string, inputs []snapStopInput, snapped []physi
 		}
 	}
 
-	order, matches := chainageOrder(snapped)
+	chainages := make([]float64, len(snapped))
+	for i, s := range snapped {
+		chainages[i] = s.ChainageM
+	}
+	_, _, faulty := transit.FirstChainageOrderFault(chainages)
+
 	return snapStopsResponse{
 		RouteSlug:          slug,
 		OffRouteThresholdM: offRouteThresholdM,
 		Stops:              results,
-		ChainageOrder:      order,
-		OrderMatchesInput:  matches,
+		ChainageOrder:      chainageOrder(snapped),
+		OrderIsConsistent:  !faulty,
 	}
 }
 
-// chainageOrder returns the input indices sorted by distance along the route,
-// and whether that agrees with the order they were supplied in. The sort is
-// stable so two stops at the same chainage keep their input order and are
-// reported as agreeing rather than as an arbitrary reshuffle.
-func chainageOrder(snapped []physics.SnappedStop) (order []int, matchesInput bool) {
-	order = make([]int, len(snapped))
+// chainageOrder returns the input indices sorted by distance along the route.
+// The sort is stable so two stops at the same chainage keep their input order
+// rather than being reshuffled arbitrarily.
+//
+// This is reported for display, not for judgement: for a service authored
+// against the route's drawn direction it is simply the input order reversed,
+// which is not a fault. OrderIsConsistent is what says whether anything is
+// wrong.
+func chainageOrder(snapped []physics.SnappedStop) []int {
+	order := make([]int, len(snapped))
 	for i := range order {
 		order[i] = i
 	}
 	sort.SliceStable(order, func(a, b int) bool {
 		return snapped[order[a]].ChainageM < snapped[order[b]].ChainageM
 	})
-
-	for i, idx := range order {
-		if idx != i {
-			return order, false
-		}
-	}
-	return order, true
+	return order
 }
 
 func decodeSnapStopsRequest(w http.ResponseWriter, r *http.Request) (snapStopsRequest, bool) {

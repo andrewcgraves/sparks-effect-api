@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,14 +19,38 @@ import (
 // fakeServiceStore is an in-memory handler.ServiceStore.
 type fakeServiceStore struct {
 	services map[string]transit.UserService // keyed by ID
-	routes   map[string]bool
+	routes   map[string]transit.Route       // keyed by slug
 	failWith error
 }
 
+// newFakeServiceStore stocks two routes with real geometry, because stops are
+// snapped onto it on every write and a route without an alignment cannot be
+// authored against.
+//
+//   - "sf-sj" runs straight from San Francisco to San Jose, so createPayload's
+//     two stops are its endpoints and snap to themselves.
+//   - "diagonal" runs along lat == lng, so the small round coordinates the
+//     ownership and validation tests use ((1,1), (2,2), …) all lie exactly on
+//     it, in increasing order.
 func newFakeServiceStore() *fakeServiceStore {
 	return &fakeServiceStore{
 		services: map[string]transit.UserService{},
-		routes:   map[string]bool{"route-1": true, "route-2": true},
+		routes: map[string]transit.Route{
+			"sf-sj": {
+				ID: "route-1", Slug: "sf-sj", Name: "SF to San Jose",
+				Geometry: transit.GeoLineString{
+					Type:        "LineString",
+					Coordinates: [][]float64{{-122.4194, 37.7749}, {-121.8863, 37.3382}},
+				},
+			},
+			"diagonal": {
+				ID: "route-2", Slug: "diagonal", Name: "Diagonal",
+				Geometry: transit.GeoLineString{
+					Type:        "LineString",
+					Coordinates: [][]float64{{0, 0}, {80, 80}},
+				},
+			},
+		},
 	}
 }
 
@@ -86,11 +111,12 @@ func (f *fakeServiceStore) ListUserServicesByOwner(_ context.Context, ownerID st
 	return out, nil
 }
 
-func (f *fakeServiceStore) RouteExists(_ context.Context, routeID string) (bool, error) {
+func (f *fakeServiceStore) GetRouteBySlug(_ context.Context, slug string) (transit.Route, bool, error) {
 	if f.failWith != nil {
-		return false, f.failWith
+		return transit.Route{}, false, f.failWith
 	}
-	return f.routes[routeID], nil
+	rt, ok := f.routes[slug]
+	return rt, ok, nil
 }
 
 // --- test harness ---
@@ -102,7 +128,7 @@ var (
 )
 
 const createPayload = `{
-	"route_id": "route-1",
+	"route_slug": "sf-sj",
 	"name": "Bay Area Express",
 	"vehicle": {"max_speed_kmh": 320, "acceleration_ms2": 1.1, "deceleration_ms2": 1.3, "dwell_s": 45},
 	"stops": [
@@ -223,8 +249,19 @@ func TestStopsAndParamsPersist(t *testing.T) {
 			t.Errorf("stop %d: got seq %d, want %d", i, stored.Stops[i].Seq, i)
 		}
 	}
-	if stored.Stops[0].Lat != 37.7749 || stored.Stops[0].Lng != -122.4194 {
+	// The stop is stored snapped, so its coordinate is the projection of what
+	// was submitted rather than the submitted value itself. Here the stop is
+	// the line's own endpoint, so the two agree to within the round trip
+	// through the planar frame.
+	if math.Abs(stored.Stops[0].Lat-37.7749) > 1e-9 || math.Abs(stored.Stops[0].Lng-(-122.4194)) > 1e-9 {
 		t.Errorf("stop coords not persisted: %+v", stored.Stops[0])
+	}
+	if stored.Stops[0].OffsetM > 1e-6 {
+		t.Errorf("stop on the alignment recorded offset %v, want ~0", stored.Stops[0].OffsetM)
+	}
+	if stored.Stops[1].ChainageM <= stored.Stops[0].ChainageM {
+		t.Errorf("chainage not persisted in route order: %v then %v",
+			stored.Stops[0].ChainageM, stored.Stops[1].ChainageM)
 	}
 
 	wantVehicle := transit.VehicleParams{
@@ -246,7 +283,7 @@ func TestStopOrderFollowsPayloadNotSeq(t *testing.T) {
 	store := newFakeServiceStore()
 	// Client sends misleading seq values; slice order must win.
 	payload := `{
-		"route_id": "route-1", "name": "Reordered",
+		"route_slug": "diagonal", "name": "Reordered",
 		"vehicle": {"max_speed_kmh": 100, "acceleration_ms2": 1, "deceleration_ms2": 1, "dwell_s": 0},
 		"stops": [
 			{"name": "First",  "lat": 1, "lng": 1, "seq": 99},
@@ -273,7 +310,7 @@ func TestOnlyOwnerCanUpdate(t *testing.T) {
 	store := newFakeServiceStore()
 	seedService(store, "svc-1", "seeded", svcOwner.ID)
 
-	body := `{"route_id":"route-1","name":"Renamed by stranger",
+	body := `{"route_slug":"diagonal","name":"Renamed by stranger",
 		"vehicle":{"max_speed_kmh":100,"acceleration_ms2":1,"deceleration_ms2":1,"dwell_s":0},
 		"stops":[{"name":"A","lat":1,"lng":1},{"name":"B","lat":2,"lng":2}]}`
 
@@ -329,7 +366,7 @@ func TestOwnerCanUpdate(t *testing.T) {
 	store := newFakeServiceStore()
 	seedService(store, "svc-1", "seeded", svcOwner.ID)
 
-	body := `{"route_id":"route-2","name":"Renamed",
+	body := `{"route_slug":"diagonal","name":"Renamed",
 		"vehicle":{"max_speed_kmh":250,"acceleration_ms2":1.2,"deceleration_ms2":1.4,"dwell_s":60},
 		"stops":[{"name":"X","lat":5,"lng":5},{"name":"Y","lat":6,"lng":6},{"name":"Z","lat":7,"lng":7}],
 		"frequency_windows":[{"start_time":"07:00","end_time":"09:00","headway_s":600}]}`
@@ -376,7 +413,7 @@ func TestUpdateCannotReassignOwner(t *testing.T) {
 	seedService(store, "svc-1", "seeded", svcOwner.ID)
 
 	// Client-supplied identity fields must be ignored, not honoured.
-	body := `{"route_id":"route-1","name":"Renamed","owner_id":"user-99","id":"svc-99","slug":"hijacked",
+	body := `{"route_slug":"diagonal","name":"Renamed","owner_id":"user-99","id":"svc-99","slug":"hijacked",
 		"vehicle":{"max_speed_kmh":100,"acceleration_ms2":1,"deceleration_ms2":1,"dwell_s":0},
 		"stops":[{"name":"A","lat":1,"lng":1},{"name":"B","lat":2,"lng":2}]}`
 
@@ -392,7 +429,7 @@ func TestUpdateCannotReassignOwner(t *testing.T) {
 
 func TestCreateIgnoresClientSuppliedOwner(t *testing.T) {
 	store := newFakeServiceStore()
-	body := `{"route_id":"route-1","name":"Sneaky","owner_id":"user-99",
+	body := `{"route_slug":"diagonal","name":"Sneaky","owner_id":"user-99",
 		"vehicle":{"max_speed_kmh":100,"acceleration_ms2":1,"deceleration_ms2":1,"dwell_s":0},
 		"stops":[{"name":"A","lat":1,"lng":1},{"name":"B","lat":2,"lng":2}]}`
 
@@ -484,15 +521,15 @@ func TestCreateRejectsInvalidPayloads(t *testing.T) {
 		want int
 	}{
 		{"malformed json", `{not json`, http.StatusBadRequest},
-		{"unknown route", strings.Replace(createPayload, "route-1", "route-nope", 1), http.StatusUnprocessableEntity},
-		{"missing name", `{"route_id":"route-1","stops":[{"name":"A","lat":1,"lng":1},{"name":"B","lat":2,"lng":2}],
+		{"unknown route", strings.Replace(createPayload, "sf-sj", "route-nope", 1), http.StatusUnprocessableEntity},
+		{"missing name", `{"route_slug":"diagonal","stops":[{"name":"A","lat":1,"lng":1},{"name":"B","lat":2,"lng":2}],
 			"vehicle":{"max_speed_kmh":100,"acceleration_ms2":1,"deceleration_ms2":1}}`, http.StatusUnprocessableEntity},
-		{"one stop", `{"route_id":"route-1","name":"X","stops":[{"name":"A","lat":1,"lng":1}],
+		{"one stop", `{"route_slug":"diagonal","name":"X","stops":[{"name":"A","lat":1,"lng":1}],
 			"vehicle":{"max_speed_kmh":100,"acceleration_ms2":1,"deceleration_ms2":1}}`, http.StatusUnprocessableEntity},
-		{"bad vehicle", `{"route_id":"route-1","name":"X",
+		{"bad vehicle", `{"route_slug":"diagonal","name":"X",
 			"stops":[{"name":"A","lat":1,"lng":1},{"name":"B","lat":2,"lng":2}],
 			"vehicle":{"max_speed_kmh":0,"acceleration_ms2":1,"deceleration_ms2":1}}`, http.StatusUnprocessableEntity},
-		{"bad coords", `{"route_id":"route-1","name":"X",
+		{"bad coords", `{"route_slug":"diagonal","name":"X",
 			"stops":[{"name":"A","lat":999,"lng":1},{"name":"B","lat":2,"lng":2}],
 			"vehicle":{"max_speed_kmh":100,"acceleration_ms2":1,"deceleration_ms2":1}}`, http.StatusUnprocessableEntity},
 	}
@@ -537,7 +574,7 @@ func TestRepositoryFailureIs500(t *testing.T) {
 
 func TestOversizedBodyIsRejected(t *testing.T) {
 	big := bytes.Repeat([]byte("x"), 2<<20)
-	body := `{"route_id":"route-1","name":"` + string(big) + `"}`
+	body := `{"route_slug":"diagonal","name":"` + string(big) + `"}`
 
 	rec := serveAs(t, newFakeServiceStore(), svcOwner, http.MethodPost, "/api/services", body)
 	if rec.Code != http.StatusRequestEntityTooLarge && rec.Code != http.StatusBadRequest {
@@ -557,5 +594,268 @@ func TestSlugCollisionGetsSuffix(t *testing.T) {
 	}
 	if slug := decodeService(t, rec).Slug; slug != "bay-area-express-2" {
 		t.Fatalf("got slug %q, want %q", slug, "bay-area-express-2")
+	}
+}
+
+// --- Snapping on write (SPA-108) ---
+
+// snapPayload builds a create/update body on route with the given stops, each
+// "name,lat,lng".
+func snapPayload(routeSlug string, stops ...[3]string) string {
+	parts := make([]string, len(stops))
+	for i, s := range stops {
+		parts[i] = fmt.Sprintf(`{"name":%q,"lat":%s,"lng":%s}`, s[0], s[1], s[2])
+	}
+	return fmt.Sprintf(`{"route_slug":%q,"name":"Snapped",
+		"vehicle":{"max_speed_kmh":200,"acceleration_ms2":1,"deceleration_ms2":1,"dwell_s":30},
+		"stops":[%s]}`, routeSlug, strings.Join(parts, ","))
+}
+
+func TestCreateRejectsAStopOffTheAlignment(t *testing.T) {
+	store := newFakeServiceStore()
+	// The diagonal runs along lat == lng; (10, 20) is nowhere near it.
+	body := snapPayload("diagonal", [3]string{"On line", "1", "1"}, [3]string{"Gilroy", "10", "20"})
+
+	rec := serveAs(t, store, svcOwner, http.MethodPost, "/api/services", body)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("got %d, want %d (body %s)", rec.Code, http.StatusUnprocessableEntity, rec.Body)
+	}
+	for _, want := range []string{"Gilroy", "diagonal", "km"} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Errorf("error body %s does not name %q", rec.Body, want)
+		}
+	}
+	if len(store.services) != 0 {
+		t.Fatalf("a rejected service was stored anyway: %+v", store.services)
+	}
+}
+
+func TestCreateRejectsStopsOutOfChainageOrder(t *testing.T) {
+	store := newFakeServiceStore()
+	// Authored A→C→B, but C lies beyond B along the line.
+	body := snapPayload("diagonal",
+		[3]string{"A", "1", "1"}, [3]string{"C", "3", "3"}, [3]string{"B", "2", "2"})
+
+	rec := serveAs(t, store, svcOwner, http.MethodPost, "/api/services", body)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("got %d, want %d (body %s)", rec.Code, http.StatusUnprocessableEntity, rec.Body)
+	}
+	for _, want := range []string{`\"C\"`, `\"B\"`, "seq 1", "seq 2"} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Errorf("error body %s does not name %s", rec.Body, want)
+		}
+	}
+	if len(store.services) != 0 {
+		t.Fatalf("a rejected service was stored anyway: %+v", store.services)
+	}
+}
+
+func TestCreateRequiresARouteSlug(t *testing.T) {
+	body := `{"name":"No route","vehicle":{"max_speed_kmh":100,"acceleration_ms2":1,"deceleration_ms2":1},
+		"stops":[{"name":"A","lat":1,"lng":1},{"name":"B","lat":2,"lng":2}]}`
+
+	rec := serveAs(t, newFakeServiceStore(), svcOwner, http.MethodPost, "/api/services", body)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("got %d, want %d (body %s)", rec.Code, http.StatusUnprocessableEntity, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), "route_slug") {
+		t.Errorf("error body %s does not name route_slug", rec.Body)
+	}
+}
+
+// TestCreateResolvesTheRouteSlugToItsID pins that the client names a route by
+// slug and never supplies an ID: what is stored is the ID the server resolved.
+func TestCreateResolvesTheRouteSlugToItsID(t *testing.T) {
+	store := newFakeServiceStore()
+	rec := serveAs(t, store, svcOwner, http.MethodPost, "/api/services", createPayload)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("got %d, want %d (body %s)", rec.Code, http.StatusCreated, rec.Body)
+	}
+	if stored := store.services[decodeService(t, rec).ID]; stored.RouteID != "route-1" {
+		t.Fatalf("got route id %q, want the id behind slug sf-sj", stored.RouteID)
+	}
+}
+
+// TestCreateResponseCarriesTheSnap covers the client that skips the preview:
+// the create response alone must show where each stop landed.
+func TestCreateResponseCarriesTheSnap(t *testing.T) {
+	store := newFakeServiceStore()
+	// Both stops sit a little off the diagonal, so offsets are non-zero.
+	body := snapPayload("diagonal", [3]string{"A", "1.0", "1.001"}, [3]string{"B", "2.0", "2.001"})
+
+	rec := serveAs(t, store, svcOwner, http.MethodPost, "/api/services", body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("got %d, want %d (body %s)", rec.Code, http.StatusCreated, rec.Body)
+	}
+
+	var got struct {
+		Stops []struct {
+			Name      string  `json:"name"`
+			Lat       float64 `json:"lat"`
+			Lng       float64 `json:"lng"`
+			ChainageM float64 `json:"chainage_m"`
+			OffsetM   float64 `json:"offset_m"`
+		} `json:"stops"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decoding response: %v (body %s)", err, rec.Body)
+	}
+	if len(got.Stops) != 2 {
+		t.Fatalf("got %d stops in the response, want 2", len(got.Stops))
+	}
+	for _, stop := range got.Stops {
+		if stop.OffsetM <= 0 {
+			t.Errorf("stop %q: response reports offset %v, want the distance it moved", stop.Name, stop.OffsetM)
+		}
+		// Snapped onto lat == lng, so the reported position is on the line.
+		if math.Abs(stop.Lat-stop.Lng) > 1e-6 {
+			t.Errorf("stop %q: response reports %v,%v, which is not on the alignment", stop.Name, stop.Lat, stop.Lng)
+		}
+	}
+	if got.Stops[1].ChainageM <= got.Stops[0].ChainageM {
+		t.Errorf("response chainage does not advance along the route: %v then %v",
+			got.Stops[0].ChainageM, got.Stops[1].ChainageM)
+	}
+}
+
+func TestUpdateSnapsStopsToo(t *testing.T) {
+	store := newFakeServiceStore()
+	seedService(store, "svc-1", "seeded", svcOwner.ID)
+
+	body := snapPayload("diagonal", [3]string{"A", "1.0", "1.001"}, [3]string{"B", "2.0", "2.001"})
+	rec := serveAs(t, store, svcOwner, http.MethodPut, "/api/services/seeded", body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d, want %d (body %s)", rec.Code, http.StatusOK, rec.Body)
+	}
+
+	stored := store.services["svc-1"]
+	for _, stop := range stored.Stops {
+		if math.Abs(stop.Lat-stop.Lng) > 1e-6 {
+			t.Errorf("update stored an unsnapped stop: %+v", stop)
+		}
+		if stop.OffsetM <= 0 {
+			t.Errorf("update did not record how far stop %q moved: %+v", stop.Name, stop)
+		}
+	}
+}
+
+func TestUpdateRejectsAnOffRouteStop(t *testing.T) {
+	store := newFakeServiceStore()
+	seedService(store, "svc-1", "seeded", svcOwner.ID)
+	before := store.services["svc-1"]
+
+	body := snapPayload("diagonal", [3]string{"A", "1", "1"}, [3]string{"Gilroy", "10", "20"})
+	rec := serveAs(t, store, svcOwner, http.MethodPut, "/api/services/seeded", body)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("got %d, want %d (body %s)", rec.Code, http.StatusUnprocessableEntity, rec.Body)
+	}
+	if store.services["svc-1"].Name != before.Name {
+		t.Fatalf("a rejected update was applied anyway: %+v", store.services["svc-1"])
+	}
+}
+
+// TestResavingAServiceUnchangedDoesNotMoveItsStops is the idempotency
+// guarantee: the coordinates a create returns, sent straight back as an update,
+// must land in the same place.
+func TestResavingAServiceUnchangedDoesNotMoveItsStops(t *testing.T) {
+	store := newFakeServiceStore()
+	rec := serveAs(t, store, svcOwner, http.MethodPost, "/api/services",
+		snapPayload("diagonal", [3]string{"A", "1.0", "1.001"}, [3]string{"B", "2.0", "2.001"}))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: got %d, want %d (body %s)", rec.Code, http.StatusCreated, rec.Body)
+	}
+	created := decodeService(t, rec)
+
+	// Echo the created service back verbatim, as a client editing an unrelated
+	// field would.
+	body, err := json.Marshal(map[string]any{
+		"route_slug": "diagonal",
+		"name":       created.Name,
+		"vehicle":    created.Vehicle,
+		"stops":      created.Stops,
+	})
+	if err != nil {
+		t.Fatalf("marshalling update: %v", err)
+	}
+
+	rec = serveAs(t, store, svcOwner, http.MethodPut, "/api/services/"+created.Slug, string(body))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update: got %d, want %d (body %s)", rec.Code, http.StatusOK, rec.Body)
+	}
+
+	updated := decodeService(t, rec)
+	for i, stop := range updated.Stops {
+		was := created.Stops[i]
+		if math.Abs(stop.Lat-was.Lat) > 1e-9 || math.Abs(stop.Lng-was.Lng) > 1e-9 {
+			t.Errorf("stop %q drifted on re-save: %v,%v became %v,%v",
+				stop.Name, was.Lat, was.Lng, stop.Lat, stop.Lng)
+		}
+		if math.Abs(stop.ChainageM-was.ChainageM) > 1e-6 {
+			t.Errorf("stop %q chainage drifted on re-save: %v became %v",
+				stop.Name, was.ChainageM, stop.ChainageM)
+		}
+	}
+}
+
+func TestUnusableRouteGeometryIs500(t *testing.T) {
+	store := newFakeServiceStore()
+	store.routes["degenerate"] = transit.Route{
+		ID: "route-3", Slug: "degenerate",
+		Geometry: transit.GeoLineString{Type: "LineString", Coordinates: [][]float64{{0, 0}}},
+	}
+
+	body := snapPayload("degenerate", [3]string{"A", "1", "1"}, [3]string{"B", "2", "2"})
+	rec := serveAs(t, store, svcOwner, http.MethodPost, "/api/services", body)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("got %d, want %d (body %s)", rec.Code, http.StatusInternalServerError, rec.Body)
+	}
+}
+
+// TestEditingOneStopOverTheAPIDoesNotMoveTheOthers is the second half of the
+// idempotency guarantee: not "resave everything unchanged" but "change one stop
+// and the rest stay put", which is what a user dragging a single marker does.
+func TestEditingOneStopOverTheAPIDoesNotMoveTheOthers(t *testing.T) {
+	store := newFakeServiceStore()
+	rec := serveAs(t, store, svcOwner, http.MethodPost, "/api/services",
+		snapPayload("diagonal",
+			[3]string{"A", "1.0", "1.001"}, [3]string{"B", "2.0", "2.001"}, [3]string{"C", "3.0", "3.001"}))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: got %d, want %d (body %s)", rec.Code, http.StatusCreated, rec.Body)
+	}
+	created := decodeService(t, rec)
+
+	// Drag the middle stop only; A and C go back exactly as they were returned.
+	edited := append([]transit.ServiceStopPoint(nil), created.Stops...)
+	edited[1] = transit.ServiceStopPoint{Name: "B moved", Lat: 2.4, Lng: 2.401}
+
+	body, err := json.Marshal(map[string]any{
+		"route_slug": "diagonal",
+		"name":       created.Name,
+		"vehicle":    created.Vehicle,
+		"stops":      edited,
+	})
+	if err != nil {
+		t.Fatalf("marshalling update: %v", err)
+	}
+
+	rec = serveAs(t, store, svcOwner, http.MethodPut, "/api/services/"+created.Slug, string(body))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update: got %d, want %d (body %s)", rec.Code, http.StatusOK, rec.Body)
+	}
+
+	updated := decodeService(t, rec)
+	for _, i := range []int{0, 2} {
+		was, now := created.Stops[i], updated.Stops[i]
+		if math.Abs(now.Lat-was.Lat) > 1e-9 || math.Abs(now.Lng-was.Lng) > 1e-9 {
+			t.Errorf("untouched stop %q moved: %v,%v became %v,%v",
+				was.Name, was.Lat, was.Lng, now.Lat, now.Lng)
+		}
+		if math.Abs(now.ChainageM-was.ChainageM) > 1e-6 {
+			t.Errorf("untouched stop %q changed chainage: %v became %v",
+				was.Name, was.ChainageM, now.ChainageM)
+		}
+	}
+	if updated.Stops[1].Name != "B moved" {
+		t.Errorf("the edited stop was not applied: %+v", updated.Stops[1])
 	}
 }

@@ -38,7 +38,6 @@ func (s *stubAuthDeps) GetUserCredentialsByEmail(context.Context, string) (trans
 func (s *stubAuthDeps) CreateUserService(context.Context, transit.UserService) error { return nil }
 func (s *stubAuthDeps) UpdateUserService(context.Context, transit.UserService) error { return nil }
 func (s *stubAuthDeps) DeleteUserService(context.Context, string) error              { return nil }
-func (s *stubAuthDeps) RouteExists(context.Context, string) (bool, error)            { return true, nil }
 
 func (s *stubAuthDeps) GetUserServiceByID(context.Context, string) (transit.UserService, bool, error) {
 	return transit.UserService{}, false, nil

@@ -281,17 +281,6 @@ func TestCreateUserServiceRejectsUnknownRoute(t *testing.T) {
 	}
 }
 
-func TestRouteExists(t *testing.T) {
-	repo, ctx, _ := userServiceFixture(t)
-
-	if exists, err := repo.RouteExists(ctx, usRouteID); err != nil || !exists {
-		t.Fatalf("known route: exists=%v err=%v", exists, err)
-	}
-	if exists, err := repo.RouteExists(ctx, "00000000-0000-4002-8003-0000000000ff"); err != nil || exists {
-		t.Fatalf("unknown route: exists=%v err=%v", exists, err)
-	}
-}
-
 func TestDeletingOwnerRemovesTheirServices(t *testing.T) {
 	repo, ctx, url := userServiceFixture(t)
 	if err := repo.CreateUserService(ctx, sampleUserService()); err != nil {

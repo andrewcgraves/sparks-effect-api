@@ -204,15 +204,6 @@ func scanUserService(row pgx.Row) (transit.UserService, error) {
 	return svc, nil
 }
 
-// RouteExists reports whether a route is present, so a service can be rejected
-// with 422 rather than surfacing a raw foreign-key violation.
-func (r *Repo) RouteExists(ctx context.Context, routeID string) (bool, error) {
-	var exists bool
-	err := r.pool.QueryRow(ctx,
-		`SELECT EXISTS (SELECT 1 FROM routes WHERE id = $1)`, routeID).Scan(&exists)
-	return exists, wrap("RouteExists", err)
-}
-
 func (r *Repo) listUserFrequencyWindows(ctx context.Context, serviceID string) ([]transit.FrequencyWindow, error) {
 	rows, err := r.pool.Query(ctx,
 		`SELECT start_time, end_time, headway_s FROM user_service_frequency_windows
