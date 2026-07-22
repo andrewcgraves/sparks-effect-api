@@ -291,6 +291,118 @@ func TestProjectStops_spanCrossingTwoInteriorVerticesSplitsIntoThreeSegments(t *
 	}
 }
 
+func TestProjectStops_errors(t *testing.T) {
+	validLine := []Point{{Lng: 0, Lat: 0}, {Lng: 0, Lat: 1}, {Lng: 0, Lat: 2}}
+	validStops := []Stop{
+		{ID: "a", Location: Point{Lng: 0, Lat: 0}},
+		{ID: "b", Location: Point{Lng: 0, Lat: 2}},
+	}
+
+	tests := []struct {
+		name    string
+		line    []Point
+		segs    []Segment
+		stops   []Stop
+		wantErr string
+	}{
+		{
+			name:    "line too short",
+			line:    []Point{{Lng: 0, Lat: 0}},
+			segs:    nil,
+			stops:   validStops,
+			wantErr: "at least 2",
+		},
+		{
+			name:    "empty line",
+			line:    nil,
+			segs:    nil,
+			stops:   validStops,
+			wantErr: "at least 2",
+		},
+		{
+			name:    "mismatched physics length",
+			line:    validLine,
+			segs:    []Segment{{CantMM: 100}}, // validLine needs 2 segments, not 1
+			stops:   validStops,
+			wantErr: "2",
+		},
+		{
+			name:    "fewer than two stops",
+			line:    validLine,
+			segs:    nil,
+			stops:   []Stop{{ID: "a", Location: Point{Lng: 0, Lat: 0}}},
+			wantErr: "at least 2",
+		},
+		{
+			name:    "no stops",
+			line:    validLine,
+			segs:    nil,
+			stops:   nil,
+			wantErr: "at least 2",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ProjectStops(tc.line, tc.segs, tc.stops)
+			if err == nil {
+				t.Fatalf("ProjectStops() error = nil, want error containing %q", tc.wantErr)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("ProjectStops() error = %q, want it to contain %q", err.Error(), tc.wantErr)
+			}
+		})
+	}
+}
+
+// TestProjectStops_emptyPhysicsMeansTangentLevelTrack covers the documented
+// default: an omitted physics slice must not error, and every resulting
+// SpanSegment must carry the zero Segment value.
+func TestProjectStops_emptyPhysicsMeansTangentLevelTrack(t *testing.T) {
+	line := []Point{{Lng: 0, Lat: 0}, {Lng: 0, Lat: 1}}
+	stops := []Stop{
+		{ID: "a", Location: Point{Lng: 0, Lat: 0}},
+		{ID: "b", Location: Point{Lng: 0, Lat: 1}},
+	}
+
+	got, err := ProjectStops(line, nil, stops)
+	if err != nil {
+		t.Fatalf("ProjectStops() error = %v, want nil", err)
+	}
+	if len(got) != 1 || len(got[0].Segments) != 1 {
+		t.Fatalf("got = %+v, want exactly 1 span with 1 SpanSegment", got)
+	}
+	if got[0].Segments[0].Physics != (Segment{}) {
+		t.Errorf("Segments[0].Physics = %+v, want zero value", got[0].Segments[0].Physics)
+	}
+}
+
+// TestProjectStops_coincidentStopsProduceZeroDistanceSpan covers the
+// degenerate case of two stops snapping to (almost) the same chainage: the
+// function must not panic or error, and must return a valid, empty span
+// rather than a negative distance.
+func TestProjectStops_coincidentStopsProduceZeroDistanceSpan(t *testing.T) {
+	line := []Point{{Lng: 0, Lat: 0}, {Lng: 0, Lat: 1}}
+	stops := []Stop{
+		{ID: "a", Location: Point{Lng: 0, Lat: 0.5}},
+		{ID: "b", Location: Point{Lng: 0, Lat: 0.5}},
+	}
+
+	got, err := ProjectStops(line, nil, stops)
+	if err != nil {
+		t.Fatalf("ProjectStops() error = %v, want nil", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(got) = %d, want 1", len(got))
+	}
+	if got[0].DistanceM < 0 {
+		t.Errorf("span.DistanceM = %v, want >= 0", got[0].DistanceM)
+	}
+	if math.Abs(got[0].DistanceM) > distTol {
+		t.Errorf("span.DistanceM = %v, want ~0 for coincident stops", got[0].DistanceM)
+	}
+}
+
 // TestSnapStops_returnsChainagePreservingInputOrder covers the ordering
 // contract that separates SnapStops from ProjectStops: callers need to be able
 // to detect that a service's stop sequence disagrees with the route's
@@ -438,117 +550,5 @@ func TestSnapStops_acceptsFewerThanTwoStops(t *testing.T) {
 	}
 	if len(empty) != 0 {
 		t.Errorf("SnapStops() with no stops = %+v, want empty", empty)
-	}
-}
-
-func TestProjectStops_errors(t *testing.T) {
-	validLine := []Point{{Lng: 0, Lat: 0}, {Lng: 0, Lat: 1}, {Lng: 0, Lat: 2}}
-	validStops := []Stop{
-		{ID: "a", Location: Point{Lng: 0, Lat: 0}},
-		{ID: "b", Location: Point{Lng: 0, Lat: 2}},
-	}
-
-	tests := []struct {
-		name    string
-		line    []Point
-		segs    []Segment
-		stops   []Stop
-		wantErr string
-	}{
-		{
-			name:    "line too short",
-			line:    []Point{{Lng: 0, Lat: 0}},
-			segs:    nil,
-			stops:   validStops,
-			wantErr: "at least 2",
-		},
-		{
-			name:    "empty line",
-			line:    nil,
-			segs:    nil,
-			stops:   validStops,
-			wantErr: "at least 2",
-		},
-		{
-			name:    "mismatched physics length",
-			line:    validLine,
-			segs:    []Segment{{CantMM: 100}}, // validLine needs 2 segments, not 1
-			stops:   validStops,
-			wantErr: "2",
-		},
-		{
-			name:    "fewer than two stops",
-			line:    validLine,
-			segs:    nil,
-			stops:   []Stop{{ID: "a", Location: Point{Lng: 0, Lat: 0}}},
-			wantErr: "at least 2",
-		},
-		{
-			name:    "no stops",
-			line:    validLine,
-			segs:    nil,
-			stops:   nil,
-			wantErr: "at least 2",
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			_, err := ProjectStops(tc.line, tc.segs, tc.stops)
-			if err == nil {
-				t.Fatalf("ProjectStops() error = nil, want error containing %q", tc.wantErr)
-			}
-			if !strings.Contains(err.Error(), tc.wantErr) {
-				t.Errorf("ProjectStops() error = %q, want it to contain %q", err.Error(), tc.wantErr)
-			}
-		})
-	}
-}
-
-// TestProjectStops_emptyPhysicsMeansTangentLevelTrack covers the documented
-// default: an omitted physics slice must not error, and every resulting
-// SpanSegment must carry the zero Segment value.
-func TestProjectStops_emptyPhysicsMeansTangentLevelTrack(t *testing.T) {
-	line := []Point{{Lng: 0, Lat: 0}, {Lng: 0, Lat: 1}}
-	stops := []Stop{
-		{ID: "a", Location: Point{Lng: 0, Lat: 0}},
-		{ID: "b", Location: Point{Lng: 0, Lat: 1}},
-	}
-
-	got, err := ProjectStops(line, nil, stops)
-	if err != nil {
-		t.Fatalf("ProjectStops() error = %v, want nil", err)
-	}
-	if len(got) != 1 || len(got[0].Segments) != 1 {
-		t.Fatalf("got = %+v, want exactly 1 span with 1 SpanSegment", got)
-	}
-	if got[0].Segments[0].Physics != (Segment{}) {
-		t.Errorf("Segments[0].Physics = %+v, want zero value", got[0].Segments[0].Physics)
-	}
-}
-
-// TestProjectStops_coincidentStopsProduceZeroDistanceSpan covers the
-// degenerate case of two stops snapping to (almost) the same chainage: the
-// function must not panic or error, and must return a valid, empty span
-// rather than a negative distance.
-func TestProjectStops_coincidentStopsProduceZeroDistanceSpan(t *testing.T) {
-	line := []Point{{Lng: 0, Lat: 0}, {Lng: 0, Lat: 1}}
-	stops := []Stop{
-		{ID: "a", Location: Point{Lng: 0, Lat: 0.5}},
-		{ID: "b", Location: Point{Lng: 0, Lat: 0.5}},
-	}
-
-	got, err := ProjectStops(line, nil, stops)
-	if err != nil {
-		t.Fatalf("ProjectStops() error = %v, want nil", err)
-	}
-	if len(got) != 1 {
-		t.Fatalf("len(got) = %d, want 1", len(got))
-	}
-	if got[0].DistanceM < 0 {
-		t.Errorf("span.DistanceM = %v, want >= 0", got[0].DistanceM)
-	}
-	if math.Abs(got[0].DistanceM) > distTol {
-		t.Errorf("span.DistanceM = %v, want ~0 for coincident stops", got[0].DistanceM)
 	}
 }

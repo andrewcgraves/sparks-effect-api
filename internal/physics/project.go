@@ -90,25 +90,7 @@ func SnapStops(line []Point, stops []Stop) ([]SnappedStop, error) {
 	if len(line) < 2 {
 		return nil, fmt.Errorf("line must have at least 2 points, got %d", len(line))
 	}
-	return snapStops(projectLinePlanar(line), stops), nil
-}
-
-// snapStops is the projection loop shared by SnapStops and ProjectStops. It
-// takes an already-projected line so ProjectStops, which needs the planar line
-// for its own segment splitting, does not project it twice.
-func snapStops(pl planarLine, stops []Stop) []SnappedStop {
-	out := make([]SnappedStop, len(stops))
-	for i, s := range stops {
-		p := projectPoint(s.Location, pl.refLatRad)
-		chainageM, snapped := snapToLine(pl, p)
-		out[i] = SnappedStop{
-			ID:        s.ID,
-			Point:     unprojectPoint(snapped, pl.refLatRad),
-			ChainageM: chainageM,
-			OffsetM:   planarDist(p, snapped),
-		}
-	}
-	return out
+	return projectLinePlanar(line).snap(stops), nil
 }
 
 // ProjectStops snaps each stop onto the route line, orders the stops by
@@ -151,7 +133,7 @@ func ProjectStops(line []Point, physicsSegs []Segment, stops []Stop) ([]InterSto
 	pl := projectLinePlanar(line)
 	lineSegs := buildLineSegments(pl, physics)
 
-	projected := snapStops(pl, stops)
+	projected := pl.snap(stops)
 	sort.SliceStable(projected, func(i, j int) bool {
 		return projected[i].ChainageM < projected[j].ChainageM
 	})
@@ -252,10 +234,29 @@ func planarDist(a, b planarPoint) float64 {
 	return math.Hypot(b.X-a.X, b.Y-a.Y)
 }
 
-// snapToLine finds the point on the polyline nearest to p and returns it
+// snap projects each stop onto the line and is the loop shared by SnapStops
+// and ProjectStops. It hangs off an already-projected line so ProjectStops,
+// which needs the planar line for its own segment splitting, does not project
+// it twice.
+func (pl planarLine) snap(stops []Stop) []SnappedStop {
+	out := make([]SnappedStop, len(stops))
+	for i, s := range stops {
+		p := projectPoint(s.Location, pl.refLatRad)
+		chainageM, snapped := pl.snapPoint(p)
+		out[i] = SnappedStop{
+			ID:        s.ID,
+			Point:     unprojectPoint(snapped, pl.refLatRad),
+			ChainageM: chainageM,
+			OffsetM:   planarDist(p, snapped),
+		}
+	}
+	return out
+}
+
+// snapPoint finds the point on the polyline nearest to p and returns it
 // alongside its chainage — the distance along the line from the start to the
 // snapped point.
-func snapToLine(pl planarLine, p planarPoint) (chainageM float64, snapped planarPoint) {
+func (pl planarLine) snapPoint(p planarPoint) (chainageM float64, snapped planarPoint) {
 	best := math.Inf(1)
 	for i := 0; i < len(pl.points)-1; i++ {
 		a, b := pl.points[i], pl.points[i+1]
