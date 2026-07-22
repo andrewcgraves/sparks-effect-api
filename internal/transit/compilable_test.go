@@ -175,8 +175,8 @@ func TestCompilableFromUserService_projectsEmbeddedStops(t *testing.T) {
 		t.Errorf("Vehicle = %+v, want %+v — the inline params' kinematics, without DwellS", got.Vehicle, wantVehicle)
 	}
 	want := []CompilableStop{
-		{Slug: "my-express--north-end", Lat: 0, Lng: 0, DwellS: 45},
-		{Slug: "my-express--south-end", Lat: 0, Lng: 1, DwellS: 45},
+		{Slug: "my-express--north-end", Name: "North End", Lat: 0, Lng: 0, DwellS: 45},
+		{Slug: "my-express--south-end", Name: "South End", Lat: 0, Lng: 1, DwellS: 45},
 	}
 	if len(got.Stops) != len(want) {
 		t.Fatalf("len(Stops) = %d, want %d", len(got.Stops), len(want))

@@ -1,0 +1,327 @@
+package transit
+
+import (
+	"sort"
+
+	"github.com/andrewcgraves/sparks-effect-api/internal/physics"
+)
+
+// MergeRadiusM is how close two stops of different services must be before
+// they compile to the same graph node — that is, before a rider may change
+// between those services there.
+//
+// It is measured on persisted snapped positions (see ServiceStopPoint), which
+// makes it a statement about where the stops ended up on their alignments, not
+// about where their authors put them. Those are not the same thing, and the
+// difference is this rule's known weak point: SnapToRoute lets a stop move up
+// to OffRouteThresholdM to reach its line, so two stops authored metres apart
+// on crossing routes can land far enough apart to miss each other here. SPA-113
+// owns that trade-off and may replace the flat radius with one widened by each
+// stop's OffsetM. Until it does, the radius is flat and the near-miss report
+// below is what keeps the resulting failure visible.
+//
+// The comparison is inclusive (distance <= radius), so a pair exactly on the
+// boundary merges.
+const MergeRadiusM = 50.0
+
+// NearMissRadiusM is how far out the near-miss report looks. Pairs of stops on
+// different services that did not merge, but lie within this, are reported.
+//
+// 5x the merge radius: wide enough to cover the case that motivates the report
+// — crossing alignments at a shared station sit routinely 50–150 m apart, so
+// the stops a user meant as one interchange land just outside the merge and
+// need naming — and narrow enough that the report stays a short list of
+// plausible candidates rather than every pair in the scenario. Beyond ~250 m
+// two stops are not a missed interchange; they are two stops.
+const NearMissRadiusM = 5 * MergeRadiusM
+
+// StopRef identifies one stop as it was before merging: which service it came
+// from, the stable identity that service minted for it (StopSlugs), and its
+// display name. It is what the merge report says "this" and "that" with.
+type StopRef struct {
+	ServiceID string `json:"service_id"`
+	Slug      string `json:"slug"`
+	Name      string `json:"name"`
+}
+
+// StopCluster is one realised merge: several services' stops that compiled to
+// a single graph node.
+//
+// Key is the node key the graph's edges actually name — the lexicographically
+// smallest member slug. Names carries every distinct member name, in the same
+// order as Members, so a caller can render "Transbay (also: Salesforce
+// Center)" rather than showing one name and silently dropping the rest.
+type StopCluster struct {
+	Key     string    `json:"key"`
+	Names   []string  `json:"names"`
+	Members []StopRef `json:"members"`
+}
+
+// NearMiss is a pair of stops on different services that did not merge but came
+// close enough that the author may well have meant them to.
+//
+// It exists because a failed merge is otherwise completely silent: the compile
+// succeeds, the graph is simply smaller, and the isochrone reports a smaller
+// world with nothing anywhere saying why. A near miss is not an error — plenty
+// of stops are legitimately 80 m apart — so it is reported, not raised.
+type NearMiss struct {
+	A         StopRef `json:"a"`
+	B         StopRef `json:"b"`
+	DistanceM float64 `json:"distance_m"`
+}
+
+// MergeReport is what the merge did, in both directions: the merges it made
+// and the merges it nearly made. An unwanted merge inflates reachability and a
+// missed one deflates it, and neither is visible in the graph itself, so both
+// are reported.
+//
+// Clusters holds only multi-member clusters. Every stop is in a cluster, but a
+// singleton cluster is just a stop; reporting those would bury the merges in a
+// list of non-events.
+type MergeReport struct {
+	Clusters   []StopCluster `json:"clusters,omitempty"`
+	NearMisses []NearMiss    `json:"near_misses,omitempty"`
+}
+
+// MergeColocatedStops resolves interchange across a scenario's member
+// services: it clusters stops that sit within MergeRadiusM of each other and
+// rewrites each stop's Slug to its cluster's key, returning the rewritten
+// services alongside a report of what it did.
+//
+// This is the whole of interchange in this system. There is no transfer edge
+// type and no transfer table — graphDijkstra pools every ServiceGraph's edges
+// into one adjacency map keyed by slug, so two services connect if and only if
+// they emit an edge naming the same key. Since StopSlugs namespaces every
+// stop identity by its owning service, nothing shares a key by default and a
+// scenario's services would compile to disconnected components. Assigning the
+// cluster key over the top is what makes a curated set of services a network.
+//
+// # The algorithm (decided on SPA-115)
+//
+// Collect every stop across every service, sort them into one total order, and
+// walk that order. For each stop, test it against the *anchor* of each existing
+// cluster in creation order; join the first cluster whose anchor is within
+// MergeRadiusM and that does not already hold a stop of the same service.
+// Otherwise start a new cluster anchored at this stop.
+//
+// Three properties follow, and each is why a simpler algorithm was rejected:
+//
+//   - **Order-independent.** The walk order is a property of the data (slug,
+//     then service ID), not of the order services or rows arrived in. Naive
+//     greedy over an arbitrary visit order gives genuinely different networks
+//     for the same stops — visit A,B,C and get {A,B},{C}; visit C,B,A and get
+//     {B,C},{A} — which would make a compile depend on a database's row order.
+//
+//   - **Non-transitive, by construction.** Membership is always measured
+//     against the anchor, never against an arbitrary member, so chains cannot
+//     propagate: with A–B and B–C each inside the radius but A–C outside, the
+//     result is always {A,B} and {C}. Single-linkage merging would instead let
+//     a line of stops 40 m apart collapse into one node spanning kilometres.
+//
+//   - **The key needs no separate pass.** Walking in ascending slug order means
+//     a cluster's anchor is, necessarily, its lexicographically smallest
+//     member — so the anchor *is* the key. Selecting the key separately would
+//     be circular: the key would decide membership and membership the key.
+//
+// The accepted cost is that a stop can sit within the radius of a *non-anchor*
+// member of a cluster it does not join. That is the unavoidable price of
+// bounding chains, and it is not swept under the rug: such a pair is reported
+// as a near miss like any other.
+//
+// # Clustering is cross-service only
+//
+// Two stops of one service never merge, however close. A lone service stopping
+// twice within the radius is a loop, a switchback, or an authoring mistake —
+// not an interchange — and merging it would delete a span, which is exactly
+// what CompileServicePhysics' duplicate-slug check exists to refuse. So this
+// can never be what puts a duplicate in front of that check, and that check
+// does not relax to accommodate this.
+//
+// # Nothing here is persisted
+//
+// Cluster keys live for one compile. No Station table, no shared stop catalog:
+// stops stay embedded on their services, which is the decision UserService was
+// built around, and the merge is an artifact of assembling a graph rather than
+// a fact about the world.
+//
+// The consequence is that a key is stable per compile, not across membership
+// changes: adding a service whose stop slug sorts earlier moves the key to it.
+// That is acceptable because the graph is a snapshot on a job row rather than a
+// durable address — but nothing may deep-link a cluster key as though it were
+// permanent.
+//
+// Input is not mutated; the returned services carry fresh stop slices.
+func MergeColocatedStops(svcs []CompilableService) ([]CompilableService, MergeReport) {
+	stops := flattenStops(svcs)
+	clusters, clusterOf := clusterStops(stops)
+
+	merged := make([]CompilableService, len(svcs))
+	copy(merged, svcs)
+	for i, svc := range svcs {
+		merged[i].Stops = append([]CompilableStop(nil), svc.Stops...)
+	}
+	for i, s := range stops {
+		merged[s.svcIdx].Stops[s.stopIdx].Slug = clusters[clusterOf[i]].key()
+	}
+
+	return merged, MergeReport{
+		Clusters:   realisedClusters(clusters),
+		NearMisses: nearMisses(stops, clusterOf),
+	}
+}
+
+// mergeStop is one stop lifted out of its service and given everything the
+// merge reasons about: where it is, who it belongs to, and where to write its
+// key back.
+type mergeStop struct {
+	svcIdx, stopIdx int
+	ref             StopRef
+	at              physics.Point
+}
+
+// flattenStops collects every stop of every service into the single total
+// order the walk depends on: slug ascending, then service ID.
+//
+// The service-ID tiebreak is not decoration. SPA-103 makes user-authored stop
+// slugs globally unique by namespacing them, but the seeded model has no such
+// guarantee — two seeded services calling at the same shared Station carry the
+// identical station slug, which is precisely how express and local already
+// interchange. Sorting on slug alone would leave those tied and the order
+// decided by the input's arrangement, which is the order-dependence this whole
+// ordering exists to remove. Service IDs are unique, and a single service
+// cannot hold the same slug twice (CompileServicePhysics refuses it), so the
+// pair is a total order over any input the compiler will accept.
+func flattenStops(svcs []CompilableService) []mergeStop {
+	var stops []mergeStop
+	for i, svc := range svcs {
+		for j, s := range svc.Stops {
+			stops = append(stops, mergeStop{
+				svcIdx:  i,
+				stopIdx: j,
+				ref:     StopRef{ServiceID: svc.ID, Slug: s.Slug, Name: s.Name},
+				at:      physics.Point{Lng: s.Lng, Lat: s.Lat},
+			})
+		}
+	}
+	sort.SliceStable(stops, func(a, b int) bool {
+		if stops[a].ref.Slug != stops[b].ref.Slug {
+			return stops[a].ref.Slug < stops[b].ref.Slug
+		}
+		return stops[a].ref.ServiceID < stops[b].ref.ServiceID
+	})
+	return stops
+}
+
+// pendingCluster is a cluster under construction. Members are appended in walk
+// order, so members[0] is the anchor and, because the walk ascends by slug,
+// also the lexicographically smallest member.
+type pendingCluster struct {
+	members  []mergeStop
+	services map[string]bool
+}
+
+// key is the cluster's graph node key. Because the walk ascends by slug and
+// members are appended in walk order, members[0] is both the anchor and the
+// lexicographically smallest member — so the key needs no separate selection.
+func (c pendingCluster) key() string { return c.members[0].ref.Slug }
+
+// anchor is the position every candidate is measured against. It is members[0]
+// and never changes as the cluster grows, which is what bounds chains:
+// membership is tested against this one point, not against whichever member
+// happens to be nearest.
+func (c pendingCluster) anchor() physics.Point { return c.members[0].at }
+
+// clusterStops runs the greedy anchored walk over stops, which must already be
+// in flattenStops' order. It returns the clusters in creation order — which,
+// since each is created at its anchor, is ascending key order — and a parallel
+// slice giving each stop's cluster index.
+func clusterStops(stops []mergeStop) ([]pendingCluster, []int) {
+	clusters := make([]pendingCluster, 0, len(stops))
+	clusterOf := make([]int, len(stops))
+
+	for i, s := range stops {
+		joined := -1
+		for ci := range clusters {
+			if clusters[ci].services[s.ref.ServiceID] {
+				continue
+			}
+			if physics.DistanceM(clusters[ci].anchor(), s.at) <= MergeRadiusM {
+				joined = ci
+				break
+			}
+		}
+		if joined < 0 {
+			clusters = append(clusters, pendingCluster{
+				members:  []mergeStop{s},
+				services: map[string]bool{s.ref.ServiceID: true},
+			})
+			clusterOf[i] = len(clusters) - 1
+			continue
+		}
+		clusters[joined].members = append(clusters[joined].members, s)
+		clusters[joined].services[s.ref.ServiceID] = true
+		clusterOf[i] = joined
+	}
+	return clusters, clusterOf
+}
+
+// realisedClusters reports the clusters that actually merged something.
+//
+// Names are deduplicated: two services calling the same place "Transbay" have
+// stated one name, not two, and "Transbay (also: Transbay)" would be noise.
+// Order follows the members, so the key's own name comes first.
+func realisedClusters(clusters []pendingCluster) []StopCluster {
+	var out []StopCluster
+	for _, c := range clusters {
+		if len(c.members) < 2 {
+			continue
+		}
+		members := make([]StopRef, len(c.members))
+		var names []string
+		seen := make(map[string]bool, len(c.members))
+		for i, m := range c.members {
+			members[i] = m.ref
+			if !seen[m.ref.Name] {
+				seen[m.ref.Name] = true
+				names = append(names, m.ref.Name)
+			}
+		}
+		out = append(out, StopCluster{Key: c.key(), Names: names, Members: members})
+	}
+	return out
+}
+
+// nearMisses reports every pair of stops on different services that ended up in
+// different clusters while lying within NearMissRadiusM of each other.
+//
+// Same-service pairs are excluded rather than reported as misses: they were
+// never candidates to merge (see MergeColocatedStops), so calling them near
+// misses would invite a user to fix something that is not broken.
+//
+// Pairs *inside* the merge radius that still failed to merge are included, and
+// are the most interesting entries in the report: they are the anchored walk's
+// accepted cost — a stop within reach of a non-anchor member — surfacing where
+// it can be seen instead of silently shaping the graph.
+//
+// O(n^2) over the scenario's stops. At the scale of a curated set of authored
+// services that is nothing; if it ever stops being nothing, the answer is a
+// grid index over the same rule, not a different rule.
+func nearMisses(stops []mergeStop, clusterOf []int) []NearMiss {
+	var out []NearMiss
+	for i := range stops {
+		for j := i + 1; j < len(stops); j++ {
+			if stops[i].ref.ServiceID == stops[j].ref.ServiceID {
+				continue
+			}
+			if clusterOf[i] == clusterOf[j] {
+				continue
+			}
+			d := physics.DistanceM(stops[i].at, stops[j].at)
+			if d > NearMissRadiusM {
+				continue
+			}
+			out = append(out, NearMiss{A: stops[i].ref, B: stops[j].ref, DistanceM: d})
+		}
+	}
+	return out
+}

@@ -152,6 +152,26 @@ func ProjectStops(line []Point, physicsSegs []Segment, stops []Stop) ([]InterSto
 	return spans, nil
 }
 
+// DistanceM is the straight-line distance between two positions, in metres,
+// measured in the same local planar frame SnapStops and ProjectStops use.
+//
+// It exists so that "how far apart are these two stops" is answered by the
+// metric the compiler already reasons in, rather than by a second, subtly
+// different one. transit's co-located-stop merge compares snapped positions
+// against a radius in metres; if it measured on a different Earth model from
+// the one that produced those positions, the radius would not mean quite what
+// the snap said it meant.
+//
+// The projection is centred on the two points' mean latitude, which is what
+// keeps it a metric — symmetric, and zero only for coincident points. Like the
+// rest of this package it trades geodesic exactness for local consistency; at
+// the sub-kilometre separations a merge decides on, the two agree to well
+// under a centimetre.
+func DistanceM(a, b Point) float64 {
+	refLatRad := degToRad((a.Lat + b.Lat) / 2)
+	return planarDist(projectPoint(a, refLatRad), projectPoint(b, refLatRad))
+}
+
 // planarPoint is a position in the local planar (x, y) meter frame produced by
 // the equirectangular projection below. It is a distinct type from Point so
 // geographic (degree) and projected (meter) coordinates can never be mixed up

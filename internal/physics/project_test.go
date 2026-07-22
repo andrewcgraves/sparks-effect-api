@@ -552,3 +552,42 @@ func TestSnapStops_acceptsFewerThanTwoStops(t *testing.T) {
 		t.Errorf("SnapStops() with no stops = %+v, want empty", empty)
 	}
 }
+
+// TestDistanceM_matchesHaversineGroundTruth pins DistanceM against an
+// independent great-circle formula, at the short separations the co-located
+// stop merge actually measures. The equirectangular frame DistanceM uses is a
+// local approximation, so this is what says "local" is good enough: at station
+// scale it must agree with the real thing to well under a metre, or a 50 m
+// merge radius would not mean 50 m.
+func TestDistanceM_matchesHaversineGroundTruth(t *testing.T) {
+	cases := []struct {
+		name string
+		a, b Point
+	}{
+		// Around San Francisco, roughly the separations a merge decides on.
+		{"east-west 80 m", Point{Lng: -122.397, Lat: 37.790}, Point{Lng: -122.3961, Lat: 37.790}},
+		{"north-south 110 m", Point{Lng: -122.397, Lat: 37.790}, Point{Lng: -122.397, Lat: 37.791}},
+		{"diagonal", Point{Lng: -122.397, Lat: 37.790}, Point{Lng: -122.3958, Lat: 37.7907}},
+		{"coincident", Point{Lng: -122.397, Lat: 37.790}, Point{Lng: -122.397, Lat: 37.790}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			want := haversineM(tc.a, tc.b)
+			got := DistanceM(tc.a, tc.b)
+			if math.Abs(got-want) > 0.01 {
+				t.Errorf("DistanceM(%v, %v) = %v, want ~%v (haversine)", tc.a, tc.b, got, want)
+			}
+		})
+	}
+}
+
+// DistanceM is a metric, so it cannot depend on which point is named first.
+// The merge walks stops in a fixed order and measures each against a cluster
+// anchor; an asymmetric distance would make membership depend on that order.
+func TestDistanceM_isSymmetric(t *testing.T) {
+	a := Point{Lng: -122.397, Lat: 37.790}
+	b := Point{Lng: -122.3958, Lat: 37.7907}
+	if ab, ba := DistanceM(a, b), DistanceM(b, a); ab != ba {
+		t.Errorf("DistanceM(a,b) = %v, DistanceM(b,a) = %v, want identical", ab, ba)
+	}
+}
