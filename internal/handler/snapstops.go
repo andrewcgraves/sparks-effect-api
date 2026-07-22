@@ -14,15 +14,15 @@ import (
 // offRouteThresholdM is how far a stop may sit from an alignment before the
 // preview flags it as implausible.
 //
-// Nothing rejects at this distance yet — write-time enforcement is SPA-108,
-// and when it lands it belongs in this package too, so it should read this
-// constant rather than declare its own. A preview that warned at a different
-// distance from the one the save enforced would be worse than no warning, since
-// the user would fix what it complained about and still be refused.
+// It is an alias for the write path's threshold, not a second copy: SPA-108
+// enforces the same distance when a service is saved, and a preview that warned
+// at a different distance from the one the save enforced would be worse than no
+// warning — the user would fix what it complained about and still be refused.
+// The rule lives in internal/transit, next to the model it constrains.
 //
 // The comparison is strict (offset > threshold), so a stop exactly on the
-// boundary previews as acceptable; enforcement must draw the line the same way.
-const offRouteThresholdM = 500.0
+// boundary previews as acceptable, and the write path saves it.
+const offRouteThresholdM = transit.OffRouteThresholdM
 
 // maxSnapStopsBodyBytes caps a request body. A pattern of a few hundred stops
 // stays well under this; anything larger is a client bug or an attack.

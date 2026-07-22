@@ -53,12 +53,17 @@ func provisionMember(t *testing.T, h http.Handler, adminToken, email, password s
 
 // createUserServiceOverAPI creates a user-authored service through the real
 // POST /api/services handler and returns its id.
-func createUserServiceOverAPI(t *testing.T, h http.Handler, token, routeID, name string) string {
+//
+// The route is named by slug, and the stops sit on the alignment the callers
+// ingest (lat 37, running west to east): stops are snapped and range-checked
+// against the route on write, so a service cannot be authored against a line it
+// is nowhere near.
+func createUserServiceOverAPI(t *testing.T, h http.Handler, token, routeSlug, name string) string {
 	t.Helper()
 	body := `{
-		"route_id": "` + routeID + `", "name": "` + name + `",
+		"route_slug": "` + routeSlug + `", "name": "` + name + `",
 		"vehicle": {"max_speed_kmh": 200, "acceleration_ms2": 1, "deceleration_ms2": 1, "dwell_s": 30},
-		"stops": [{"name": "A", "lat": 1, "lng": 1}, {"name": "B", "lat": 2, "lng": 2}]
+		"stops": [{"name": "A", "lat": 37, "lng": -121.8}, {"name": "B", "lat": 37, "lng": -121.4}]
 	}`
 	req := httptest.NewRequest(http.MethodPost, "/api/services", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -90,8 +95,8 @@ func TestIntegration_UserScenarioAssembleAndReadBack(t *testing.T) {
 		t.Fatalf("CreateRoute: %v", err)
 	}
 
-	svc1 := createUserServiceOverAPI(t, h, memberToken, routeID, "Express")
-	svc2 := createUserServiceOverAPI(t, h, memberToken, routeID, "Local")
+	svc1 := createUserServiceOverAPI(t, h, memberToken, "usn-int-route", "Express")
+	svc2 := createUserServiceOverAPI(t, h, memberToken, "usn-int-route", "Local")
 
 	body := `{"name":"Weekend Getaway","service_ids":["` + svc1 + `","` + svc2 + `"]}`
 	rec := request(t, h, http.MethodPost, "/api/user-scenarios", memberToken, body)
@@ -134,7 +139,7 @@ func TestIntegration_UserScenarioOnlyOwnerCanMutate(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateRoute: %v", err)
 	}
-	svc := createUserServiceOverAPI(t, h, ownerToken, routeID, "Owner Service")
+	svc := createUserServiceOverAPI(t, h, ownerToken, "usn-int-route-2", "Owner Service")
 
 	rec := request(t, h, http.MethodPost, "/api/user-scenarios", ownerToken,
 		`{"name":"Owner Scenario","service_ids":["`+svc+`"]}`)
@@ -195,7 +200,7 @@ func TestIntegration_UserScenarioCannotCurateAnotherUsersService(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateRoute: %v", err)
 	}
-	strangersSvc := createUserServiceOverAPI(t, h, strangerToken, routeID, "Stranger Service")
+	strangersSvc := createUserServiceOverAPI(t, h, strangerToken, "usn-int-route-3", "Stranger Service")
 
 	rec := request(t, h, http.MethodPost, "/api/user-scenarios", ownerToken,
 		`{"name":"Reach For It","service_ids":["`+strangersSvc+`"]}`)

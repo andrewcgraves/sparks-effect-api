@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/ids"
@@ -23,7 +24,10 @@ type ServiceStore interface {
 	ListUserServicesByOwner(ctx context.Context, ownerID string) ([]transit.UserService, error)
 	UpdateUserService(ctx context.Context, svc transit.UserService) error
 	DeleteUserService(ctx context.Context, id string) error
-	RouteExists(ctx context.Context, routeID string) (bool, error)
+	// GetRouteBySlug resolves the route a service is authored against. The
+	// whole route is needed, not just its existence: stops are snapped onto its
+	// geometry before the service is stored.
+	GetRouteBySlug(ctx context.Context, slug string) (transit.Route, bool, error)
 }
 
 // maxServiceBodyBytes caps a request body. A service with a few hundred stops
@@ -33,8 +37,13 @@ const maxServiceBodyBytes = 1 << 20 // 1 MiB
 // serviceRequest is the client-writable surface of a service. Identity fields
 // (id, slug, owner_id) are deliberately absent: the server assigns them, so a
 // client cannot claim an ID or reassign ownership by including them.
+//
+// The route is named by slug rather than by ID, matching route ingestion's
+// scenario_slug and the route picker in GET /api/routes: a client addresses
+// routes by slug everywhere else, and resolving it server-side means a client
+// can never supply an arbitrary route_id directly.
 type serviceRequest struct {
-	RouteID          string                     `json:"route_id"`
+	RouteSlug        string                     `json:"route_slug"`
 	Name             string                     `json:"name"`
 	Description      string                     `json:"description"`
 	Vehicle          transit.VehicleParams      `json:"vehicle"`
@@ -43,9 +52,9 @@ type serviceRequest struct {
 }
 
 // applyTo copies the client-writable fields onto svc, leaving ID, Slug, and
-// OwnerID untouched.
+// OwnerID untouched. RouteID is not among them: it is resolved from the request
+// slug by prepareService, which needs the route itself anyway.
 func (req serviceRequest) applyTo(svc *transit.UserService) {
-	svc.RouteID = req.RouteID
 	svc.Name = req.Name
 	svc.Description = req.Description
 	svc.Vehicle = req.Vehicle
@@ -81,7 +90,7 @@ func CreateService(store ServiceStore) http.HandlerFunc {
 		svc := transit.UserService{ID: id, OwnerID: user.ID}
 		req.applyTo(&svc)
 
-		if !validateService(w, r, store, svc) {
+		if !prepareService(w, r, store, &svc, req.RouteSlug) {
 			return
 		}
 
@@ -168,7 +177,7 @@ func UpdateService(store ServiceStore) http.HandlerFunc {
 		// carry over from the stored service.
 		req.applyTo(&svc)
 
-		if !validateService(w, r, store, svc) {
+		if !prepareService(w, r, store, &svc, req.RouteSlug) {
 			return
 		}
 		if err := store.UpdateUserService(r.Context(), svc); err != nil {
@@ -252,20 +261,46 @@ func decodeServiceRequest(w http.ResponseWriter, r *http.Request) (serviceReques
 	return req, true
 }
 
-// validateService applies domain validation and confirms the target route
-// exists, so a bad route_id is a 422 rather than a foreign-key 500.
-func validateService(w http.ResponseWriter, r *http.Request, store ServiceStore, svc transit.UserService) bool {
+// prepareService resolves the route the request names, validates the service
+// against it, and snaps its stops onto that route's alignment — after which svc
+// holds the coordinates that will be stored.
+//
+// Resolving the route also settles what would otherwise be a foreign-key 500:
+// an unknown slug is a 422 the client can act on. Snapping happens here rather
+// than in the store because it is a validation step as much as a normalisation
+// one: a stop the route does not pass anywhere near, or a sequence that runs
+// against the alignment, is refused rather than quietly stored.
+func prepareService(w http.ResponseWriter, r *http.Request, store ServiceStore, svc *transit.UserService, routeSlug string) bool {
+	routeSlug = strings.TrimSpace(routeSlug)
+	if routeSlug == "" {
+		writeError(w, http.StatusUnprocessableEntity, "route_slug is required")
+		return false
+	}
+	rt, found, err := store.GetRouteBySlug(r.Context(), routeSlug)
+	if err != nil {
+		writeInternalError(w, "looking up route", err)
+		return false
+	}
+	if !found {
+		writeError(w, http.StatusUnprocessableEntity, "unknown route_slug "+routeSlug)
+		return false
+	}
+	svc.RouteID = rt.ID
+
+	// Validate first: it range-checks coordinates and the stop count, which
+	// snapping would otherwise trip over with a worse message.
 	if err := svc.Validate(); err != nil {
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
 		return false
 	}
-	exists, err := store.RouteExists(r.Context(), svc.RouteID)
-	if err != nil {
-		writeInternalError(w, "checking route", err)
-		return false
-	}
-	if !exists {
-		writeError(w, http.StatusUnprocessableEntity, "unknown route_id")
+	if err := svc.SnapToRoute(rt); err != nil {
+		// Unusable stored geometry is the server's fault, not the caller's:
+		// they submitted a valid service against a route we cannot project on.
+		if errors.Is(err, transit.ErrRouteGeometry) {
+			writeInternalError(w, "snapping stops", err)
+			return false
+		}
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
 		return false
 	}
 	return true

@@ -42,11 +42,31 @@ type VehicleParams struct {
 
 // ServiceStopPoint is one stop in a user service's pattern, stored embedded as
 // a bare coordinate and label rather than a reference to a shared Station.
+//
+// Lat/Lng are the *snapped* position on the route's alignment, not what the
+// author typed: SnapToRoute rewrites them on every write, so a stored stop has
+// one coordinate rather than one for the author, one for the preview and one
+// the compiler derives. ChainageM and OffsetM are that snap's other two
+// products, persisted alongside it so nothing downstream has to re-derive them
+// and risk disagreeing.
 type ServiceStopPoint struct {
 	Name string  `json:"name"`
 	Lat  float64 `json:"lat"`
 	Lng  float64 `json:"lng"`
 	Seq  int     `json:"seq"`
+	// ChainageM is the distance along the route line from its start to this
+	// stop, in metres.
+	ChainageM float64 `json:"chainage_m"`
+	// OffsetM is how far the submitted position sat from the alignment — the
+	// distance the stop moved when it was snapped. It is kept rather than
+	// discarded because it is the uncertainty attached to this stop's position,
+	// which SPA-109's co-located-stop merge needs at compile time (SPA-113).
+	//
+	// It describes one write, not the stop: a client that resubmits the
+	// coordinate a previous write returned has moved the stop zero metres, so
+	// this drops to 0 on re-save. Anything treating it as durable uncertainty
+	// has to reckon with that.
+	OffsetM float64 `json:"offset_m"`
 }
 
 // Validate reports whether the service is well-formed enough to persist.

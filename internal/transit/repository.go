@@ -54,7 +54,6 @@ type Repository interface {
 	ListUserServicesByOwner(ctx context.Context, ownerID string) ([]UserService, error)
 	UpdateUserService(ctx context.Context, svc UserService) error
 	DeleteUserService(ctx context.Context, id string) error
-	RouteExists(ctx context.Context, routeID string) (bool, error)
 
 	// UserScenarios are owner-scoped curated sets of UserService IDs. Like
 	// UserServices, ownership is enforced above this layer: these methods do
