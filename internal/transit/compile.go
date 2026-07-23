@@ -17,6 +17,30 @@ type ServiceGraph struct {
 	WaitSecs  int    `json:"wait_secs"`
 }
 
+// GraphNode is one addressable point in a compiled graph: the key every
+// Edge.FromSlug/ToSlug refers to, together with the position the isochrone
+// layer needs and the display names that produced it.
+//
+// It exists because a compiled scenario is otherwise pure topology — bare slugs
+// and seconds, no geometry anywhere. The chainer needs a location per node, and
+// a user scenario has no stations table to reconstruct one from after the fact:
+// its key is a compile-time cluster key (MergeColocatedStops) persisted nowhere
+// else, so the coordinate must ride on the graph or it is unrecoverable. The
+// compile result is the one sound source.
+//
+// Lat/Lng are the cluster key member's persisted-snapped coordinate (SPA-108),
+// not a centroid. A centroid lies on no route line, so it is not a place a
+// train stops, and it would drift as membership changed; the key member's own
+// snapped position is a real point on a real alignment. Names carries every
+// distinct member stop name, key member first, so a caller can render
+// "Transbay (also: Salesforce Center)" from one field.
+type GraphNode struct {
+	Slug  string   `json:"slug"`
+	Lat   float64  `json:"lat"`
+	Lng   float64  `json:"lng"`
+	Names []string `json:"names"`
+}
+
 // TransitGraph is a compiled, Dijkstra-ready representation of a scenario's
 // active services — either hand-authored (Compile) or physics-derived
 // (CompileScenario) — and is what an async compile job persists as its result
@@ -28,9 +52,19 @@ type ServiceGraph struct {
 // nothing to merge. It rides on the job result rather than a separate endpoint
 // so the poller contract is unchanged — a client already reading the graph
 // reads the report from the same payload.
+//
+// Nodes gives every graph key a position and display names, so the physics
+// compile carries its own geometry (see GraphNode). It is populated by the
+// physics/scenario path (CompileServices) with exactly one node per key the
+// edges name — closure the graph would otherwise lack — and is empty for the
+// hand-authored Compile, whose seeded isochrone still sources positions from
+// GetStationsByScenario. The field is additive and optional on decode: a
+// jobs.result row written before it unmarshals unchanged, with Nodes nil, and
+// no historical rows are backfilled.
 type TransitGraph struct {
 	Services []ServiceGraph `json:"services"`
 	Merge    MergeReport    `json:"merge,omitempty"`
+	Nodes    []GraphNode    `json:"nodes,omitempty"`
 }
 
 func Compile(
