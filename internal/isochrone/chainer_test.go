@@ -13,36 +13,28 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// fakeTransitData implements transit.TransitData for tests.
-type fakeTransitData struct {
+// fakeIsochroneData implements transit.IsochroneData for tests.
+type fakeIsochroneData struct {
 	scenario    transit.Scenario
 	stations    []transit.Station
 	travelTimes map[[2]string]int
 	waitTimes   map[[2]string]int // per-pair boarding wait in seconds (default 0)
 }
 
-func (f *fakeTransitData) GetScenarioBySlug(slug string) (transit.Scenario, bool) {
-	if f.scenario.Slug == slug {
-		return f.scenario, true
+func (f *fakeIsochroneData) Nodes(slug string) ([]transit.Node, bool) {
+	if f.scenario.Slug != slug {
+		return nil, false
 	}
-	return transit.Scenario{}, false
-}
-
-func (f *fakeTransitData) GetStationsByScenario(scenarioID string) []transit.Station {
-	var out []transit.Station
+	var out []transit.Node
 	for _, st := range f.stations {
-		if st.ScenarioID == scenarioID {
-			out = append(out, st)
+		if st.ScenarioID == f.scenario.ID {
+			out = append(out, transit.Node{Slug: st.Slug, Lat: st.Location.Coordinates[1], Lng: st.Location.Coordinates[0]})
 		}
 	}
-	return out
+	return out, true
 }
 
-func (f *fakeTransitData) GetServicesByScenario(scenarioID string) []transit.Service {
-	return nil
-}
-
-func (f *fakeTransitData) TravelTimeBetween(_ string, fromSlug, toSlug string) (int, int, string, bool) {
+func (f *fakeIsochroneData) TravelTimeBetween(_ string, fromSlug, toSlug string) (int, int, string, bool) {
 	key := [2]string{fromSlug, toSlug}
 	rev := [2]string{toSlug, fromSlug}
 	if v, ok := f.travelTimes[key]; ok {
@@ -54,8 +46,8 @@ func (f *fakeTransitData) TravelTimeBetween(_ string, fromSlug, toSlug string) (
 	return 0, 0, "", false
 }
 
-func newTestData() *fakeTransitData {
-	return &fakeTransitData{
+func newTestData() *fakeIsochroneData {
+	return &fakeIsochroneData{
 		scenario: transit.Scenario{ID: "sc1", Slug: "test-sc"},
 		stations: []transit.Station{
 			{
@@ -128,7 +120,7 @@ func TestChainer_happyPath_twoStations(t *testing.T) {
 
 func TestChainer_noStations(t *testing.T) {
 	fc := &stadia.FakeClient{IsochroneResp: cannedIso()}
-	store := &fakeTransitData{
+	store := &fakeIsochroneData{
 		scenario: transit.Scenario{ID: "sc1", Slug: "test-sc"},
 		stations: []transit.Station{},
 	}
@@ -217,7 +209,7 @@ func TestChainer_zeroRemainingExcludesStation(t *testing.T) {
 
 func TestChainer_directAccess_AequalsB(t *testing.T) {
 	// Single station, directly reachable; no HSR leg.
-	store := &fakeTransitData{
+	store := &fakeIsochroneData{
 		scenario: transit.Scenario{ID: "sc1", Slug: "test-sc"},
 		stations: []transit.Station{
 			{
@@ -287,7 +279,7 @@ func TestChainer_concurrentFanOut_noRace(t *testing.T) {
 			SourcesToTargets: [][]stadia.MatrixCell{matrixCells},
 		},
 	}
-	store := &fakeTransitData{
+	store := &fakeIsochroneData{
 		scenario:    transit.Scenario{ID: "sc1", Slug: "test-sc"},
 		stations:    stations,
 		travelTimes: tt,
@@ -344,7 +336,7 @@ func TestChainer_ErrInvalidMode(t *testing.T) {
 }
 
 func TestChainer_haversineFilterExcludesFarStations(t *testing.T) {
-	store := &fakeTransitData{
+	store := &fakeIsochroneData{
 		scenario: transit.Scenario{ID: "sc1", Slug: "test-sc"},
 		stations: []transit.Station{
 			{
@@ -383,7 +375,7 @@ func TestChainer_haversineFilterExcludesFarStations(t *testing.T) {
 }
 
 func TestChainer_matrixReachClampedToStadiaPathLimit(t *testing.T) {
-	store := &fakeTransitData{
+	store := &fakeIsochroneData{
 		scenario: transit.Scenario{ID: "sc1", Slug: "test-sc"},
 		stations: []transit.Station{
 			{
@@ -438,7 +430,7 @@ func TestChainer_matrixCap600_truncated(t *testing.T) {
 		}
 		matrixCells[i] = stadia.MatrixCell{Time: -1, Distance: 0}
 	}
-	store := &fakeTransitData{
+	store := &fakeIsochroneData{
 		scenario: transit.Scenario{ID: "sc1", Slug: "test-sc"},
 		stations: stations,
 	}
@@ -464,7 +456,7 @@ func TestChainer_matrixCap600_truncated(t *testing.T) {
 }
 
 func TestChainer_drive_largeBudget_noOriginFeature(t *testing.T) {
-	store := &fakeTransitData{
+	store := &fakeIsochroneData{
 		scenario: transit.Scenario{ID: "sc1", Slug: "test-sc"},
 		stations: []transit.Station{},
 	}
@@ -501,7 +493,7 @@ func TestChainer_drive_largeBudget_noOriginFeature(t *testing.T) {
 
 func TestChainer_drive_smallBudget_hasOriginFeature(t *testing.T) {
 	// budget_mins=10 → budgetSecs=600 < driveMaxSecs=900 → not clamped → origin iso included
-	store := &fakeTransitData{
+	store := &fakeIsochroneData{
 		scenario: transit.Scenario{ID: "sc1", Slug: "test-sc"},
 		stations: []transit.Station{},
 	}
@@ -594,7 +586,7 @@ func TestChainer_isochroneBudgetAboveModeClamp_neverSentUnclamped(t *testing.T) 
 	// Verifies that BudgetSecs sent to Stadia never exceeds the per-mode max.
 	// bike clamp = 20000m / (15km/h in m/s) = 4800s
 	const bikeMaxSecs = 4800
-	store := &fakeTransitData{
+	store := &fakeIsochroneData{
 		scenario: transit.Scenario{ID: "sc1", Slug: "test-sc"},
 		stations: []transit.Station{},
 	}
@@ -616,7 +608,7 @@ func TestChainer_isochroneBudgetAboveModeClamp_neverSentUnclamped(t *testing.T) 
 }
 
 func TestChainer_bikeIsoBudgetClamped(t *testing.T) {
-	store := &fakeTransitData{
+	store := &fakeIsochroneData{
 		scenario: transit.Scenario{ID: "sc1", Slug: "test-sc"},
 		stations: []transit.Station{},
 	}
@@ -645,7 +637,7 @@ func TestChainer_caHSR_zeroWait_waitModelNone(t *testing.T) {
 	// budget=90min=5400s, access to station-a=600s, transit a→b=1800s, wait=900s.
 	// ca-hsr: remaining = 5400 - 600 - 1800 - 0 = 3000s = 50min (wait skipped).
 	// non-ca-hsr would yield: 5400 - 600 - 1800 - 900 = 2100s = 35min.
-	store := &fakeTransitData{
+	store := &fakeIsochroneData{
 		scenario: transit.Scenario{ID: "cahsr", Slug: "ca-hsr"},
 		stations: []transit.Station{
 			{
@@ -709,7 +701,7 @@ func TestChainer_caHSR_zeroWait_waitModelNone(t *testing.T) {
 func TestChainer_nonCaHSR_waitApplied_waitModelHeadway(t *testing.T) {
 	// budget=90min=5400s, access=600s, transit=1800s, wait=900s.
 	// remaining = 5400 - 600 - 1800 - 900 = 2100s = 35min.
-	store := &fakeTransitData{
+	store := &fakeIsochroneData{
 		scenario: transit.Scenario{ID: "sc1", Slug: "test-sc"},
 		stations: []transit.Station{
 			{

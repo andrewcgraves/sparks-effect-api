@@ -69,7 +69,7 @@ func main() {
 	stadiaClient := stadia.NewHTTPClient(cfg.StadiaAPIKey).WithLogger(lg)
 	isoChainer := isochrone.New(stadiaClient, store, lg)
 
-	srv := server.New(cfg, store, deps, isoChainer, lg)
+	srv := server.New(cfg, store, deps, isoChainer, stadiaClient, lg)
 
 	go func() {
 		log.Printf("listening on %s", srv.Addr)

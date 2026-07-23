@@ -81,12 +81,12 @@ func wrapStadiaErr(err error) error {
 
 type chainImpl struct {
 	stadia stadia.Client
-	store  transit.TransitData
+	store  transit.IsochroneData
 	log    *logger.Logger
 }
 
 // New constructs the production chainer.
-func New(stadiaClient stadia.Client, store transit.TransitData, log *logger.Logger) Chainer {
+func New(stadiaClient stadia.Client, store transit.IsochroneData, log *logger.Logger) Chainer {
 	return &chainImpl{stadia: stadiaClient, store: store, log: log}
 }
 
@@ -112,31 +112,29 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 	c.log.Debugf("chain: lat=%.6f lng=%.6f budget_mins=%d mode=%s scenario=%s",
 		req.Lat, req.Lng, req.BudgetMins, req.Mode, req.ScenarioSlug)
 
-	scenario, ok := c.store.GetScenarioBySlug(req.ScenarioSlug)
+	nodes, ok := c.store.Nodes(req.ScenarioSlug)
 	if !ok {
 		return nil, ErrScenarioNotFound
 	}
-
-	stations := c.store.GetStationsByScenario(scenario.ID)
-	c.log.Debugf("chain: %d stations in scenario", len(stations))
+	c.log.Debugf("chain: %d nodes in scenario", len(nodes))
 
 	reachKm := approxAccessReachKm(req.Mode, req.BudgetMins)
-	var nearbyStations []transit.Station
-	for _, st := range stations {
-		if haversineKm(req.Lat, req.Lng, st.Location.Coordinates[1], st.Location.Coordinates[0]) <= reachKm {
-			nearbyStations = append(nearbyStations, st)
+	var nearbyNodes []transit.Node
+	for _, n := range nodes {
+		if haversineKm(req.Lat, req.Lng, n.Lat, n.Lng) <= reachKm {
+			nearbyNodes = append(nearbyNodes, n)
 		}
 	}
-	c.log.Debugf("chain: %d/%d stations within haversine reach (%.1f km)", len(nearbyStations), len(stations), reachKm)
+	c.log.Debugf("chain: %d/%d nodes within haversine reach (%.1f km)", len(nearbyNodes), len(nodes), reachKm)
 
-	if len(nearbyStations) > stadiaMaxMatrixDests {
-		sort.Slice(nearbyStations, func(i, j int) bool {
-			di := haversineKm(req.Lat, req.Lng, nearbyStations[i].Location.Coordinates[1], nearbyStations[i].Location.Coordinates[0])
-			dj := haversineKm(req.Lat, req.Lng, nearbyStations[j].Location.Coordinates[1], nearbyStations[j].Location.Coordinates[0])
+	if len(nearbyNodes) > stadiaMaxMatrixDests {
+		sort.Slice(nearbyNodes, func(i, j int) bool {
+			di := haversineKm(req.Lat, req.Lng, nearbyNodes[i].Lat, nearbyNodes[i].Lng)
+			dj := haversineKm(req.Lat, req.Lng, nearbyNodes[j].Lat, nearbyNodes[j].Lng)
 			return di < dj
 		})
-		nearbyStations = nearbyStations[:stadiaMaxMatrixDests]
-		c.log.Debugf("chain: truncated to %d stations (matrix destination cap)", stadiaMaxMatrixDests)
+		nearbyNodes = nearbyNodes[:stadiaMaxMatrixDests]
+		c.log.Debugf("chain: truncated to %d nodes (matrix destination cap)", stadiaMaxMatrixDests)
 	}
 
 	clampedBudget := safeIsoBudgetSecs(req.Mode, req.BudgetMins*60)
@@ -168,11 +166,11 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 		})
 	}
 
-	if len(nearbyStations) > 0 {
+	if len(nearbyNodes) > 0 {
 		g.Go(func() error {
-			dests := make([]stadia.LatLng, len(nearbyStations))
-			for i, st := range nearbyStations {
-				dests[i] = stadia.LatLng{Lat: st.Location.Coordinates[1], Lng: st.Location.Coordinates[0]}
+			dests := make([]stadia.LatLng, len(nearbyNodes))
+			for i, n := range nearbyNodes {
+				dests[i] = stadia.LatLng{Lat: n.Lat, Lng: n.Lng}
 			}
 			m, mErr := c.stadia.Matrix(gctx, stadia.MatrixRequest{
 				Origins:      []stadia.LatLng{{Lat: req.Lat, Lng: req.Lng}},
@@ -196,18 +194,18 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 	accessSecs := make(map[string]int)
 	if matrixResp != nil && len(matrixResp.SourcesToTargets) > 0 {
 		row := matrixResp.SourcesToTargets[0]
-		for i, st := range nearbyStations {
+		for i, n := range nearbyNodes {
 			if i < len(row) && row[i].Time >= 0 {
-				accessSecs[st.Slug] = row[i].Time
+				accessSecs[n.Slug] = row[i].Time
 			}
 		}
 	}
 
-	c.log.Debugf("chain: matrix done, %d/%d stations reachable", len(accessSecs), len(stations))
+	c.log.Debugf("chain: matrix done, %d/%d nodes reachable", len(accessSecs), len(nodes))
 
-	stationBySlug := make(map[string]transit.Station, len(stations))
-	for _, st := range stations {
-		stationBySlug[st.Slug] = st
+	nodeBySlug := make(map[string]transit.Node, len(nodes))
+	for _, n := range nodes {
+		nodeBySlug[n.Slug] = n
 	}
 
 	type pathResult struct {
@@ -219,7 +217,7 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 	budgetSecs := req.BudgetMins * 60
 	skipWait := req.ScenarioSlug == caHSRScenarioSlug
 	bestPaths := make(map[string]pathResult)
-	for egressSlug := range stationBySlug {
+	for egressSlug := range nodeBySlug {
 		var best *pathResult
 		bestRSecs := 0
 		for accessSlug, aSecs := range accessSecs {
@@ -251,16 +249,16 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 	}
 
 	type egressCandidate struct {
-		station       transit.Station
+		node          transit.Node
 		remainingMins int
 		accessMins    int
 		serviceID     string
 	}
 	var egressCandidates []egressCandidate
-	for _, st := range stations {
-		if p, hasBest := bestPaths[st.Slug]; hasBest {
+	for _, n := range nodes {
+		if p, hasBest := bestPaths[n.Slug]; hasBest {
 			egressCandidates = append(egressCandidates, egressCandidate{
-				station:       st,
+				node:          n,
 				remainingMins: p.remainingMins,
 				accessMins:    p.accessMins,
 				serviceID:     p.serviceID,
@@ -281,7 +279,7 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 				sem <- struct{}{}
 				defer func() { <-sem }()
 				iso, isoErr := c.stadia.Isochrone(gctx2, stadia.IsochroneRequest{
-					Origin:     stadia.LatLng{Lat: ec.station.Location.Coordinates[1], Lng: ec.station.Location.Coordinates[0]},
+					Origin:     stadia.LatLng{Lat: ec.node.Lat, Lng: ec.node.Lng},
 					Costing:    costing,
 					BudgetSecs: safeIsoBudgetSecs(req.Mode, ec.remainingMins*60),
 				})
@@ -316,7 +314,7 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 		for _, f := range egressIsos[i].Features {
 			injected, injErr := injectProperties(f, map[string]any{
 				"source":         "egress",
-				"station_slug":   ec.station.Slug,
+				"station_slug":   ec.node.Slug,
 				"remaining_mins": ec.remainingMins,
 			})
 			if injErr != nil {
@@ -325,7 +323,7 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 			features = append(features, injected)
 		}
 		reachableStations = append(reachableStations, ReachableStation{
-			StationSlug:   ec.station.Slug,
+			StationSlug:   ec.node.Slug,
 			AccessMins:    ec.accessMins,
 			RemainingMins: ec.remainingMins,
 			ViaService:    ec.serviceID,

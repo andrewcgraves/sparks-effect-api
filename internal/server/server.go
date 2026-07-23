@@ -12,6 +12,7 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/isochrone"
 	"github.com/andrewcgraves/sparks-effect-api/internal/logger"
+	"github.com/andrewcgraves/sparks-effect-api/internal/stadia"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
@@ -41,7 +42,13 @@ type AuthDeps interface {
 
 // New builds an *http.Server with all routes registered, ready to be
 // started by the caller. deps may be nil when no database is configured.
-func New(cfg config.Config, store *transit.Store, deps AuthDeps, chainer isochrone.Chainer, lg *logger.Logger) *http.Server {
+//
+// stadiaClient is threaded through separately from chainer: chainer is the
+// seeded /api/isochrone's Chainer, fixed to the embedded store at
+// construction, while the user-scenario isochrone route builds a fresh
+// Chainer per request scoped to that request's compiled graph (see
+// handler.UserScenarioIsochrone) and needs the raw client to do it.
+func New(cfg config.Config, store *transit.Store, deps AuthDeps, chainer isochrone.Chainer, stadiaClient stadia.Client, lg *logger.Logger) *http.Server {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", handler.Health)
@@ -64,7 +71,7 @@ func New(cfg config.Config, store *transit.Store, deps AuthDeps, chainer isochro
 
 	registerRouteRoutes(mux, deps)
 	registerCompileRoutes(mux, deps)
-	registerAuthRoutes(mux, cfg, deps)
+	registerAuthRoutes(mux, cfg, deps, stadiaClient, lg)
 
 	h := cors(mux, cfg.AllowLocalhostCORS)
 
@@ -128,7 +135,7 @@ func registerCompileRoutes(mux *http.ServeMux, deps AuthDeps) {
 // With no database configured there is nothing to authenticate against, so
 // every route answers 503 rather than 404 — a client can tell "not deployed
 // with auth" from "no such endpoint".
-func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps) {
+func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, stadiaClient stadia.Client, lg *logger.Logger) {
 	if deps == nil {
 		for _, pattern := range []string{
 			"/api/auth/login", "/api/auth/logout", "/api/auth/me",
@@ -185,6 +192,10 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps) {
 	// by slug. Both owner-scoped, unlike the public seeded /api/scenarios/{slug}/graph.
 	mux.Handle("POST /api/user-scenarios/{slug}/compile", authenticated(handler.CompileUserScenario(deps)))
 	mux.Handle("GET /api/user-scenarios/{slug}/graph", authenticated(handler.UserScenarioGraph(deps)))
+	// The user-authored counterpart to POST /api/isochrone (SPA-83): computes
+	// over the scenario's compiled graph rather than the seeded store, and
+	// answers 409 with a distinct code when that graph is stale (SPA-116).
+	mux.Handle("POST /api/user-scenarios/{slug}/isochrone", authenticated(handler.UserScenarioIsochrone(deps, stadiaClient, lg)))
 
 	// Admin-only.
 	mux.Handle("POST /api/admin/users", adminOnly(handler.CreateUser(deps)))
