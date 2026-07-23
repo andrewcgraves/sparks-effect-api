@@ -14,10 +14,14 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// fakeScenarioStore is an in-memory handler.ScenarioStore.
+// fakeScenarioStore is an in-memory handler.ScenarioStore. It also backs
+// handler.UserIsochroneStore (userisochrone_test.go) via members and jobs,
+// rather than a second fake, since both seams read the same scenario rows.
 type fakeScenarioStore struct {
 	scenarios map[string]transit.UserScenario // keyed by ID
 	services  map[string]string               // service id -> owner id
+	members   map[string]transit.UserService  // service id -> full record
+	jobs      map[string]transit.Job          // scenario slug -> latest succeeded job
 	failWith  error
 }
 
@@ -25,7 +29,30 @@ func newFakeScenarioStore() *fakeScenarioStore {
 	return &fakeScenarioStore{
 		scenarios: map[string]transit.UserScenario{},
 		services:  map[string]string{"svc-1": scnOwner.ID, "svc-2": scnOwner.ID, "svc-theirs": scnStranger.ID},
+		members:   map[string]transit.UserService{},
+		jobs:      map[string]transit.Job{},
 	}
+}
+
+func (f *fakeScenarioStore) ListUserServicesByIDs(_ context.Context, ids []string) ([]transit.UserService, error) {
+	if f.failWith != nil {
+		return nil, f.failWith
+	}
+	out := make([]transit.UserService, 0, len(ids))
+	for _, id := range ids {
+		if svc, ok := f.members[id]; ok {
+			out = append(out, svc)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeScenarioStore) GetLatestSucceededUserScenarioJob(_ context.Context, slug string) (transit.Job, bool, error) {
+	if f.failWith != nil {
+		return transit.Job{}, false, f.failWith
+	}
+	job, ok := f.jobs[slug]
+	return job, ok, nil
 }
 
 func (f *fakeScenarioStore) CreateUserScenario(_ context.Context, sc transit.UserScenario) error {

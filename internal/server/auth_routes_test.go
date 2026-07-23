@@ -141,7 +141,7 @@ func newTestServer(t *testing.T, deps AuthDeps) http.Handler {
 	}
 	chainer := isochrone.New(&stadia.FakeClient{}, store, logger.Discard())
 	cfg := config.Config{Port: "8080", SessionTTL: time.Hour}
-	return New(cfg, store, deps, chainer, logger.Discard()).Handler
+	return New(cfg, store, deps, chainer, &stadia.FakeClient{}, logger.Discard()).Handler
 }
 
 func newStubDeps() *stubAuthDeps {

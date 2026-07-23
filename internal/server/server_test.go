@@ -18,7 +18,7 @@ func TestNew_healthz(t *testing.T) {
 		t.Fatalf("NewStore: %v", err)
 	}
 	chainer := isochrone.New(&stadia.FakeClient{}, store, logger.Discard())
-	srv := New(config.Config{Port: "8080"}, store, nil, chainer, logger.Discard())
+	srv := New(config.Config{Port: "8080"}, store, nil, chainer, &stadia.FakeClient{}, logger.Discard())
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rec := httptest.NewRecorder()
@@ -35,7 +35,7 @@ func TestCORS_flagOn_localhostOrigin_GET(t *testing.T) {
 		t.Fatalf("NewStore: %v", err)
 	}
 	chainer := isochrone.New(&stadia.FakeClient{}, store, logger.Discard())
-	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: true}, store, nil, chainer, logger.Discard())
+	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: true}, store, nil, chainer, &stadia.FakeClient{}, logger.Discard())
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	req.Header.Set("Origin", "http://localhost:5173")
@@ -54,7 +54,7 @@ func TestCORS_flagOn_localhostOrigin_OPTIONS(t *testing.T) {
 		t.Fatalf("NewStore: %v", err)
 	}
 	chainer := isochrone.New(&stadia.FakeClient{}, store, logger.Discard())
-	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: true}, store, nil, chainer, logger.Discard())
+	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: true}, store, nil, chainer, &stadia.FakeClient{}, logger.Discard())
 
 	req := httptest.NewRequest(http.MethodOptions, "/healthz", nil)
 	req.Header.Set("Origin", "http://127.0.0.1:4173")
@@ -77,7 +77,7 @@ func TestCORS_flagOn_nonLocalhostOrigin(t *testing.T) {
 		t.Fatalf("NewStore: %v", err)
 	}
 	chainer := isochrone.New(&stadia.FakeClient{}, store, logger.Discard())
-	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: true}, store, nil, chainer, logger.Discard())
+	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: true}, store, nil, chainer, &stadia.FakeClient{}, logger.Discard())
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	req.Header.Set("Origin", "https://example.com")
@@ -96,7 +96,7 @@ func TestCORS_productionOrigin_allowedRegardlessOfFlag(t *testing.T) {
 		t.Fatalf("NewStore: %v", err)
 	}
 	chainer := isochrone.New(&stadia.FakeClient{}, store, logger.Discard())
-	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: false}, store, nil, chainer, logger.Discard())
+	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: false}, store, nil, chainer, &stadia.FakeClient{}, logger.Discard())
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	req.Header.Set("Origin", "https://sparks-effect-website.vercel.app")
@@ -115,7 +115,7 @@ func TestCORS_flagOff_localhostOrigin(t *testing.T) {
 		t.Fatalf("NewStore: %v", err)
 	}
 	chainer := isochrone.New(&stadia.FakeClient{}, store, logger.Discard())
-	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: false}, store, nil, chainer, logger.Discard())
+	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: false}, store, nil, chainer, &stadia.FakeClient{}, logger.Discard())
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	req.Header.Set("Origin", "http://localhost:5173")

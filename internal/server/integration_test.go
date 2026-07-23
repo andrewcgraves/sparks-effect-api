@@ -65,7 +65,7 @@ func integrationServer(t *testing.T) (http.Handler, *postgres.Repo) {
 	}
 	chainer := isochrone.New(&stadia.FakeClient{}, store, logger.Discard())
 	cfg := config.Config{Port: "8080", SessionTTL: time.Hour}
-	return New(cfg, store, repo, chainer, logger.Discard()).Handler, repo
+	return New(cfg, store, repo, chainer, &stadia.FakeClient{}, logger.Discard()).Handler, repo
 }
 
 // provisionAdmin stands in for the bootstrap-admin path in main.
