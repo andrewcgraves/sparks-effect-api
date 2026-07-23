@@ -376,6 +376,48 @@ func TestEffectiveMergeRadius_capsAtMaxMergeRadiusM(t *testing.T) {
 	}
 }
 
+// SPA-114's literal acceptance case: two identically-named stops on crossing
+// alignments, 80 m apart — outside the 50 m merge radius, inside the 250 m
+// near-miss band — must not merge silently. They appear in the near-miss
+// report, same name and all; see cluster.go's "Name agreement does not widen
+// the radius" for why the shared name does not merge them outright.
+func TestMergeColocatedStops_sameNamed80mApartIsNearMissNotMerge(t *testing.T) {
+	svcs := []CompilableService{
+		svcOf("svc-a", stop("a--transbay-terminal", "Transbay Terminal", 0)),
+		svcOf("svc-b", stop("b--transbay-terminal", "Transbay Terminal", degLatOffsetTest(80))),
+	}
+
+	got, report, _ := MergeColocatedStops(svcs)
+	if keysOf(got)[0][0] == keysOf(got)[1][0] {
+		t.Fatal("stops merged, want them left separate at 80 m")
+	}
+	if !hasNearMiss(report, "a--transbay-terminal", "b--transbay-terminal") {
+		t.Fatalf("near misses = %+v, want the Transbay Terminal pair reported", report.NearMisses)
+	}
+}
+
+// SPA-114's literal false-positive case: two unrelated-named stops, 40 m
+// apart, still merge on proximity alone — and that merge is reported as a
+// realised cluster, not left silent to inflate reachability unseen.
+func TestMergeColocatedStops_unrelatedNamed40mApartMergeIsReported(t *testing.T) {
+	svcs := []CompilableService{
+		svcOf("svc-a", stop("a--fresno", "Fresno", 0)),
+		svcOf("svc-b", stop("b--bakersfield-depot", "Bakersfield Depot", degLatOffsetTest(40))),
+	}
+
+	got, report, _ := MergeColocatedStops(svcs)
+	if keysOf(got)[0][0] != keysOf(got)[1][0] {
+		t.Fatalf("keys = %q and %q, want one shared key at 40 m", keysOf(got)[0][0], keysOf(got)[1][0])
+	}
+	if len(report.Clusters) != 1 {
+		t.Fatalf("clusters = %+v, want exactly one realised merge reported", report.Clusters)
+	}
+	want := []string{"Fresno", "Bakersfield Depot"}
+	if !reflect.DeepEqual(report.Clusters[0].Names, want) {
+		t.Errorf("names = %q, want %q — the merge must name both unrelated stops, not hide it", report.Clusters[0].Names, want)
+	}
+}
+
 // A pair that a flat 50 m radius would miss — 333.6 m apart, also outside the
 // 250 m near-miss band — merges once each stop's snapping offset is counted,
 // because 50+200+150 = 400 covers the separation.
