@@ -44,7 +44,7 @@ func CompileScenario(routes []Route, stations []Station, services []Service, veh
 		}
 		compilables = append(compilables, cs)
 	}
-	return CompileServices(compilables)
+	return CompileServices(compilables, nil)
 }
 
 // CompileServices compiles a set of services that share a scenario into one
@@ -67,8 +67,16 @@ func CompileScenario(routes []Route, stations []Station, services []Service, veh
 // The merge is cross-service only and never hands one service two stops with
 // the same key, so CompileServicePhysics' duplicate-slug check still guards
 // each service exactly as before.
-func CompileServices(svcs []CompilableService) (TransitGraph, error) {
-	merged, report, nodes := MergeColocatedStops(svcs)
+//
+// pairs is SPA-120's declared interchange (nil for the seeded model, which
+// has no such concept). It is validated here, against these exact svcs,
+// before MergeColocatedStops ever sees it — the one place both a pair's
+// claimed identities and the real stop list are in scope together.
+func CompileServices(svcs []CompilableService, pairs []InterchangePair) (TransitGraph, error) {
+	if err := validateInterchangePairs(svcs, pairs); err != nil {
+		return TransitGraph{}, err
+	}
+	merged, report, nodes := MergeColocatedStops(svcs, pairs)
 
 	// nodes come straight from the same clustering that rewrote the slugs, so
 	// they carry exactly one node per key the edges below emit — the closure

@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -12,9 +13,14 @@ import (
 
 // --- User scenarios (curated membership over user_services) ---
 
-const userScenarioColumns = `id, slug, owner_id, name, description, created_at, updated_at`
+const userScenarioColumns = `id, slug, owner_id, name, description, interchange_pairs, created_at, updated_at`
 
 func (r *Repo) CreateUserScenario(ctx context.Context, sc transit.UserScenario) error {
+	pairs, err := marshalInterchangePairs(sc)
+	if err != nil {
+		return err
+	}
+
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return wrap("CreateUserScenario begin", err)
@@ -22,9 +28,9 @@ func (r *Repo) CreateUserScenario(ctx context.Context, sc transit.UserScenario) 
 	defer tx.Rollback(ctx) //nolint:errcheck // rollback after commit is a no-op
 
 	if _, err := tx.Exec(ctx,
-		`INSERT INTO user_scenarios (id, slug, owner_id, name, description)
-		 VALUES ($1, $2, $3, $4, $5)`,
-		sc.ID, sc.Slug, sc.OwnerID, sc.Name, sc.Description); err != nil {
+		`INSERT INTO user_scenarios (id, slug, owner_id, name, description, interchange_pairs)
+		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		sc.ID, sc.Slug, sc.OwnerID, sc.Name, sc.Description, pairs); err != nil {
 		return wrap("CreateUserScenario", err)
 	}
 	if err := insertUserScenarioMembership(ctx, tx, sc.ID, sc.ServiceIDs); err != nil {
@@ -36,6 +42,11 @@ func (r *Repo) CreateUserScenario(ctx context.Context, sc transit.UserScenario) 
 // UpdateUserScenario rewrites scalar fields and replaces the membership set
 // wholesale — membership has no client-visible identity to diff against.
 func (r *Repo) UpdateUserScenario(ctx context.Context, sc transit.UserScenario) error {
+	pairs, err := marshalInterchangePairs(sc)
+	if err != nil {
+		return err
+	}
+
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return wrap("UpdateUserScenario begin", err)
@@ -43,8 +54,8 @@ func (r *Repo) UpdateUserScenario(ctx context.Context, sc transit.UserScenario) 
 	defer tx.Rollback(ctx) //nolint:errcheck // rollback after commit is a no-op
 
 	tag, err := tx.Exec(ctx,
-		`UPDATE user_scenarios SET name = $2, description = $3, updated_at = now() WHERE id = $1`,
-		sc.ID, sc.Name, sc.Description)
+		`UPDATE user_scenarios SET name = $2, description = $3, interchange_pairs = $4, updated_at = now() WHERE id = $1`,
+		sc.ID, sc.Name, sc.Description, pairs)
 	if err != nil {
 		return wrap("UpdateUserScenario", err)
 	}
@@ -226,7 +237,30 @@ func insertUserScenarioMembership(ctx context.Context, tx pgx.Tx, scenarioID str
 // pgx.Row is satisfied by both QueryRow results and pgx.Rows, so the single
 // and list read paths share it.
 func scanUserScenario(row pgx.Row) (transit.UserScenario, error) {
-	var sc transit.UserScenario
-	err := row.Scan(&sc.ID, &sc.Slug, &sc.OwnerID, &sc.Name, &sc.Description, &sc.CreatedAt, &sc.UpdatedAt)
-	return sc, err
+	var (
+		sc    transit.UserScenario
+		pairs []byte
+	)
+	if err := row.Scan(&sc.ID, &sc.Slug, &sc.OwnerID, &sc.Name, &sc.Description, &pairs, &sc.CreatedAt, &sc.UpdatedAt); err != nil {
+		return transit.UserScenario{}, err
+	}
+	if err := json.Unmarshal(pairs, &sc.InterchangePairs); err != nil {
+		return transit.UserScenario{}, fmt.Errorf("decoding interchange pairs for scenario %q: %w", sc.ID, err)
+	}
+	return sc, nil
+}
+
+// marshalInterchangePairs marshals a scenario's declared interchange pairs,
+// normalising a nil slice to [] so an empty declaration round-trips as an
+// empty JSON array rather than null.
+func marshalInterchangePairs(sc transit.UserScenario) ([]byte, error) {
+	pairs := sc.InterchangePairs
+	if pairs == nil {
+		pairs = []transit.InterchangePair{}
+	}
+	b, err := json.Marshal(pairs)
+	if err != nil {
+		return nil, wrap("marshal interchange pairs", err)
+	}
+	return b, nil
 }

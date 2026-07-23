@@ -108,7 +108,7 @@ func TestMergeColocatedStops_authored20mApartOnAlignments400mApartMerges(t *test
 		t.Fatalf("fixture: stop B offset = %v, want ~170 m", interchangeB.OffsetM)
 	}
 
-	got, report, _ := MergeColocatedStops([]CompilableService{svcA, svcB})
+	got, report, _ := MergeColocatedStops([]CompilableService{svcA, svcB}, nil)
 	keys := keysOf(got)
 	if keys[0][0] != keys[1][0] {
 		t.Fatalf("keys = %q and %q, want one shared key — 20 m of authored intent should survive "+
@@ -158,7 +158,7 @@ func TestMergeColocatedStops_authoredFarApartButSnappedCloseStillMerges(t *testi
 	svcA := compileOne(t, rtA, twoStopServiceSPA113("svc-a", "route-a", routeALat, stopALat, -121.5, -121.05))
 	svcB := compileOne(t, rtB, twoStopServiceSPA113("svc-b", "route-b", routeBLat, stopBLat, -121.5, -121.95))
 
-	got, report, _ := MergeColocatedStops([]CompilableService{svcA, svcB})
+	got, report, _ := MergeColocatedStops([]CompilableService{svcA, svcB}, nil)
 	keys := keysOf(got)
 	if keys[0][0] != keys[1][0] {
 		t.Errorf("keys = %q and %q, want one shared key — the rule merges on post-snap proximity "+

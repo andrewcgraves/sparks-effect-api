@@ -16,7 +16,7 @@ func TestMergeColocatedStops_nodeCarriesKeyMemberCoordAndAllNames(t *testing.T) 
 		svcOf("svc-b", stop("b--salesforce", "Salesforce Center", latDeltaMerges)),
 	}
 
-	_, _, nodes := MergeColocatedStops(svcs)
+	_, _, nodes := MergeColocatedStops(svcs, nil)
 
 	node, ok := nodeBySlug(nodes)["a--transbay"]
 	if !ok {
@@ -43,7 +43,7 @@ func TestMergeColocatedStops_nodesIncludeSingletons(t *testing.T) {
 		svcOf("svc-c", stop("c--daly", "Daly City", latDeltaFar)),
 	}
 
-	_, report, nodes := MergeColocatedStops(svcs)
+	_, report, nodes := MergeColocatedStops(svcs, nil)
 
 	if len(report.Clusters) != 1 {
 		t.Fatalf("len(report.Clusters) = %d, want 1 (only the merge)", len(report.Clusters))
@@ -173,7 +173,7 @@ func TestCompileServices_userServiceNodeCarriesPersistedSnappedCoord(t *testing.
 	}
 
 	cs := mustCompilableFromUserService(t, adapterRoute(), svc)
-	graph, err := CompileServices([]CompilableService{cs})
+	graph, err := CompileServices([]CompilableService{cs}, nil)
 	if err != nil {
 		t.Fatalf("CompileServices() error = %v, want nil", err)
 	}

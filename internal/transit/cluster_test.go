@@ -63,7 +63,7 @@ func TestMergeColocatedStops_colocatedCrossServiceStopsShareOneKey(t *testing.T)
 		svcOf("svc-b", stop("b--salesforce", "Salesforce Center", latDeltaMerges)),
 	}
 
-	got, _, _ := MergeColocatedStops(svcs)
+	got, _, _ := MergeColocatedStops(svcs, nil)
 
 	keys := keysOf(got)
 	if keys[0][0] != keys[1][0] {
@@ -84,7 +84,7 @@ func TestMergeColocatedStops_separatedStopsKeepTheirOwnKeys(t *testing.T) {
 		svcOf("svc-b", stop("b--south", "South", latDeltaFar)),
 	}
 
-	keys := keysOf(mergedOnly(MergeColocatedStops(svcs)))
+	keys := keysOf(mergedOnly(MergeColocatedStops(svcs, nil)))
 	if keys[0][0] != "a--north" || keys[1][0] != "b--south" {
 		t.Errorf("keys = %q, want each stop to keep its own slug", keys)
 	}
@@ -110,7 +110,7 @@ func TestMergeColocatedStops_chainDoesNotPropagateThroughANonAnchor(t *testing.T
 		svcOf("svc-c", stop("c", "C", 2*latDeltaMerges)),
 	}
 
-	got, report, _ := MergeColocatedStops(svcs)
+	got, report, _ := MergeColocatedStops(svcs, nil)
 	keys := keysOf(got)
 
 	// A and B share A's key; C keeps its own.
@@ -149,7 +149,7 @@ func TestMergeColocatedStops_isDeterministicUnderShuffle(t *testing.T) {
 		svcOf("svc-d", stop("d", "D", latDeltaFar)),
 	}
 
-	_, want, _ := MergeColocatedStops(base)
+	_, want, _ := MergeColocatedStops(base, nil)
 
 	// Every permutation of the four services.
 	perms := permute([]int{0, 1, 2, 3})
@@ -158,7 +158,7 @@ func TestMergeColocatedStops_isDeterministicUnderShuffle(t *testing.T) {
 		for i, idx := range p {
 			shuffled[i] = base[idx]
 		}
-		_, got, _ := MergeColocatedStops(shuffled)
+		_, got, _ := MergeColocatedStops(shuffled, nil)
 		if !reflect.DeepEqual(clusterKeys(got), clusterKeys(want)) {
 			t.Fatalf("permutation %v gave clusters %+v, want %+v — merge must not depend on service order",
 				p, clusterKeys(got), clusterKeys(want))
@@ -209,7 +209,7 @@ func TestMergeColocatedStops_neverMergesWithinOneService(t *testing.T) {
 		),
 	}
 
-	got, report, _ := MergeColocatedStops(svcs)
+	got, report, _ := MergeColocatedStops(svcs, nil)
 	keys := keysOf(got)
 	if keys[0][0] == keys[0][1] {
 		t.Errorf("keys = %q, want two distinct keys — a service's own stops must not merge", keys[0])
@@ -237,7 +237,7 @@ func TestMergeColocatedStops_singleServiceKeysAreUnchanged(t *testing.T) {
 		),
 	}
 
-	got, report, _ := MergeColocatedStops(svcs)
+	got, report, _ := MergeColocatedStops(svcs, nil)
 	want := []string{"a--north", "a--mid", "a--south"}
 	if !reflect.DeepEqual(keysOf(got)[0], want) {
 		t.Errorf("keys = %q, want %q unchanged", keysOf(got)[0], want)
@@ -256,7 +256,7 @@ func TestMergeColocatedStops_clusterCarriesAllMemberNames(t *testing.T) {
 		svcOf("svc-c", stop("c--transbay", "Transbay", latDeltaMerges)),
 	}
 
-	_, report, _ := MergeColocatedStops(svcs)
+	_, report, _ := MergeColocatedStops(svcs, nil)
 	if len(report.Clusters) != 1 {
 		t.Fatalf("clusters = %+v, want exactly one", report.Clusters)
 	}
@@ -277,7 +277,7 @@ func TestMergeColocatedStops_reportsSameNamedNearMiss(t *testing.T) {
 		svcOf("svc-b", stop("b--transbay", "Transbay", latDeltaNearMiss)),
 	}
 
-	got, report, _ := MergeColocatedStops(svcs)
+	got, report, _ := MergeColocatedStops(svcs, nil)
 	// Did not merge.
 	if keysOf(got)[0][0] == keysOf(got)[1][0] {
 		t.Fatal("stops merged, want them left separate at 77.8 m")
@@ -324,7 +324,7 @@ func TestCompileServices_journeyCrossesAMergedNode(t *testing.T) {
 		},
 	}
 
-	graph, err := CompileServices([]CompilableService{svcA, svcB})
+	graph, err := CompileServices([]CompilableService{svcA, svcB}, nil)
 	if err != nil {
 		t.Fatalf("CompileServices() error = %v, want nil", err)
 	}
@@ -376,6 +376,204 @@ func TestEffectiveMergeRadius_capsAtMaxMergeRadiusM(t *testing.T) {
 	}
 }
 
+// SPA-120: a declared pair merges two stops regardless of how far apart they
+// actually are. ~2.2 km is far past even MaxMergeRadiusM (500 m) — nothing
+// short of a declared pair could ever have merged or even near-missed this on
+// its own.
+func TestMergeColocatedStops_declaredPairMergesRegardlessOfDistance(t *testing.T) {
+	const latDeltaKm = 0.02 // ~2.22 km
+	svcs := []CompilableService{
+		svcOf("svc-a", stop("a--downtown", "Downtown", 0)),
+		svcOf("svc-b", stop("b--downtown", "Downtown", latDeltaKm)),
+	}
+	pairs := []InterchangePair{
+		{A: StopIdentity{ServiceID: "svc-a", Slug: "a--downtown"}, B: StopIdentity{ServiceID: "svc-b", Slug: "b--downtown"}},
+	}
+
+	got, report, nodes := MergeColocatedStops(svcs, pairs)
+	keys := keysOf(got)
+	if keys[0][0] != keys[1][0] {
+		t.Fatalf("keys = %q and %q, want one shared key — a declared pair must merge regardless of distance", keys[0][0], keys[1][0])
+	}
+	if len(report.Clusters) != 1 {
+		t.Fatalf("clusters = %+v, want exactly one realised merge", report.Clusters)
+	}
+	if len(nodes) != 1 {
+		t.Errorf("nodes = %+v, want one merged node", nodes)
+	}
+	if len(report.NearMisses) != 0 {
+		t.Errorf("near misses = %+v, want none — the pair merged, it did not almost merge", report.NearMisses)
+	}
+}
+
+// Declaring a pair already within the proximity merge radius is a no-op, not
+// an error: the two stops already share a cluster, so there is nothing for
+// the fold to do.
+func TestMergeColocatedStops_declaredPairAlreadyInRadiusIsNoOp(t *testing.T) {
+	svcs := []CompilableService{
+		svcOf("svc-a", stop("a--transbay", "Transbay", 0)),
+		svcOf("svc-b", stop("b--salesforce", "Salesforce Center", latDeltaMerges)),
+	}
+	pairs := []InterchangePair{
+		{A: StopIdentity{ServiceID: "svc-a", Slug: "a--transbay"}, B: StopIdentity{ServiceID: "svc-b", Slug: "b--salesforce"}},
+	}
+
+	got, report, _ := MergeColocatedStops(svcs, pairs)
+	keys := keysOf(got)
+	if keys[0][0] != "a--transbay" || keys[1][0] != "a--transbay" {
+		t.Fatalf("keys = %q, want both merged onto %q exactly as proximity alone gives", keys, "a--transbay")
+	}
+	if len(report.Clusters) != 1 {
+		t.Errorf("clusters = %+v, want exactly one — an already-merged declared pair must not duplicate it", report.Clusters)
+	}
+}
+
+// A declared pair folds whole clusters together, not just the two named
+// stops: if the declared stop already sits in a multi-member proximity
+// cluster, every one of that cluster's members comes along. svc-a and svc-c
+// are within the proximity radius of each other (already one cluster before
+// any pair is declared); declaring svc-a--svc-x the same place pulls svc-c in
+// too, even though C-X was never declared and is kilometres outside any
+// merge or near-miss radius. This is deliberate, not an accident of the
+// fold's implementation order: a declared pair asserts a place, not a
+// stop-to-stop link, and svc-c already shares svc-a's place by proximity.
+func TestMergeColocatedStops_declaredPairFoldsInProximityClusterMatesToo(t *testing.T) {
+	svcs := []CompilableService{
+		svcOf("svc-a", stop("a", "A", 0)),
+		svcOf("svc-c", stop("c", "C", latDeltaMerges)), // within radius of A: one proximity cluster
+		svcOf("svc-x", stop("x", "X", 10*latDeltaFar)), // kilometres from A and C alike
+	}
+	pairs := []InterchangePair{
+		{A: StopIdentity{ServiceID: "svc-a", Slug: "a"}, B: StopIdentity{ServiceID: "svc-x", Slug: "x"}},
+	}
+
+	got, report, nodes := MergeColocatedStops(svcs, pairs)
+	keys := keysOf(got)
+	if keys[0][0] != keys[1][0] || keys[0][0] != keys[2][0] {
+		t.Fatalf("keys = %q, %q, %q, want all three sharing one key — C rides along with A's declared merge", keys[0][0], keys[1][0], keys[2][0])
+	}
+	if len(report.Clusters) != 1 || len(report.Clusters[0].Members) != 3 {
+		t.Fatalf("clusters = %+v, want one cluster of three members", report.Clusters)
+	}
+	if len(nodes) != 1 {
+		t.Errorf("nodes = %+v, want one merged node", nodes)
+	}
+}
+
+// Declaring interchange for one pair must not change the outcome for any
+// other pair. This reproduces the chain case from
+// TestMergeColocatedStops_chainDoesNotPropagateThroughANonAnchor verbatim —
+// A merges onto B, C stays separate, the B-C near miss is reported — with an
+// unrelated declared pair between two wholly different, kilometres-distant
+// stops folded in alongside it. The chain's outcome must be untouched.
+func TestMergeColocatedStops_declaringOnePairDoesNotChangeAnotherPairsOutcome(t *testing.T) {
+	svcs := []CompilableService{
+		svcOf("svc-a", stop("a", "A", 0)),
+		svcOf("svc-b", stop("b", "B", latDeltaMerges)),
+		svcOf("svc-c", stop("c", "C", 2*latDeltaMerges)),
+		svcOf("svc-x", stop("x--far1", "Far1", 10*latDeltaFar)),
+		svcOf("svc-y", stop("y--far2", "Far2", 20*latDeltaFar)),
+	}
+	pairs := []InterchangePair{
+		{A: StopIdentity{ServiceID: "svc-x", Slug: "x--far1"}, B: StopIdentity{ServiceID: "svc-y", Slug: "y--far2"}},
+	}
+
+	got, report, _ := MergeColocatedStops(svcs, pairs)
+	keys := keysOf(got)
+
+	if keys[0][0] != "a" || keys[1][0] != "a" {
+		t.Errorf("A,B keys = %q,%q, want both %q — unchanged by the unrelated declared pair", keys[0][0], keys[1][0], "a")
+	}
+	if keys[2][0] != "c" {
+		t.Errorf("C key = %q, want %q — unchanged", keys[2][0], "c")
+	}
+	if !hasNearMiss(report, "b", "c") {
+		t.Errorf("near misses = %+v, want the B-C pair still reported", report.NearMisses)
+	}
+
+	// And the declared pair still did its own job.
+	if keys[3][0] != keys[4][0] {
+		t.Errorf("X,Y keys = %q,%q, want merged by the declared pair", keys[3][0], keys[4][0])
+	}
+}
+
+// A declared pair naming two stops on the same service is rejected outright,
+// at the CompileServices seam: letting it through would surface later as a
+// duplicate-slug compile failure with the wrong stated cause.
+func TestCompileServices_rejectsInterchangePairOnSameService(t *testing.T) {
+	svcs := []CompilableService{
+		svcOf("svc-a", stop("a--north", "North", 0), stop("a--south", "South", latDeltaFar)),
+	}
+	pairs := []InterchangePair{
+		{A: StopIdentity{ServiceID: "svc-a", Slug: "a--north"}, B: StopIdentity{ServiceID: "svc-a", Slug: "a--south"}},
+	}
+
+	if _, err := CompileServices(svcs, pairs); err == nil {
+		t.Error("CompileServices() error = nil, want an error for a same-service interchange pair")
+	}
+}
+
+// A declared pair naming a stop slug absent from the named service is a
+// caller error, not a silently-ignored no-op.
+func TestCompileServices_rejectsInterchangePairWithUnknownStop(t *testing.T) {
+	svcs := []CompilableService{
+		svcOf("svc-a", stop("a--north", "North", 0)),
+		svcOf("svc-b", stop("b--south", "South", latDeltaFar)),
+	}
+	pairs := []InterchangePair{
+		{A: StopIdentity{ServiceID: "svc-a", Slug: "a--north"}, B: StopIdentity{ServiceID: "svc-b", Slug: "b--nonexistent"}},
+	}
+
+	if _, err := CompileServices(svcs, pairs); err == nil {
+		t.Error("CompileServices() error = nil, want an error for an unknown stop slug")
+	}
+}
+
+// The SPA-120 counterpart to TestCompileServices_journeyCrossesAMergedNode:
+// board service A, cross to service B via a *declared* pair rather than
+// proximity. The two crossing stops sit roughly 111 km apart (one degree of
+// latitude) — nowhere near any merge or near-miss radius — so only the
+// declared pair can connect them.
+func TestCompileServices_journeyCrossesADeclaredInterchange(t *testing.T) {
+	svcA := CompilableService{
+		ID:      "svc-a",
+		Route:   Route{Geometry: GeoLineString{Coordinates: [][]float64{{0, 0}, {0.01, 0}}}},
+		Vehicle: physicsKinematics(),
+		Stops: []CompilableStop{
+			{Slug: "a--west", Name: "West", Lng: 0, Lat: 0},
+			{Slug: "a--cross", Name: "Cross", Lng: 0.01, Lat: 0},
+		},
+	}
+	svcB := CompilableService{
+		ID:      "svc-b",
+		Route:   Route{Geometry: GeoLineString{Coordinates: [][]float64{{1, 1}, {1, 1.01}}}},
+		Vehicle: physicsKinematics(),
+		Stops: []CompilableStop{
+			{Slug: "b--cross", Name: "Cross", Lng: 1, Lat: 1},
+			{Slug: "b--north", Name: "North", Lng: 1, Lat: 1.01},
+		},
+	}
+	pairs := []InterchangePair{
+		{A: StopIdentity{ServiceID: "svc-a", Slug: "a--cross"}, B: StopIdentity{ServiceID: "svc-b", Slug: "b--cross"}},
+	}
+
+	graph, err := CompileServices([]CompilableService{svcA, svcB}, pairs)
+	if err != nil {
+		t.Fatalf("CompileServices() error = %v, want nil", err)
+	}
+
+	secs, _, _, ok := graphDijkstra(&graph, "a--west", "b--north")
+	if !ok {
+		t.Fatal("no journey a--west -> b--north: the declared pair did not connect the two services")
+	}
+	if secs <= 0 {
+		t.Errorf("journey secs = %d, want > 0", secs)
+	}
+	if len(graph.Merge.Clusters) != 1 || graph.Merge.Clusters[0].Key != "a--cross" {
+		t.Errorf("clusters = %+v, want one keyed a--cross", graph.Merge.Clusters)
+	}
+}
+
 // SPA-114's literal acceptance case: two identically-named stops on crossing
 // alignments, 80 m apart — outside the 50 m merge radius, inside the 250 m
 // near-miss band — must not merge silently. They appear in the near-miss
@@ -387,7 +585,7 @@ func TestMergeColocatedStops_sameNamed80mApartIsNearMissNotMerge(t *testing.T) {
 		svcOf("svc-b", stop("b--transbay-terminal", "Transbay Terminal", degLatOffsetTest(80))),
 	}
 
-	got, report, _ := MergeColocatedStops(svcs)
+	got, report, _ := MergeColocatedStops(svcs, nil)
 	if keysOf(got)[0][0] == keysOf(got)[1][0] {
 		t.Fatal("stops merged, want them left separate at 80 m")
 	}
@@ -405,7 +603,7 @@ func TestMergeColocatedStops_unrelatedNamed40mApartMergeIsReported(t *testing.T)
 		svcOf("svc-b", stop("b--bakersfield-depot", "Bakersfield Depot", degLatOffsetTest(40))),
 	}
 
-	got, report, _ := MergeColocatedStops(svcs)
+	got, report, _ := MergeColocatedStops(svcs, nil)
 	if keysOf(got)[0][0] != keysOf(got)[1][0] {
 		t.Fatalf("keys = %q and %q, want one shared key at 40 m", keysOf(got)[0][0], keysOf(got)[1][0])
 	}
@@ -427,7 +625,7 @@ func TestMergeColocatedStops_offsetsWidenRadiusEnoughToMerge(t *testing.T) {
 		svcOf("svc-b", stopWithOffset("b--salesforce", "Salesforce Center", latDeltaFar, 150)),
 	}
 
-	got, report, _ := MergeColocatedStops(svcs)
+	got, report, _ := MergeColocatedStops(svcs, nil)
 	keys := keysOf(got)
 	if keys[0][0] != keys[1][0] {
 		t.Fatalf("keys = %q and %q, want one shared key — the widened radius should have covered 333.6 m",

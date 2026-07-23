@@ -23,7 +23,12 @@ import "fmt"
 // scenario is the explicit curated set the caller assembled, so every service
 // handed in is compiled. A route a member references but that is absent from
 // routes is a caller error, not a silent skip.
-func CompileUserScenario(routes []Route, services []UserService) (TransitGraph, error) {
+//
+// pairs is the owning UserScenario's declared interchange (SPA-120), passed
+// through to CompileServices rather than looked up here — the caller already
+// has the UserScenario in hand (see worker.compileUserScenario) and this
+// stays a pure function of routes and services otherwise.
+func CompileUserScenario(routes []Route, services []UserService, pairs []InterchangePair) (TransitGraph, error) {
 	routesByID := make(map[string]Route, len(routes))
 	for _, rt := range routes {
 		routesByID[rt.ID] = rt
@@ -41,5 +46,5 @@ func CompileUserScenario(routes []Route, services []UserService) (TransitGraph, 
 		}
 		compilables = append(compilables, cs)
 	}
-	return CompileServices(compilables)
+	return CompileServices(compilables, pairs)
 }
