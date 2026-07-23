@@ -193,6 +193,28 @@ type MergeReport struct {
 // precisely to avoid: the key is stable per compile, not across membership
 // changes.
 //
+// # Name agreement does not widen the radius (SPA-114)
+//
+// Two same-named stops still merge on proximity alone, same as any other pair
+// — a shared name does not lower the bar. Names are common ("Downtown") and
+// meaningless past the merge/near-miss test's own scale, so folding them into
+// the radius would let a name substitute for location precisely where the
+// ticket that raised the question said it must not. The cheaper fix already
+// covers the case that motivates this: a same-named pair just outside the
+// radius reports as a near miss like any other, and the shared name is right
+// there in the report (both StopCluster.Names and NearMiss.A/B.Name) for
+// whoever reads it to act on. Reconsider only alongside a real signal for
+// "same name, unrelated place" — none exists here — not as a standalone
+// widening.
+//
+// # Explicit declared interchange is deferred (SPA-114 → SPA-120)
+//
+// The actual fix for intent — a scenario asserting stop X of service A is
+// stop Y of service B, threshold-free — is out of scope here. It costs a data
+// model addition and frontend work that this ticket's proximity-plus-report
+// fix does not need, so it is deferred deliberately to SPA-120 rather than
+// left an unexamined absence.
+//
 // Input is not mutated; the returned services carry fresh stop slices.
 func MergeColocatedStops(svcs []CompilableService) ([]CompilableService, MergeReport, []GraphNode) {
 	stops := flattenStops(svcs)
