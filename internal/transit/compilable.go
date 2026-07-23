@@ -82,6 +82,13 @@ type CompilableStop struct {
 	Lat    float64
 	Lng    float64
 	DwellS int
+
+	// OffsetM is how far this position sat from its route's alignment before
+	// being snapped onto it — 0 for a seeded stop, which is never snapped, and
+	// SPA-108's persisted ServiceStopPoint.OffsetM for a user-authored one.
+	// MergeColocatedStops (SPA-113) widens its merge radius by this, since it is
+	// exactly the uncertainty snapping introduced into the position above.
+	OffsetM float64
 }
 
 // CompilableFromService adapts the seeded model. It resolves each stop's
@@ -173,11 +180,12 @@ func CompilableFromUserService(route Route, svc UserService) (CompilableService,
 	for i, idx := range order {
 		stop := svc.Stops[idx]
 		compiled[i] = CompilableStop{
-			Slug:   slugs[idx],
-			Name:   stop.Name,
-			Lat:    stop.Lat,
-			Lng:    stop.Lng,
-			DwellS: svc.Vehicle.DwellS,
+			Slug:    slugs[idx],
+			Name:    stop.Name,
+			Lat:     stop.Lat,
+			Lng:     stop.Lng,
+			DwellS:  svc.Vehicle.DwellS,
+			OffsetM: stop.OffsetM,
 		}
 	}
 
