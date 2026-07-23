@@ -6,23 +6,56 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/physics"
 )
 
-// MergeRadiusM is how close two stops of different services must be before
-// they compile to the same graph node — that is, before a rider may change
-// between those services there.
+// MergeRadiusM is the base radius for how close two stops of different
+// services must be before they compile to the same graph node — that is,
+// before a rider may change between those services there.
 //
 // It is measured on persisted snapped positions (see ServiceStopPoint), which
 // makes it a statement about where the stops ended up on their alignments, not
-// about where their authors put them. Those are not the same thing, and the
-// difference is this rule's known weak point: SnapToRoute lets a stop move up
-// to OffRouteThresholdM to reach its line, so two stops authored metres apart
-// on crossing routes can land far enough apart to miss each other here. SPA-113
-// owns that trade-off and may replace the flat radius with one widened by each
-// stop's OffsetM. Until it does, the radius is flat and the near-miss report
-// below is what keeps the resulting failure visible.
+// about where their authors put them. Those are not the same thing: SnapToRoute
+// lets a stop move up to OffRouteThresholdM to reach its line, so two stops
+// authored metres apart on crossing routes can land far enough apart to miss
+// each other on this radius alone. That is why the radius actually applied is
+// not this constant but effectiveMergeRadius (SPA-113): this is its floor, the
+// distance two already-unmoved stops must still clear.
 //
 // The comparison is inclusive (distance <= radius), so a pair exactly on the
 // boundary merges.
 const MergeRadiusM = 50.0
+
+// MaxMergeRadiusM ceilings effectiveMergeRadius. Without a ceiling the radius
+// would grow without bound as offsets grow, eventually merging two stops whose
+// only real connection is that both were snapped a long way. It is set to
+// OffRouteThresholdM itself: that is the most either single stop was allowed
+// to move to reach its own line, so letting the *pair's* combined benefit of
+// the doubt exceed it would grant two stops together more slack than either
+// was individually granted alone.
+//
+// This is independent of OffRouteThresholdM changing later — it is a separate
+// decision that happens to reuse the same number today, not a derived
+// constant, so a future change to one does not silently move the other.
+const MaxMergeRadiusM = 500.0
+
+// effectiveMergeRadius is the merge test's actual threshold for a specific
+// pair: the base radius widened by both stops' snapping uncertainty, capped at
+// MaxMergeRadiusM.
+//
+// SPA-113's reasoning: if a stop moved offsetM metres to reach its line, the
+// authored point could have been anywhere within that distance of where it
+// landed. Two stops authored at the same point could therefore still end up
+// this far apart after independent snaps, so treating that separation as
+// "could have been co-located" is not a relaxation of the rule, it is the same
+// rule applied to the uncertainty snapping actually introduced. A stop that
+// needed no correction (offsetM 0) contributes nothing, which is what makes
+// MergeRadiusM alone the right answer for two stops already sitting on their
+// lines.
+func effectiveMergeRadius(offsetA, offsetB float64) float64 {
+	r := MergeRadiusM + offsetA + offsetB
+	if r > MaxMergeRadiusM {
+		return MaxMergeRadiusM
+	}
+	return r
+}
 
 // NearMissRadiusM is how far out the near-miss report looks. Pairs of stops on
 // different services that did not merge, but lie within this, are reported.
@@ -84,9 +117,9 @@ type MergeReport struct {
 }
 
 // MergeColocatedStops resolves interchange across a scenario's member
-// services: it clusters stops that sit within MergeRadiusM of each other and
-// rewrites each stop's Slug to its cluster's key, returning the rewritten
-// services alongside a report of what it did.
+// services: it clusters stops that sit within effectiveMergeRadius of each
+// other and rewrites each stop's Slug to its cluster's key, returning the
+// rewritten services alongside a report of what it did.
 //
 // This is the whole of interchange in this system. There is no transfer edge
 // type and no transfer table — graphDijkstra pools every ServiceGraph's edges
@@ -101,8 +134,10 @@ type MergeReport struct {
 // Collect every stop across every service, sort them into one total order, and
 // walk that order. For each stop, test it against the *anchor* of each existing
 // cluster in creation order; join the first cluster whose anchor is within
-// MergeRadiusM and that does not already hold a stop of the same service.
-// Otherwise start a new cluster anchored at this stop.
+// effectiveMergeRadius (SPA-113: MergeRadiusM widened by the anchor's and the
+// candidate's OffsetM, capped at MaxMergeRadiusM) and that does not already
+// hold a stop of the same service. Otherwise start a new cluster anchored at
+// this stop.
 //
 // Three properties follow, and each is why a simpler algorithm was rejected:
 //
@@ -186,6 +221,7 @@ type mergeStop struct {
 	svcIdx, stopIdx int
 	ref             StopRef
 	at              physics.Point
+	offsetM         float64
 }
 
 // flattenStops collects every stop of every service into the single total
@@ -209,6 +245,7 @@ func flattenStops(svcs []CompilableService) []mergeStop {
 				stopIdx: j,
 				ref:     StopRef{ServiceID: svc.ID, Slug: s.Slug, Name: s.Name},
 				at:      physics.Point{Lng: s.Lng, Lat: s.Lat},
+				offsetM: s.OffsetM,
 			})
 		}
 	}
@@ -240,6 +277,10 @@ func (c pendingCluster) key() string { return c.members[0].ref.Slug }
 // happens to be nearest.
 func (c pendingCluster) anchor() physics.Point { return c.members[0].at }
 
+// anchorOffsetM is the anchor's own OffsetM, needed alongside anchor() to
+// compute effectiveMergeRadius for a candidate.
+func (c pendingCluster) anchorOffsetM() float64 { return c.members[0].offsetM }
+
 // clusterStops runs the greedy anchored walk over stops, which must already be
 // in flattenStops' order. It returns the clusters in creation order — which,
 // since each is created at its anchor, is ascending key order — and a parallel
@@ -254,7 +295,8 @@ func clusterStops(stops []mergeStop) ([]pendingCluster, []int) {
 			if clusters[ci].services[s.ref.ServiceID] {
 				continue
 			}
-			if physics.DistanceM(clusters[ci].anchor(), s.at) <= MergeRadiusM {
+			radius := effectiveMergeRadius(clusters[ci].anchorOffsetM(), s.offsetM)
+			if physics.DistanceM(clusters[ci].anchor(), s.at) <= radius {
 				joined = ci
 				break
 			}

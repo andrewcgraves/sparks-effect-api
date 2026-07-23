@@ -19,9 +19,13 @@ import (
 // The comparison is strict (offset > threshold), so a stop exactly on the
 // boundary saves. The preview draws the boundary the same way.
 //
-// The number itself is provisional: it is a movement *budget*, and every metre
-// of it is a metre of reliability taken from the co-located-stop merge in
-// SPA-109. SPA-113 owns that trade-off and may lower this.
+// It is a movement *budget*, and SPA-109's co-located-stop merge has to
+// reckon with a stop having spent up to all of it: two stops authored metres
+// apart can each snap up to this far and still miss a merge measured only on
+// where they landed. SPA-113 settled that by widening the merge radius by
+// each stop's OffsetM rather than by shrinking this number — see
+// effectiveMergeRadius and MaxMergeRadiusM in cluster.go, the latter of which
+// reuses this same 500 m as its ceiling.
 const OffRouteThresholdM = 500.0
 
 // ErrRouteGeometry marks a snap that failed because of the stored route rather

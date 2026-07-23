@@ -26,6 +26,14 @@ func stop(slug, name string, latDelta float64) CompilableStop {
 	return CompilableStop{Slug: slug, Name: name, Lat: baseLat + latDelta, Lng: baseLng}
 }
 
+// stopWithOffset is stop plus an OffsetM, simulating a stop that needed
+// correcting by that many metres when SnapToRoute put it on its alignment.
+func stopWithOffset(slug, name string, latDelta, offsetM float64) CompilableStop {
+	s := stop(slug, name, latDelta)
+	s.OffsetM = offsetM
+	return s
+}
+
 // svcOf builds a CompilableService carrying nothing but identity and stops —
 // MergeColocatedStops reads no more than that.
 func svcOf(id string, stops ...CompilableStop) CompilableService {
@@ -341,4 +349,49 @@ func TestCompileServices_journeyCrossesAMergedNode(t *testing.T) {
 // CompilableService.Vehicle, for tests that build Compilables directly.
 func physicsKinematics() Kinematics {
 	return Kinematics{MaxSpeedKMH: 36, AccelerationMS2: 1, DecelerationMS2: 1}
+}
+
+// SPA-113: the merge radius widens by both stops' OffsetM, capped at
+// MaxMergeRadiusM. These pin effectiveMergeRadius directly before the tests
+// below exercise it through MergeColocatedStops.
+func TestEffectiveMergeRadius_zeroOffsetsIsTheBaseRadius(t *testing.T) {
+	if got := effectiveMergeRadius(0, 0); got != MergeRadiusM {
+		t.Errorf("effectiveMergeRadius(0, 0) = %v, want %v", got, MergeRadiusM)
+	}
+}
+
+func TestEffectiveMergeRadius_widensByBothStopsOffset(t *testing.T) {
+	got := effectiveMergeRadius(100, 150)
+	want := MergeRadiusM + 100 + 150
+	if got != want {
+		t.Errorf("effectiveMergeRadius(100, 150) = %v, want %v", got, want)
+	}
+}
+
+func TestEffectiveMergeRadius_capsAtMaxMergeRadiusM(t *testing.T) {
+	// Both stops near their own 500 m off-route limit: 50+500+500 = 1050,
+	// which must not exceed the 500 m ceiling.
+	if got := effectiveMergeRadius(500, 500); got != MaxMergeRadiusM {
+		t.Errorf("effectiveMergeRadius(500, 500) = %v, want the %v ceiling", got, MaxMergeRadiusM)
+	}
+}
+
+// A pair that a flat 50 m radius would miss — 333.6 m apart, also outside the
+// 250 m near-miss band — merges once each stop's snapping offset is counted,
+// because 50+200+150 = 400 covers the separation.
+func TestMergeColocatedStops_offsetsWidenRadiusEnoughToMerge(t *testing.T) {
+	svcs := []CompilableService{
+		svcOf("svc-a", stopWithOffset("a--transbay", "Transbay", 0, 200)),
+		svcOf("svc-b", stopWithOffset("b--salesforce", "Salesforce Center", latDeltaFar, 150)),
+	}
+
+	got, report, _ := MergeColocatedStops(svcs)
+	keys := keysOf(got)
+	if keys[0][0] != keys[1][0] {
+		t.Fatalf("keys = %q and %q, want one shared key — the widened radius should have covered 333.6 m",
+			keys[0][0], keys[1][0])
+	}
+	if len(report.Clusters) != 1 {
+		t.Errorf("clusters = %+v, want exactly one realised merge", report.Clusters)
+	}
 }
