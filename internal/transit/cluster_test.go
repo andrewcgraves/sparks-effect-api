@@ -428,6 +428,38 @@ func TestMergeColocatedStops_declaredPairAlreadyInRadiusIsNoOp(t *testing.T) {
 	}
 }
 
+// A declared pair folds whole clusters together, not just the two named
+// stops: if the declared stop already sits in a multi-member proximity
+// cluster, every one of that cluster's members comes along. svc-a and svc-c
+// are within the proximity radius of each other (already one cluster before
+// any pair is declared); declaring svc-a--svc-x the same place pulls svc-c in
+// too, even though C-X was never declared and is kilometres outside any
+// merge or near-miss radius. This is deliberate, not an accident of the
+// fold's implementation order: a declared pair asserts a place, not a
+// stop-to-stop link, and svc-c already shares svc-a's place by proximity.
+func TestMergeColocatedStops_declaredPairFoldsInProximityClusterMatesToo(t *testing.T) {
+	svcs := []CompilableService{
+		svcOf("svc-a", stop("a", "A", 0)),
+		svcOf("svc-c", stop("c", "C", latDeltaMerges)), // within radius of A: one proximity cluster
+		svcOf("svc-x", stop("x", "X", 10*latDeltaFar)), // kilometres from A and C alike
+	}
+	pairs := []InterchangePair{
+		{A: StopIdentity{ServiceID: "svc-a", Slug: "a"}, B: StopIdentity{ServiceID: "svc-x", Slug: "x"}},
+	}
+
+	got, report, nodes := MergeColocatedStops(svcs, pairs)
+	keys := keysOf(got)
+	if keys[0][0] != keys[1][0] || keys[0][0] != keys[2][0] {
+		t.Fatalf("keys = %q, %q, %q, want all three sharing one key — C rides along with A's declared merge", keys[0][0], keys[1][0], keys[2][0])
+	}
+	if len(report.Clusters) != 1 || len(report.Clusters[0].Members) != 3 {
+		t.Fatalf("clusters = %+v, want one cluster of three members", report.Clusters)
+	}
+	if len(nodes) != 1 {
+		t.Errorf("nodes = %+v, want one merged node", nodes)
+	}
+}
+
 // Declaring interchange for one pair must not change the outcome for any
 // other pair. This reproduces the chain case from
 // TestMergeColocatedStops_chainDoesNotPropagateThroughANonAnchor verbatim —

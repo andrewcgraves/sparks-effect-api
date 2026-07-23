@@ -89,6 +89,16 @@ func validateInterchangePairs(svcs []CompilableService, pairs []InterchangePair)
 // proximity radius, or already folded together by an earlier pair — is a
 // silent no-op: union-find only ever narrows the group count, never errors.
 //
+// Folding operates on whole clusters, not just the two named stops: if a
+// declared stop already sits in a multi-member proximity cluster, every
+// other member of that cluster is folded in too. This is deliberate rather
+// than an accidental consequence of unioning cluster indices — a declared
+// pair asserts that a *place* is shared, and a stop already proximity-merged
+// with the declared one already shares that place, whether or not it was
+// itself named. It is still true that no *other*, disjoint cluster is
+// touched: only the clusters a declared pair's named stops actually belong
+// to are ever folded together.
+//
 // Unknown stop identities are ignored here rather than rejected: validating
 // that a pair names two real stops is validateInterchangePairs' job, run
 // once by CompileServices before this ever sees the pairs.
