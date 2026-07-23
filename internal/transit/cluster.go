@@ -194,9 +194,19 @@ type MergeReport struct {
 // changes.
 //
 // Input is not mutated; the returned services carry fresh stop slices.
-func MergeColocatedStops(svcs []CompilableService) ([]CompilableService, MergeReport, []GraphNode) {
+//
+// pairs is SPA-120's declared-interchange override: a scenario's assertion
+// that two stops, identified by (service ID, stop slug), are the same place
+// regardless of distance. Declared pairs are folded into the clusters this
+// proximity walk already produced (see foldDeclaredPairs) rather than
+// consulted during the walk itself, so passing an empty pairs is
+// byte-identical to this function before SPA-120, and a stop naming no
+// declared pair merges, near-misses, or stays separate exactly as it always
+// did.
+func MergeColocatedStops(svcs []CompilableService, pairs []InterchangePair) ([]CompilableService, MergeReport, []GraphNode) {
 	stops := flattenStops(svcs)
 	clusters, clusterOf := clusterStops(stops)
+	clusters, clusterOf = foldDeclaredPairs(stops, clusters, clusterOf, pairs)
 
 	merged := make([]CompilableService, len(svcs))
 	copy(merged, svcs)

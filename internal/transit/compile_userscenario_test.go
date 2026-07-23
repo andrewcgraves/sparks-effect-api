@@ -25,7 +25,7 @@ func TestCompileUserScenario_compilesMemberServices(t *testing.T) {
 	routes := []Route{adapterRoute()}
 	services := []UserService{userServiceFixture("svc-1", "line-a")}
 
-	got, err := CompileUserScenario(routes, services)
+	got, err := CompileUserScenario(routes, services, nil)
 	if err != nil {
 		t.Fatalf("CompileUserScenario() error = %v, want nil", err)
 	}
@@ -54,7 +54,7 @@ func TestCompileUserScenario_compilesMultipleMembers(t *testing.T) {
 		userServiceFixture("svc-2", "line-b"),
 	}
 
-	got, err := CompileUserScenario(routes, services)
+	got, err := CompileUserScenario(routes, services, nil)
 	if err != nil {
 		t.Fatalf("CompileUserScenario() error = %v, want nil", err)
 	}
@@ -72,7 +72,7 @@ func TestCompileUserScenario_mergesColocatedStopsAcrossMembers(t *testing.T) {
 		userServiceFixture("svc-2", "line-b"),
 	}
 
-	got, err := CompileUserScenario(routes, services)
+	got, err := CompileUserScenario(routes, services, nil)
 	if err != nil {
 		t.Fatalf("CompileUserScenario() error = %v, want nil", err)
 	}
@@ -91,7 +91,7 @@ func TestCompileUserScenario_mergesColocatedStopsAcrossMembers(t *testing.T) {
 func TestCompileUserScenario_errorsOnUnknownRoute(t *testing.T) {
 	services := []UserService{userServiceFixture("svc-1", "line-a")}
 
-	if _, err := CompileUserScenario(nil, services); err == nil {
+	if _, err := CompileUserScenario(nil, services, nil); err == nil {
 		t.Error("CompileUserScenario() error = nil, want an error for an unknown route id")
 	}
 }
@@ -100,7 +100,7 @@ func TestCompileUserScenario_errorsOnUnknownRoute(t *testing.T) {
 // error — the boundary a compile hits for a freshly-created, unpopulated
 // scenario.
 func TestCompileUserScenario_emptyScenarioCompilesToEmptyGraph(t *testing.T) {
-	got, err := CompileUserScenario(nil, nil)
+	got, err := CompileUserScenario(nil, nil, nil)
 	if err != nil {
 		t.Fatalf("CompileUserScenario() error = %v, want nil", err)
 	}

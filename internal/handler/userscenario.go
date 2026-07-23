@@ -36,9 +36,10 @@ const maxScenarioBodyBytes = 1 << 20 // 1 MiB
 // them, so a client cannot claim an ID or reassign ownership by including
 // them.
 type userScenarioRequest struct {
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	ServiceIDs  []string `json:"service_ids"`
+	Name             string                    `json:"name"`
+	Description      string                    `json:"description"`
+	ServiceIDs       []string                  `json:"service_ids"`
+	InterchangePairs []transit.InterchangePair `json:"interchange_pairs"`
 }
 
 // applyTo copies the client-writable fields onto sc, leaving ID, Slug, and
@@ -47,6 +48,7 @@ func (req userScenarioRequest) applyTo(sc *transit.UserScenario) {
 	sc.Name = req.Name
 	sc.Description = req.Description
 	sc.ServiceIDs = req.ServiceIDs
+	sc.InterchangePairs = req.InterchangePairs
 }
 
 // CreateUserScenario persists a new curated scenario owned by the caller.

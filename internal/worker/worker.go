@@ -134,11 +134,13 @@ func compileUserScenario(ctx context.Context, store Store, id string) (transit.T
 	if err != nil {
 		return transit.TransitGraph{}, fmt.Errorf("worker: loading member services: %w", err)
 	}
-	return compileUserServices(ctx, store, services)
+	return compileUserServices(ctx, store, services, sc.InterchangePairs)
 }
 
 // compileUserService compiles a single user-authored service alone — the
-// degenerate scenario compile (one member, only singleton clusters).
+// degenerate scenario compile (one member, only singleton clusters). There is
+// no scenario here, so no declared interchange (SPA-120) to pass through:
+// interchange is stated between two services, and there is only one.
 func compileUserService(ctx context.Context, store Store, id string) (transit.TransitGraph, error) {
 	svc, found, err := store.GetUserServiceByID(ctx, id)
 	if err != nil {
@@ -147,17 +149,17 @@ func compileUserService(ctx context.Context, store Store, id string) (transit.Tr
 	if !found {
 		return transit.TransitGraph{}, fmt.Errorf("worker: user service %q not found", id)
 	}
-	return compileUserServices(ctx, store, []transit.UserService{svc})
+	return compileUserServices(ctx, store, []transit.UserService{svc}, nil)
 }
 
 // compileUserServices is the shared tail of both user-authored paths: load the
 // routes the services reference and hand off to the compiler.
-func compileUserServices(ctx context.Context, store Store, services []transit.UserService) (transit.TransitGraph, error) {
+func compileUserServices(ctx context.Context, store Store, services []transit.UserService, pairs []transit.InterchangePair) (transit.TransitGraph, error) {
 	routes, err := store.ListRoutesByIDs(ctx, routeIDsOf(services))
 	if err != nil {
 		return transit.TransitGraph{}, fmt.Errorf("worker: loading routes: %w", err)
 	}
-	return transit.CompileUserScenario(routes, services)
+	return transit.CompileUserScenario(routes, services, pairs)
 }
 
 // routeIDsOf collects the distinct route ids the services reference, so the

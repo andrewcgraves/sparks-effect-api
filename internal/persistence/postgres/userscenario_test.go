@@ -110,6 +110,29 @@ func TestUserScenarioRoundTrip(t *testing.T) {
 	}
 }
 
+// SPA-120: a scenario's declared interchange pairs round-trip through the
+// jsonb column exactly as authored.
+func TestUserScenarioRoundTripInterchangePairs(t *testing.T) {
+	repo, ctx := userScenarioFixture(t)
+	want := sampleUserScenario()
+	want.InterchangePairs = []transit.InterchangePair{
+		{A: transit.StopIdentity{ServiceID: usnService1ID, Slug: "usn-service-1--a"},
+			B: transit.StopIdentity{ServiceID: usnService2ID, Slug: "usn-service-2--a"}},
+	}
+
+	if err := repo.CreateUserScenario(ctx, want); err != nil {
+		t.Fatalf("CreateUserScenario: %v", err)
+	}
+
+	got, found, err := repo.GetUserScenarioBySlug(ctx, want.Slug)
+	if err != nil || !found {
+		t.Fatalf("GetUserScenarioBySlug: found=%v err=%v", found, err)
+	}
+	if len(got.InterchangePairs) != 1 || got.InterchangePairs[0] != want.InterchangePairs[0] {
+		t.Fatalf("interchange_pairs = %+v, want %+v", got.InterchangePairs, want.InterchangePairs)
+	}
+}
+
 func TestUserScenarioUnknownSlugAndID(t *testing.T) {
 	repo, ctx := userScenarioFixture(t)
 

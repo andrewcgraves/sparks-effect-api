@@ -52,6 +52,21 @@ func rewindJobTargetsMigration(t *testing.T, url string) {
 		`ALTER TABLE jobs DROP COLUMN IF EXISTS user_service_id`,
 		`ALTER TABLE jobs DROP COLUMN IF EXISTS user_scenario_id`,
 		`DELETE FROM goose_db_version WHERE version_id = 9`)
+	rewindInterchangePairsMigration(t, url)
+}
+
+// rewindInterchangePairsMigration unwinds 00010 (user_scenarios'
+// interchange_pairs column), for the same reason 00009 is unwound alongside
+// 00007/00008: a state before any earlier migration is necessarily before
+// 00010 too, and goose refuses to re-apply an earlier migration while a later
+// one (version 10) is still recorded as applied. 00010 touches only
+// user_scenarios — untouched by these user_services tests — so dropping and
+// re-applying it changes nothing under test.
+func rewindInterchangePairsMigration(t *testing.T, url string) {
+	t.Helper()
+	exec(t, url,
+		`ALTER TABLE user_scenarios DROP COLUMN IF EXISTS interchange_pairs`,
+		`DELETE FROM goose_db_version WHERE version_id = 10`)
 }
 
 func exec(t *testing.T, url string, statements ...string) {
