@@ -197,8 +197,13 @@ func UserServiceIsochrone(store UserServiceIsochroneStore, stadiaClient stadia.C
 			BudgetMins: req.BudgetMins,
 			Mode:       isochrone.Mode(req.Mode),
 			// CompiledGraphData is already scoped to this one graph and ignores
-			// the slug on every lookup, so passing a service slug where a
-			// scenario slug is named resolves nothing and is safe.
+			// the slug on both its lookups, so a service slug resolves nothing
+			// here. Two places do still read it, neither fatal but both worth
+			// knowing: the chainer's `skipWait` literal (chainer.go:236), so a
+			// service whose name happens to slug to "ca-hsr" would silently be
+			// chained wait-free; and ChainMetadata.ScenarioSlug, so the response
+			// reports a service slug under "scenario_slug". Both belong to the
+			// wait model SPA-110 is to settle — recorded, not fixed here.
 			ScenarioSlug: svc.Slug,
 		})
 		if err != nil {

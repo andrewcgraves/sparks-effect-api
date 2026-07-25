@@ -352,4 +352,21 @@ func TestUserServiceIsochrone_200_graphWithoutTransitEdges(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status: want 200, got %d: %s", rec.Code, rec.Body.String())
 	}
+	// It degrades rather than degenerating: the street isochrone around the
+	// origin still comes back, there is just no transit reach chained onto it.
+	var resp struct {
+		Type     string `json:"type"`
+		Metadata struct {
+			ReachableStations []any `json:"reachable_stations"`
+		} `json:"metadata"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Type != "FeatureCollection" {
+		t.Errorf("type: want FeatureCollection, got %q", resp.Type)
+	}
+	if len(resp.Metadata.ReachableStations) != 0 {
+		t.Errorf("reachable_stations = %v, want none for a graph with no transit edges", resp.Metadata.ReachableStations)
+	}
 }

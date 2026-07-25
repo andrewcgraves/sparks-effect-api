@@ -180,7 +180,7 @@ func UserServiceGraph(store CompileStore) http.HandlerFunc {
 		// Bundled for the same reason the scenario read bundles its members'
 		// routes: the compiled graph is pure topology, so without the alignment
 		// a client can only draw straight chords between stops.
-		routes, err := routesByID(r.Context(), store, serviceRouteIDs([]transit.UserService{svc}))
+		routes, err := routesByIDs(r.Context(), store, serviceRouteIDs([]transit.UserService{svc}))
 		if err != nil {
 			writeInternalError(w, "loading service route", err)
 			return
@@ -213,7 +213,7 @@ func memberRoutes(ctx context.Context, store CompileStore, serviceIDs []string) 
 	if err != nil {
 		return nil, err
 	}
-	return routesByID(ctx, store, serviceRouteIDs(services))
+	return routesByIDs(ctx, store, serviceRouteIDs(services))
 }
 
 // serviceRouteIDs is the distinct set of routes a group of services runs on, in
@@ -232,9 +232,9 @@ func serviceRouteIDs(services []transit.UserService) []string {
 	return ids
 }
 
-// routesByID loads routes by id, normalising nil to an empty slice so the JSON
+// routesByIDs loads routes by id, normalising nil to an empty slice so the JSON
 // always carries a routes array rather than null.
-func routesByID(ctx context.Context, store CompileStore, ids []string) ([]transit.Route, error) {
+func routesByIDs(ctx context.Context, store CompileStore, ids []string) ([]transit.Route, error) {
 	routes, err := store.ListRoutesByIDs(ctx, ids)
 	if err != nil {
 		return nil, err
