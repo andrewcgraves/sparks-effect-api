@@ -374,7 +374,10 @@ func TestChainer_haversineFilterExcludesFarStations(t *testing.T) {
 	}
 }
 
-func TestChainer_matrixReachClampedToStadiaPathLimit(t *testing.T) {
+// A 90-minute drive budget reaches ~86 km of b-line distance, so a station 30 km
+// out is a legitimate access candidate. Stadia's matrix b-line limit for auto is
+// 400 km, not 20 km, so nothing should cut the reach short here.
+func TestChainer_driveReachFollowsBudgetNotA20kmFloor(t *testing.T) {
 	store := &fakeIsochroneData{
 		scenario: transit.Scenario{ID: "sc1", Slug: "test-sc"},
 		stations: []transit.Station{
@@ -392,7 +395,7 @@ func TestChainer_matrixReachClampedToStadiaPathLimit(t *testing.T) {
 		IsochroneResp: cannedIso(),
 		MatrixResp: &stadia.MatrixResponse{
 			SourcesToTargets: [][]stadia.MatrixCell{
-				{{Time: 600, Distance: 1.0}},
+				{{Time: 600, Distance: 1.0}, {Time: 1800, Distance: 30.0}},
 			},
 		},
 	}
@@ -408,8 +411,50 @@ func TestChainer_matrixReachClampedToStadiaPathLimit(t *testing.T) {
 	if len(fc.MatrixCalls) != 1 {
 		t.Fatalf("MatrixCalls: want 1, got %d", len(fc.MatrixCalls))
 	}
+	if got := len(fc.MatrixCalls[0].Destinations); got != 2 {
+		t.Errorf("Destinations: want 2 (30 km station is within a 90-min drive), got %d", got)
+	}
+}
+
+// Stadia rejects a matrix whose source→target b-line distance exceeds 400 km for
+// auto costing, so the pre-filter must still cap reach there however large the budget.
+func TestChainer_driveReachCappedAtAutoMatrixBLineLimit(t *testing.T) {
+	store := &fakeIsochroneData{
+		scenario: transit.Scenario{ID: "sc1", Slug: "test-sc"},
+		stations: []transit.Station{
+			{
+				ID: "st1", ScenarioID: "sc1", Slug: "station-near",
+				Location: transit.GeoPoint{Type: "Point", Coordinates: []float64{-122.39, 37.71}},
+			},
+			{
+				// ~5.5° of latitude north ≈ 610 km, beyond the 400 km auto cap.
+				ID: "st2", ScenarioID: "sc1", Slug: "station-610km",
+				Location: transit.GeoPoint{Type: "Point", Coordinates: []float64{-122.40, 43.20}},
+			},
+		},
+	}
+	fc := &stadia.FakeClient{
+		IsochroneResp: cannedIso(),
+		MatrixResp: &stadia.MatrixResponse{
+			SourcesToTargets: [][]stadia.MatrixCell{
+				{{Time: 600, Distance: 1.0}},
+			},
+		},
+	}
+	chainer := isochrone.New(fc, store, logger.Discard())
+
+	_, err := chainer.Chain(context.Background(), isochrone.ChainRequest{
+		Lat: 37.7, Lng: -122.4, BudgetMins: 9999,
+		Mode: isochrone.ModeDrive, ScenarioSlug: "test-sc",
+	})
+	if err != nil {
+		t.Fatalf("Chain: %v", err)
+	}
+	if len(fc.MatrixCalls) != 1 {
+		t.Fatalf("MatrixCalls: want 1, got %d", len(fc.MatrixCalls))
+	}
 	if got := len(fc.MatrixCalls[0].Destinations); got != 1 {
-		t.Errorf("Destinations: want 1 (30 km station beyond 20 km Stadia path limit), got %d", got)
+		t.Errorf("Destinations: want 1 (610 km station beyond 400 km auto b-line limit), got %d", got)
 	}
 }
 
@@ -455,7 +500,10 @@ func TestChainer_matrixCap600_truncated(t *testing.T) {
 	}
 }
 
-func TestChainer_drive_largeBudget_noOriginFeature(t *testing.T) {
+// SPA-136: a 60-minute drive origin polygon is requested at its full 60 minutes.
+// It used to be clamped to 15 min and then dropped entirely, which is what made
+// the rendered drive isochrone look far too small.
+func TestChainer_drive_largeBudget_originFeatureAtFullBudget(t *testing.T) {
 	store := &fakeIsochroneData{
 		scenario: transit.Scenario{ID: "sc1", Slug: "test-sc"},
 		stations: []transit.Station{},
@@ -470,12 +518,13 @@ func TestChainer_drive_largeBudget_noOriginFeature(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Chain: %v", err)
 	}
-	if resp.Metadata.OriginIsoAvailable {
-		t.Error("OriginIsoAvailable: want false for drive+large budget")
+	if !resp.Metadata.OriginIsoAvailable {
+		t.Error("OriginIsoAvailable: want true for drive+60min")
 	}
-	if !resp.Metadata.OriginIsoClamped {
-		t.Error("OriginIsoClamped: want true for drive+large budget")
+	if resp.Metadata.OriginIsoClamped {
+		t.Error("OriginIsoClamped: want false — 60 min is under the 120-min contour ceiling")
 	}
+	var originFeatures int
 	for _, f := range resp.Features {
 		var feat map[string]any
 		if err := json.Unmarshal(f, &feat); err != nil {
@@ -483,16 +532,66 @@ func TestChainer_drive_largeBudget_noOriginFeature(t *testing.T) {
 		}
 		props, _ := feat["properties"].(map[string]any)
 		if props["source"] == "origin" {
-			t.Error("found origin feature in response: drive+clamped should omit origin polygon")
+			originFeatures++
 		}
 	}
-	if len(fc.IsochoneCalls) != 0 {
-		t.Errorf("IsochoneCalls: want 0 (origin iso skipped for drive+clamped), got %d", len(fc.IsochoneCalls))
+	if originFeatures != 1 {
+		t.Errorf("origin features: want 1, got %d", originFeatures)
+	}
+	if len(fc.IsochoneCalls) != 1 {
+		t.Fatalf("IsochoneCalls: want 1, got %d", len(fc.IsochoneCalls))
+	}
+	if got := fc.IsochoneCalls[0].BudgetSecs; got != 3600 {
+		t.Errorf("origin BudgetSecs: want 3600 (full 60 min), got %d", got)
+	}
+}
+
+// SPA-136: egress polygons were silently clamped to 15 min for drive with no
+// metadata flag, so every station's drive coverage was undersized too.
+func TestChainer_drive_egressIsoUsesFullRemainingBudget(t *testing.T) {
+	store := &fakeIsochroneData{
+		scenario: transit.Scenario{ID: "sc1", Slug: "test-sc"},
+		stations: []transit.Station{
+			{
+				ID: "st1", ScenarioID: "sc1", Slug: "station-a",
+				Location: transit.GeoPoint{Type: "Point", Coordinates: []float64{-122.39, 37.71}},
+			},
+		},
+	}
+	fc := &stadia.FakeClient{
+		IsochroneResp: cannedIso(),
+		MatrixResp: &stadia.MatrixResponse{
+			SourcesToTargets: [][]stadia.MatrixCell{
+				{{Time: 600, Distance: 1.0}}, // 10 min access
+			},
+		},
+	}
+	chainer := isochrone.New(fc, store, logger.Discard())
+
+	// budget 90 min − 10 min access = 80 min remaining at station-a.
+	resp, err := chainer.Chain(context.Background(), isochrone.ChainRequest{
+		Lat: 37.7, Lng: -122.4, BudgetMins: 90,
+		Mode: isochrone.ModeDrive, ScenarioSlug: "test-sc",
+	})
+	if err != nil {
+		t.Fatalf("Chain: %v", err)
+	}
+	if len(resp.Metadata.ReachableStations) != 1 {
+		t.Fatalf("ReachableStations: want 1, got %d", len(resp.Metadata.ReachableStations))
+	}
+	if got := resp.Metadata.ReachableStations[0].RemainingMins; got != 80 {
+		t.Fatalf("RemainingMins: want 80, got %d", got)
+	}
+	// IsochoneCalls[0] is the origin (first errgroup); egress calls follow.
+	if len(fc.IsochoneCalls) != 2 {
+		t.Fatalf("IsochoneCalls: want 2 (origin + 1 egress), got %d", len(fc.IsochoneCalls))
+	}
+	if got := fc.IsochoneCalls[1].BudgetSecs; got != 4800 {
+		t.Errorf("egress BudgetSecs: want 4800 (full 80 min remaining), got %d", got)
 	}
 }
 
 func TestChainer_drive_smallBudget_hasOriginFeature(t *testing.T) {
-	// budget_mins=10 → budgetSecs=600 < driveMaxSecs=900 → not clamped → origin iso included
 	store := &fakeIsochroneData{
 		scenario: transit.Scenario{ID: "sc1", Slug: "test-sc"},
 		stations: []transit.Station{},
@@ -582,32 +681,39 @@ func TestChainer_matrixRateLimit_propagatesAsErrStadiaRateLimit(t *testing.T) {
 	}
 }
 
-func TestChainer_isochroneBudgetAboveModeClamp_neverSentUnclamped(t *testing.T) {
-	// Verifies that BudgetSecs sent to Stadia never exceeds the per-mode max.
-	// bike clamp = 20000m / (15km/h in m/s) = 4800s
-	const bikeMaxSecs = 4800
+// Stadia caps a single time contour at 120 minutes (openapi contour.time maximum),
+// regardless of mode. Nothing may go out above that.
+func TestChainer_isochroneBudgetNeverExceedsContourCeiling(t *testing.T) {
+	const maxContourSecs = 120 * 60
 	store := &fakeIsochroneData{
 		scenario: transit.Scenario{ID: "sc1", Slug: "test-sc"},
 		stations: []transit.Station{},
 	}
-	fc := &stadia.FakeClient{IsochroneResp: cannedIso()}
-	chainer := isochrone.New(fc, store, logger.Discard())
+	for _, mode := range []isochrone.Mode{isochrone.ModeWalk, isochrone.ModeBike, isochrone.ModeDrive} {
+		t.Run(string(mode), func(t *testing.T) {
+			fc := &stadia.FakeClient{IsochroneResp: cannedIso()}
+			chainer := isochrone.New(fc, store, logger.Discard())
 
-	_, err := chainer.Chain(context.Background(), isochrone.ChainRequest{
-		Lat: 37.7, Lng: -122.4, BudgetMins: 120,
-		Mode: isochrone.ModeBike, ScenarioSlug: "test-sc",
-	})
-	if err != nil {
-		t.Fatalf("Chain: %v", err)
-	}
-	for _, call := range fc.IsochoneCalls {
-		if call.BudgetSecs > bikeMaxSecs {
-			t.Errorf("IsochoneCalls BudgetSecs=%d exceeds bike max %d — would trigger Stadia 400", call.BudgetSecs, bikeMaxSecs)
-		}
+			resp, err := chainer.Chain(context.Background(), isochrone.ChainRequest{
+				Lat: 37.7, Lng: -122.4, BudgetMins: 300,
+				Mode: mode, ScenarioSlug: "test-sc",
+			})
+			if err != nil {
+				t.Fatalf("Chain: %v", err)
+			}
+			if !resp.Metadata.OriginIsoClamped {
+				t.Error("OriginIsoClamped: want true for a 300-min budget")
+			}
+			for _, call := range fc.IsochoneCalls {
+				if call.BudgetSecs > maxContourSecs {
+					t.Errorf("BudgetSecs=%d exceeds the %d s contour ceiling — would trigger Stadia 400", call.BudgetSecs, maxContourSecs)
+				}
+			}
+		})
 	}
 }
 
-func TestChainer_bikeIsoBudgetClamped(t *testing.T) {
+func TestChainer_bikeIsoBudgetUnclampedBelowCeiling(t *testing.T) {
 	store := &fakeIsochroneData{
 		scenario: transit.Scenario{ID: "sc1", Slug: "test-sc"},
 		stations: []transit.Station{},
@@ -615,7 +721,7 @@ func TestChainer_bikeIsoBudgetClamped(t *testing.T) {
 	fc := &stadia.FakeClient{IsochroneResp: cannedIso()}
 	chainer := isochrone.New(fc, store, logger.Discard())
 
-	_, err := chainer.Chain(context.Background(), isochrone.ChainRequest{
+	resp, err := chainer.Chain(context.Background(), isochrone.ChainRequest{
 		Lat: 37.7, Lng: -122.4, BudgetMins: 90,
 		Mode: isochrone.ModeBike, ScenarioSlug: "test-sc",
 	})
@@ -625,9 +731,11 @@ func TestChainer_bikeIsoBudgetClamped(t *testing.T) {
 	if len(fc.IsochoneCalls) != 1 {
 		t.Fatalf("IsochoneCalls: want 1, got %d", len(fc.IsochoneCalls))
 	}
-	const wantBudget = 4800 // 20000m / (15km/h in m/s) = 4800s
-	if fc.IsochoneCalls[0].BudgetSecs != wantBudget {
-		t.Errorf("BudgetSecs: want %d (clamped), got %d", wantBudget, fc.IsochoneCalls[0].BudgetSecs)
+	if got := fc.IsochoneCalls[0].BudgetSecs; got != 5400 {
+		t.Errorf("BudgetSecs: want 5400 (full 90 min), got %d", got)
+	}
+	if resp.Metadata.OriginIsoClamped {
+		t.Error("OriginIsoClamped: want false for a 90-min bike budget")
 	}
 }
 

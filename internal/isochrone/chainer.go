@@ -16,12 +16,25 @@ import (
 )
 
 const (
-	stadiaMaxMatrixDests  = 600
-	stadiaMaxIsoDistanceM = 20_000.0
-	roadDetourFactor      = 1.4
-	walkSpeedKmH          = 5.0
-	bikeSpeedKmH          = 15.0
-	driveSpeedKmH         = 80.0
+	stadiaMaxMatrixDests = 600
+
+	// stadiaMaxIsoContourMins is Stadia's ceiling on a single isochrone time
+	// contour (openapi `contour.time`, maximum 120). It is the only size limit that
+	// applies to our isochrone calls: Valhalla's service_limits.isochrone.max_distance
+	// guards the b-line distance between location *pairs*, and the isochrone endpoint
+	// accepts exactly one location, so that check can never fire.
+	stadiaMaxIsoContourMins = 120
+
+	// Stadia caps the b-line distance between a matrix source and target at 400 km
+	// for auto costing and 200 km for every other mode. This bounds the access-station
+	// pre-filter, nothing else.
+	stadiaMaxMatrixBLineAutoKm  = 400.0
+	stadiaMaxMatrixBLineOtherKm = 200.0
+
+	roadDetourFactor = 1.4
+	walkSpeedKmH     = 5.0
+	bikeSpeedKmH     = 15.0
+	driveSpeedKmH    = 80.0
 
 	// caHSRScenarioSlug identifies the California High-Speed Rail scenario. For
 	// this scenario boarding wait is omitted from the isochrone budget so the
@@ -53,15 +66,22 @@ func modeSpeedKmH(mode Mode) float64 {
 	}
 }
 
-func approxAccessReachKm(mode Mode, budgetMins int) float64 {
-	budgetReachKm := modeSpeedKmH(mode) * float64(budgetMins) / 60.0 / roadDetourFactor
-	stadiaPathLimitKm := stadiaMaxIsoDistanceM / 1000.0
-	return math.Min(budgetReachKm, stadiaPathLimitKm)
+func matrixBLineLimitKm(mode Mode) float64 {
+	if mode == ModeDrive {
+		return stadiaMaxMatrixBLineAutoKm
+	}
+	return stadiaMaxMatrixBLineOtherKm
 }
 
-func safeIsoBudgetSecs(mode Mode, budgetSecs int) int {
-	speedMS := modeSpeedKmH(mode) * 1000 / 3600
-	maxSecs := int(stadiaMaxIsoDistanceM / speedMS)
+func approxAccessReachKm(mode Mode, budgetMins int) float64 {
+	budgetReachKm := modeSpeedKmH(mode) * float64(budgetMins) / 60.0 / roadDetourFactor
+	return math.Min(budgetReachKm, matrixBLineLimitKm(mode))
+}
+
+// safeIsoBudgetSecs clamps a contour to Stadia's 120-minute isochrone ceiling.
+// Mode is irrelevant — the limit is on the contour value, not on distance covered.
+func safeIsoBudgetSecs(budgetSecs int) int {
+	maxSecs := stadiaMaxIsoContourMins * 60
 	if budgetSecs > maxSecs {
 		return maxSecs
 	}
@@ -137,12 +157,8 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 		c.log.Debugf("chain: truncated to %d nodes (matrix destination cap)", stadiaMaxMatrixDests)
 	}
 
-	clampedBudget := safeIsoBudgetSecs(req.Mode, req.BudgetMins*60)
+	clampedBudget := safeIsoBudgetSecs(req.BudgetMins * 60)
 	originIsoClamped := clampedBudget < req.BudgetMins*60
-	// Drive-mode origin isochrone is misleading when clamped: a 15-min auto polygon
-	// captures almost no meaningful area and implies false reachability. Skip it and
-	// report origin_iso_available: false so clients can respond appropriately.
-	driveOriginUnavailable := req.Mode == ModeDrive && originIsoClamped
 
 	var (
 		originIso  *stadia.IsochroneResponse
@@ -151,20 +167,18 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 
 	g, gctx := errgroup.WithContext(ctx)
 
-	if !driveOriginUnavailable {
-		g.Go(func() error {
-			iso, isoErr := c.stadia.Isochrone(gctx, stadia.IsochroneRequest{
-				Origin:     stadia.LatLng{Lat: req.Lat, Lng: req.Lng},
-				Costing:    costing,
-				BudgetSecs: clampedBudget,
-			})
-			if isoErr != nil {
-				return wrapStadiaErr(isoErr)
-			}
-			originIso = iso
-			return nil
+	g.Go(func() error {
+		iso, isoErr := c.stadia.Isochrone(gctx, stadia.IsochroneRequest{
+			Origin:     stadia.LatLng{Lat: req.Lat, Lng: req.Lng},
+			Costing:    costing,
+			BudgetSecs: clampedBudget,
 		})
-	}
+		if isoErr != nil {
+			return wrapStadiaErr(isoErr)
+		}
+		originIso = iso
+		return nil
+	})
 
 	if len(nearbyNodes) > 0 {
 		g.Go(func() error {
@@ -281,7 +295,7 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 				iso, isoErr := c.stadia.Isochrone(gctx2, stadia.IsochroneRequest{
 					Origin:     stadia.LatLng{Lat: ec.node.Lat, Lng: ec.node.Lng},
 					Costing:    costing,
-					BudgetSecs: safeIsoBudgetSecs(req.Mode, ec.remainingMins*60),
+					BudgetSecs: safeIsoBudgetSecs(ec.remainingMins * 60),
 				})
 				if isoErr != nil {
 					return wrapStadiaErr(isoErr)
@@ -347,7 +361,7 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 			Mode:               string(req.Mode),
 			WaitModel:          waitModel,
 			OriginIsoClamped:   originIsoClamped,
-			OriginIsoAvailable: !driveOriginUnavailable,
+			OriginIsoAvailable: originIso != nil,
 		},
 	}, nil
 }
