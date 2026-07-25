@@ -582,21 +582,38 @@ func TestChainer_drive_egressIsoUsesFullRemainingBudget(t *testing.T) {
 	if got := resp.Metadata.ReachableStations[0].RemainingMins; got != 80 {
 		t.Fatalf("RemainingMins: want 80, got %d", got)
 	}
-	// IsochoneCalls[0] is the origin (first errgroup); egress calls follow.
-	if len(fc.IsochoneCalls) != 2 {
-		t.Fatalf("IsochoneCalls: want 2 (origin + 1 egress), got %d", len(fc.IsochoneCalls))
+	// Match on origin coordinates rather than call order, which errgroup doesn't fix.
+	var egressBudget int
+	for _, call := range fc.IsochoneCalls {
+		if call.Origin.Lat == 37.71 && call.Origin.Lng == -122.39 {
+			egressBudget = call.BudgetSecs
+		}
 	}
-	if got := fc.IsochoneCalls[1].BudgetSecs; got != 4800 {
-		t.Errorf("egress BudgetSecs: want 4800 (full 80 min remaining), got %d", got)
+	if egressBudget != 4800 {
+		t.Errorf("egress BudgetSecs: want 4800 (full 80 min remaining), got %d", egressBudget)
 	}
 }
 
-func TestChainer_drive_smallBudget_hasOriginFeature(t *testing.T) {
+// Stadia's contour is minute-granular, so a station with under a minute of budget
+// left would go out as `{"time": 0}` — which Valhalla rejects, failing the whole
+// errgroup and with it the entire request. Such stations must be dropped instead.
+func TestChainer_subMinuteRemainingBudget_stationDropped(t *testing.T) {
 	store := &fakeIsochroneData{
 		scenario: transit.Scenario{ID: "sc1", Slug: "test-sc"},
-		stations: []transit.Station{},
+		stations: []transit.Station{
+			{
+				ID: "st1", ScenarioID: "sc1", Slug: "station-a",
+				Location: transit.GeoPoint{Type: "Point", Coordinates: []float64{-122.39, 37.71}},
+			},
+		},
 	}
-	fc := &stadia.FakeClient{IsochroneResp: cannedIso()}
+	fc := &stadia.FakeClient{
+		IsochroneResp: cannedIso(),
+		MatrixResp: &stadia.MatrixResponse{
+			// 600 s budget − 570 s access = 30 s remaining → 0 whole minutes.
+			SourcesToTargets: [][]stadia.MatrixCell{{{Time: 570, Distance: 1.0}}},
+		},
+	}
 	chainer := isochrone.New(fc, store, logger.Discard())
 
 	resp, err := chainer.Chain(context.Background(), isochrone.ChainRequest{
@@ -606,11 +623,13 @@ func TestChainer_drive_smallBudget_hasOriginFeature(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Chain: %v", err)
 	}
-	if !resp.Metadata.OriginIsoAvailable {
-		t.Error("OriginIsoAvailable: want true for drive+small budget (not clamped)")
+	if len(resp.Metadata.ReachableStations) != 0 {
+		t.Errorf("ReachableStations: want 0 (under a minute left), got %d", len(resp.Metadata.ReachableStations))
 	}
-	if len(fc.IsochoneCalls) != 1 {
-		t.Errorf("IsochoneCalls: want 1, got %d", len(fc.IsochoneCalls))
+	for _, call := range fc.IsochoneCalls {
+		if call.BudgetSecs < 60 {
+			t.Errorf("BudgetSecs=%d would send a 0-minute contour and trigger Stadia 400", call.BudgetSecs)
+		}
 	}
 }
 
