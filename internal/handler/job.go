@@ -26,6 +26,9 @@ type CompileStore interface {
 	// GetLatestSucceededUserScenarioJob is its user-authored counterpart,
 	// backing UserScenarioGraph.
 	GetLatestSucceededUserScenarioJob(ctx context.Context, userScenarioSlug string) (transit.Job, bool, error)
+	// GetLatestSucceededUserServiceJob backs UserServiceGraph, for a service
+	// compiled on its own rather than as a scenario member.
+	GetLatestSucceededUserServiceJob(ctx context.Context, userServiceSlug string) (transit.Job, bool, error)
 	worker.Store
 }
 

@@ -178,6 +178,12 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, st
 	// Compiling a single service is the degenerate scenario compile; owner-scoped
 	// like the rest of the authored surface.
 	mux.Handle("POST /api/services/{slug}/compile", authenticated(handler.CompileUserService(deps)))
+	// Read that compile back, and plot over it, without wrapping the service in
+	// a scenario first (SPA-140). Twins of the /api/user-scenarios pair below,
+	// owner-scoped identically. The database-less 503 list above needs no entry
+	// for either: "/api/services/" is a subtree pattern and already covers them.
+	mux.Handle("GET /api/services/{slug}/graph", authenticated(handler.UserServiceGraph(deps)))
+	mux.Handle("POST /api/services/{slug}/isochrone", authenticated(handler.UserServiceIsochrone(deps, stadiaClient, lg)))
 
 	// User-owned scenarios: owner-scoped CRUD over a curated set of UserService
 	// ids. Named /api/user-scenarios, distinct from the public /api/scenarios

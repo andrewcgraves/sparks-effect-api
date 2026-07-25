@@ -122,4 +122,7 @@ type Repository interface {
 	// GetLatestSucceededUserScenarioJob is the user-authored counterpart: the
 	// compiled graph retrievable by a user scenario's slug.
 	GetLatestSucceededUserScenarioJob(ctx context.Context, userScenarioSlug string) (Job, bool, error)
+	// GetLatestSucceededUserServiceJob is the single-service counterpart, for a
+	// service compiled alone as the degenerate one-member scenario.
+	GetLatestSucceededUserServiceJob(ctx context.Context, userServiceSlug string) (Job, bool, error)
 }

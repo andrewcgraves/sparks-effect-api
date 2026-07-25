@@ -10,16 +10,20 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// fakeServiceStore is an in-memory handler.ServiceStore.
+// fakeServiceStore is an in-memory handler.ServiceStore. It also backs
+// handler.UserServiceIsochroneStore (userisochrone_test.go) via jobs, rather
+// than a second fake, since both seams read the same service rows.
 type fakeServiceStore struct {
 	services map[string]transit.UserService // keyed by ID
 	routes   map[string]transit.Route       // keyed by slug
+	jobs     map[string]transit.Job         // service slug -> latest succeeded job
 	failWith error
 }
 
@@ -35,6 +39,7 @@ type fakeServiceStore struct {
 func newFakeServiceStore() *fakeServiceStore {
 	return &fakeServiceStore{
 		services: map[string]transit.UserService{},
+		jobs:     map[string]transit.Job{},
 		routes: map[string]transit.Route{
 			"sf-sj": {
 				ID: "route-1", Slug: "sf-sj", Name: "SF to San Jose",
@@ -117,6 +122,23 @@ func (f *fakeServiceStore) GetRouteBySlug(_ context.Context, slug string) (trans
 	}
 	rt, ok := f.routes[slug]
 	return rt, ok, nil
+}
+
+func (f *fakeServiceStore) GetLatestSucceededUserServiceJob(_ context.Context, slug string) (transit.Job, bool, error) {
+	if f.failWith != nil {
+		return transit.Job{}, false, f.failWith
+	}
+	job, ok := f.jobs[slug]
+	return job, ok, nil
+}
+
+// seedServiceRow stores a service directly, bypassing the write path's
+// validation and stop snapping — the isochrone tests care only about its id,
+// slug, owner, and UpdatedAt, which is what staleness turns on.
+func seedServiceRow(f *fakeServiceStore, id, slug, ownerID string, updatedAt time.Time) {
+	f.services[id] = transit.UserService{
+		ID: id, Slug: slug, OwnerID: ownerID, RouteID: "route-1", UpdatedAt: updatedAt,
+	}
 }
 
 // --- test harness ---

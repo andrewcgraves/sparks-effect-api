@@ -180,3 +180,176 @@ func TestUserScenarioIsochrone_200_fresh(t *testing.T) {
 		t.Errorf("type: want FeatureCollection, got %v", resp["type"])
 	}
 }
+
+// --- single-service isochrone (SPA-140) ---
+
+func userServiceIsochroneMux(store handler.UserServiceIsochroneStore, sc stadia.Client) *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/services/{slug}/isochrone", handler.UserServiceIsochrone(store, sc, logger.Discard()))
+	return mux
+}
+
+func svcIsoServeAs(t *testing.T, store handler.UserServiceIsochroneStore, sc stadia.Client, user transit.User, target, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	r := httptest.NewRequest(http.MethodPost, target, strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	if user.ID != "" {
+		r = r.WithContext(auth.WithUser(r.Context(), user))
+	}
+	rec := httptest.NewRecorder()
+	userServiceIsochroneMux(store, sc).ServeHTTP(rec, r)
+	return rec
+}
+
+func TestUserServiceIsochrone_401_unauthenticated(t *testing.T) {
+	store := newFakeServiceStore()
+	seedServiceRow(store, "svc-1", "line-a", svcOwner.ID, time.Now())
+
+	rec := svcIsoServeAs(t, store, fakeStadia(), transit.User{}, "/api/services/line-a/isochrone", isoValidBody)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status: want 401, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestUserServiceIsochrone_404_unknownSlug(t *testing.T) {
+	store := newFakeServiceStore()
+
+	rec := svcIsoServeAs(t, store, fakeStadia(), svcOwner, "/api/services/nope/isochrone", isoValidBody)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status: want 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// 404 rather than 403, so a non-owner cannot probe which service slugs exist.
+func TestUserServiceIsochrone_404_nonOwner(t *testing.T) {
+	store := newFakeServiceStore()
+	created := time.Now().Add(-time.Hour)
+	seedServiceRow(store, "svc-1", "line-a", svcOwner.ID, created.Add(-time.Minute))
+	store.jobs["line-a"] = transit.Job{
+		ID: "job-1", Status: transit.JobStatusSucceeded, CreatedAt: created,
+		CompiledServiceIDs: []string{"svc-1"}, Result: freshGraph(),
+	}
+
+	rec := svcIsoServeAs(t, store, fakeStadia(), svcStranger, "/api/services/line-a/isochrone", isoValidBody)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status: want 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestUserServiceIsochrone_404_noCompiledGraphYet(t *testing.T) {
+	store := newFakeServiceStore()
+	seedServiceRow(store, "svc-1", "line-a", svcOwner.ID, time.Now())
+
+	rec := svcIsoServeAs(t, store, fakeStadia(), svcOwner, "/api/services/line-a/isochrone", isoValidBody)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status: want 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestUserServiceIsochrone_400_invalidMode(t *testing.T) {
+	store := newFakeServiceStore()
+	seedServiceRow(store, "svc-1", "line-a", svcOwner.ID, time.Now())
+
+	rec := svcIsoServeAs(t, store, fakeStadia(), svcOwner, "/api/services/line-a/isochrone",
+		`{"lat":37.7,"lng":-122.4,"budget_mins":30,"mode":"fly"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status: want 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestUserServiceIsochrone_400_budgetNotPositive(t *testing.T) {
+	store := newFakeServiceStore()
+	seedServiceRow(store, "svc-1", "line-a", svcOwner.ID, time.Now())
+
+	rec := svcIsoServeAs(t, store, fakeStadia(), svcOwner, "/api/services/line-a/isochrone",
+		`{"lat":37.7,"lng":-122.4,"budget_mins":0,"mode":"walk"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status: want 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// Editing the service after its compile is the only way a single-service graph
+// goes stale — there is no membership to change, so this is the whole rule.
+func TestUserServiceIsochrone_409_editedService(t *testing.T) {
+	store := newFakeServiceStore()
+	created := time.Now().Add(-time.Hour)
+	seedServiceRow(store, "svc-1", "line-a", svcOwner.ID, created.Add(time.Minute)) // edited after compile
+	store.jobs["line-a"] = transit.Job{
+		ID: "job-1", Status: transit.JobStatusSucceeded, CreatedAt: created,
+		CompiledServiceIDs: []string{"svc-1"}, Result: freshGraph(),
+	}
+
+	rec := svcIsoServeAs(t, store, fakeStadia(), svcOwner, "/api/services/line-a/isochrone", isoValidBody)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status: want 409, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body["code"] != handler.StaleGraphErrorCode {
+		t.Errorf("code: want %q, got %q", handler.StaleGraphErrorCode, body["code"])
+	}
+	// The stale response must never leak the outdated graph data.
+	if _, ok := body["features"]; ok {
+		t.Error("409 response leaks graph features")
+	}
+}
+
+// A job that compiled a different service cannot satisfy this service's read,
+// the membership arm of GraphStale degenerated to a one-vs-one identity check.
+func TestUserServiceIsochrone_409_graphCompiledADifferentService(t *testing.T) {
+	store := newFakeServiceStore()
+	created := time.Now().Add(-time.Hour)
+	seedServiceRow(store, "svc-1", "line-a", svcOwner.ID, created.Add(-time.Minute))
+	store.jobs["line-a"] = transit.Job{
+		ID: "job-1", Status: transit.JobStatusSucceeded, CreatedAt: created,
+		CompiledServiceIDs: []string{"svc-2"}, Result: freshGraph(),
+	}
+
+	rec := svcIsoServeAs(t, store, fakeStadia(), svcOwner, "/api/services/line-a/isochrone", isoValidBody)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status: want 409, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestUserServiceIsochrone_200_fresh(t *testing.T) {
+	store := newFakeServiceStore()
+	created := time.Now().Add(-time.Hour)
+	seedServiceRow(store, "svc-1", "line-a", svcOwner.ID, created.Add(-time.Minute))
+	store.jobs["line-a"] = transit.Job{
+		ID: "job-1", Status: transit.JobStatusSucceeded, CreatedAt: created,
+		CompiledServiceIDs: []string{"svc-1"}, Result: freshGraph(),
+	}
+
+	rec := svcIsoServeAs(t, store, fakeStadia(), svcOwner, "/api/services/line-a/isochrone", isoValidBody)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp["type"] != "FeatureCollection" {
+		t.Errorf("type: want FeatureCollection, got %v", resp["type"])
+	}
+}
+
+// A service with 0 or 1 stops compiles to a graph with no transit edges. That
+// is not an error: the isochrone degrades to the plain street-mode one rather
+// than failing, so an as-yet-unstopped service still renders something.
+func TestUserServiceIsochrone_200_graphWithoutTransitEdges(t *testing.T) {
+	store := newFakeServiceStore()
+	created := time.Now().Add(-time.Hour)
+	seedServiceRow(store, "svc-1", "line-a", svcOwner.ID, created.Add(-time.Minute))
+	store.jobs["line-a"] = transit.Job{
+		ID: "job-1", Status: transit.JobStatusSucceeded, CreatedAt: created,
+		CompiledServiceIDs: []string{"svc-1"},
+		Result:             &transit.TransitGraph{Services: []transit.ServiceGraph{{ServiceID: "svc-1"}}},
+	}
+
+	rec := svcIsoServeAs(t, store, fakeStadia(), svcOwner, "/api/services/line-a/isochrone", isoValidBody)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+}

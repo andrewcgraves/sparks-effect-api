@@ -759,11 +759,19 @@ func (r *Repo) GetLatestSucceededUserScenarioJob(ctx context.Context, userScenar
 	return r.latestSucceededJobBySlug(ctx, "user_scenarios", "user_scenario_id", userScenarioSlug, transit.JobKindCompileUserScenario)
 }
 
+// GetLatestSucceededUserServiceJob resolves through user_services, for a service
+// compiled alone rather than as a scenario member. Kind is fixed at
+// compile_user_service for the same reason as its scenario sibling: a service has
+// exactly one compile kind, so the caller addresses it by slug alone.
+func (r *Repo) GetLatestSucceededUserServiceJob(ctx context.Context, userServiceSlug string) (transit.Job, bool, error) {
+	return r.latestSucceededJobBySlug(ctx, "user_services", "user_service_id", userServiceSlug, transit.JobKindCompileUserService)
+}
+
 // latestSucceededJobBySlug is the single "compiled graph, retrievable by slug"
-// resolver both readers above share: it joins jobs to the target table on the
+// resolver the readers above share: it joins jobs to the target table on the
 // given FK column, filters by the target's slug, kind, and succeeded status, and
 // takes the most recent. targetTable and fkColumn are compile-time constants
-// from the two wrappers, never caller input, so interpolating them into the SQL
+// from those wrappers, never caller input, so interpolating them into the SQL
 // carries no injection surface; the slug, kind, and status remain bound
 // parameters.
 func (r *Repo) latestSucceededJobBySlug(ctx context.Context, targetTable, fkColumn, slug, kind string) (transit.Job, bool, error) {
