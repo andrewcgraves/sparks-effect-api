@@ -29,6 +29,19 @@ Runtime unit of truth is **seconds** (`Edge.Seconds`, `WaitSecs`,
 (`budget_mins`, `access_mins`, `remaining_mins`) stay as-is on the wire; the
 chainer converts at the boundary.
 
+### Stadia limits the chainer respects
+
+| Limit | Value | Where it bites |
+| --- | --- | --- |
+| Isochrone time contour | 120 min | Origin and egress contours are clamped; `origin_iso_clamped` reports it |
+| Isochrone locations | 1 | Why `service_limits.isochrone.max_distance` (b-line between location *pairs*) can never fire |
+| Matrix elements | 625 (Standard) | Destinations hard-capped at 600, nearest-first |
+| Matrix b-line distance | 400 km auto / 200 km other | Bounds the access-station haversine pre-filter |
+
+Contours are minute-granular, so a contour under one minute serializes to
+`{"time": 0}` and is rejected — egress candidates with under a minute of
+remaining budget are dropped rather than requested.
+
 ## Seed data
 
 Scenarios live under `internal/transit/data/scenarios/<slug>/` and are embedded

@@ -16,12 +16,30 @@ import (
 )
 
 const (
-	stadiaMaxMatrixDests  = 600
-	stadiaMaxIsoDistanceM = 20_000.0
-	roadDetourFactor      = 1.4
-	walkSpeedKmH          = 5.0
-	bikeSpeedKmH          = 15.0
-	driveSpeedKmH         = 80.0
+	stadiaMaxMatrixDests = 600
+
+	// stadiaMaxIsoContourSecs is Stadia's ceiling on a single isochrone time contour
+	// (openapi `contour.time`, maximum 120 minutes). It is the only size limit that
+	// applies to our isochrone calls: Valhalla's service_limits.isochrone.max_distance
+	// guards the b-line distance between location *pairs*, and the isochrone endpoint
+	// accepts exactly one location, so that check can never fire.
+	stadiaMaxIsoContourSecs = 120 * 60
+
+	// minIsoContourSecs is the smallest contour worth requesting. Stadia's contour is
+	// minute-granular, so anything under a minute serializes to `{"time": 0}` and is
+	// rejected — which would fail the whole fan-out, not just that one polygon.
+	minIsoContourSecs = 60
+
+	// Stadia caps the b-line distance between a matrix source and target at 400 km
+	// for auto costing and 200 km for every other mode. This bounds the access-station
+	// pre-filter, nothing else.
+	stadiaMaxMatrixBLineAutoKm  = 400.0
+	stadiaMaxMatrixBLineOtherKm = 200.0
+
+	roadDetourFactor = 1.4
+	walkSpeedKmH     = 5.0
+	bikeSpeedKmH     = 15.0
+	driveSpeedKmH    = 80.0
 
 	// caHSRScenarioSlug identifies the California High-Speed Rail scenario. For
 	// this scenario boarding wait is omitted from the isochrone budget so the
@@ -53,17 +71,23 @@ func modeSpeedKmH(mode Mode) float64 {
 	}
 }
 
-func approxAccessReachKm(mode Mode, budgetMins int) float64 {
-	budgetReachKm := modeSpeedKmH(mode) * float64(budgetMins) / 60.0 / roadDetourFactor
-	stadiaPathLimitKm := stadiaMaxIsoDistanceM / 1000.0
-	return math.Min(budgetReachKm, stadiaPathLimitKm)
+func matrixBLineLimitKm(mode Mode) float64 {
+	if mode == ModeDrive {
+		return stadiaMaxMatrixBLineAutoKm
+	}
+	return stadiaMaxMatrixBLineOtherKm
 }
 
-func safeIsoBudgetSecs(mode Mode, budgetSecs int) int {
-	speedMS := modeSpeedKmH(mode) * 1000 / 3600
-	maxSecs := int(stadiaMaxIsoDistanceM / speedMS)
-	if budgetSecs > maxSecs {
-		return maxSecs
+func approxAccessReachKm(mode Mode, budgetMins int) float64 {
+	budgetReachKm := modeSpeedKmH(mode) * float64(budgetMins) / 60.0 / roadDetourFactor
+	return math.Min(budgetReachKm, matrixBLineLimitKm(mode))
+}
+
+// clampToContourCeilingSecs caps a contour at Stadia's 120-minute isochrone ceiling.
+// Mode is irrelevant — the limit is on the contour value, not on distance covered.
+func clampToContourCeilingSecs(budgetSecs int) int {
+	if budgetSecs > stadiaMaxIsoContourSecs {
+		return stadiaMaxIsoContourSecs
 	}
 	return budgetSecs
 }
@@ -137,12 +161,8 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 		c.log.Debugf("chain: truncated to %d nodes (matrix destination cap)", stadiaMaxMatrixDests)
 	}
 
-	clampedBudget := safeIsoBudgetSecs(req.Mode, req.BudgetMins*60)
-	originIsoClamped := clampedBudget < req.BudgetMins*60
-	// Drive-mode origin isochrone is misleading when clamped: a 15-min auto polygon
-	// captures almost no meaningful area and implies false reachability. Skip it and
-	// report origin_iso_available: false so clients can respond appropriately.
-	driveOriginUnavailable := req.Mode == ModeDrive && originIsoClamped
+	originContourSecs := clampToContourCeilingSecs(req.BudgetMins * 60)
+	originIsoClamped := originContourSecs < req.BudgetMins*60
 
 	var (
 		originIso  *stadia.IsochroneResponse
@@ -151,20 +171,18 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 
 	g, gctx := errgroup.WithContext(ctx)
 
-	if !driveOriginUnavailable {
-		g.Go(func() error {
-			iso, isoErr := c.stadia.Isochrone(gctx, stadia.IsochroneRequest{
-				Origin:     stadia.LatLng{Lat: req.Lat, Lng: req.Lng},
-				Costing:    costing,
-				BudgetSecs: clampedBudget,
-			})
-			if isoErr != nil {
-				return wrapStadiaErr(isoErr)
-			}
-			originIso = iso
-			return nil
+	g.Go(func() error {
+		iso, isoErr := c.stadia.Isochrone(gctx, stadia.IsochroneRequest{
+			Origin:     stadia.LatLng{Lat: req.Lat, Lng: req.Lng},
+			Costing:    costing,
+			BudgetSecs: originContourSecs,
 		})
-	}
+		if isoErr != nil {
+			return wrapStadiaErr(isoErr)
+		}
+		originIso = iso
+		return nil
+	})
 
 	if len(nearbyNodes) > 0 {
 		g.Go(func() error {
@@ -237,7 +255,7 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 				rSecs = budgetSecs - aSecs - transitSecs - effectiveWait
 				serviceID = transitService
 			}
-			if rSecs > 0 && (best == nil || rSecs > bestRSecs) {
+			if rSecs >= minIsoContourSecs && (best == nil || rSecs > bestRSecs) {
 				bestRSecs = rSecs
 				p := pathResult{accessMins: aSecs / 60, remainingMins: rSecs / 60, serviceID: serviceID}
 				best = &p
@@ -278,10 +296,14 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 			g2.Go(func() error {
 				sem <- struct{}{}
 				defer func() { <-sem }()
+				// Truncation here is silent and unflagged: it needs a budget over
+				// ~120 min plus access time to trigger, and a 120-min egress polygon
+				// is a fine answer to an over-ceiling ask. Only the origin reports
+				// clamping, since that is the number the caller actually chose.
 				iso, isoErr := c.stadia.Isochrone(gctx2, stadia.IsochroneRequest{
 					Origin:     stadia.LatLng{Lat: ec.node.Lat, Lng: ec.node.Lng},
 					Costing:    costing,
-					BudgetSecs: safeIsoBudgetSecs(req.Mode, ec.remainingMins*60),
+					BudgetSecs: clampToContourCeilingSecs(ec.remainingMins * 60),
 				})
 				if isoErr != nil {
 					return wrapStadiaErr(isoErr)
@@ -341,13 +363,16 @@ func (c *chainImpl) Chain(ctx context.Context, req ChainRequest) (*ChainResponse
 		Type:     "FeatureCollection",
 		Features: features,
 		Metadata: ChainMetadata{
-			ReachableStations:  reachableStations,
-			OriginBudgetMins:   req.BudgetMins,
-			ScenarioSlug:       req.ScenarioSlug,
-			Mode:               string(req.Mode),
-			WaitModel:          waitModel,
-			OriginIsoClamped:   originIsoClamped,
-			OriginIsoAvailable: !driveOriginUnavailable,
+			ReachableStations: reachableStations,
+			OriginBudgetMins:  req.BudgetMins,
+			ScenarioSlug:      req.ScenarioSlug,
+			Mode:              string(req.Mode),
+			WaitModel:         waitModel,
+			OriginIsoClamped:  originIsoClamped,
+			// Always true in practice now that the origin polygon is never skipped —
+			// a Stadia failure returns an error instead. Kept on the wire for
+			// compatibility with clients that already read it.
+			OriginIsoAvailable: originIso != nil,
 		},
 	}, nil
 }
