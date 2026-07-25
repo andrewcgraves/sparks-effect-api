@@ -148,6 +148,40 @@ func TestUserScenarioGraphReturnsCompiledResultForOwner(t *testing.T) {
 	}
 }
 
+func TestUserScenarioGraphBundlesMemberRoutes(t *testing.T) {
+	store := newFakeCompileStore()
+	_, scenarioID := store.compilableUserFixture("user-1")
+	store.jobs["job-1"] = transit.Job{
+		ID: "job-1", Kind: transit.JobKindCompileUserScenario, Status: transit.JobStatusSucceeded,
+		UserScenarioID: &scenarioID,
+		Result:         &transit.TransitGraph{Services: []transit.ServiceGraph{{ServiceID: "usvc-1"}}},
+	}
+
+	owner := transit.User{ID: "user-1"}
+	rec := getWithPathValueAs(t, handler.UserScenarioGraph(store), "/api/user-scenarios/trip/graph", "slug", "trip", &owner)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body.String())
+	}
+
+	var resp struct {
+		Services []transit.ServiceGraph `json:"services"`
+		Routes   []transit.Route        `json:"routes"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// The graph fields stay inlined alongside the new routes array.
+	if len(resp.Services) != 1 || resp.Services[0].ServiceID != "usvc-1" {
+		t.Errorf("services = %+v, want the stored graph", resp.Services)
+	}
+	if len(resp.Routes) != 1 || resp.Routes[0].ID != "rt-user" {
+		t.Fatalf("routes = %+v, want the member service's route", resp.Routes)
+	}
+	if len(resp.Routes[0].Geometry.Coordinates) == 0 {
+		t.Errorf("route geometry was not bundled: %+v", resp.Routes[0])
+	}
+}
+
 func TestUserScenarioGraphRejectsNonOwner(t *testing.T) {
 	store := newFakeCompileStore()
 	_, scenarioID := store.compilableUserFixture("owner")

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
@@ -121,8 +122,58 @@ func UserScenarioGraph(store CompileStore) http.HandlerFunc {
 			writeError(w, http.StatusNotFound, "no compiled graph for this scenario yet")
 			return
 		}
-		writeJSON(w, http.StatusOK, job.Result)
+
+		// The compiled graph is pure topology — its edges carry no geometry —
+		// so a client that wants to draw the scenario needs the member
+		// services' routes too. Load them at read time and bundle them
+		// alongside the graph, mirroring what the public /api/scenarios/{slug}
+		// read does; the persisted job result is left untouched.
+		routes, err := memberRoutes(r.Context(), store, sc.ServiceIDs)
+		if err != nil {
+			writeInternalError(w, "loading member routes", err)
+			return
+		}
+
+		writeJSON(w, http.StatusOK, userScenarioGraphResponse{
+			TransitGraph: job.Result,
+			Routes:       routes,
+		})
 	}
+}
+
+// userScenarioGraphResponse is the compiled graph as returned to a client: the
+// TransitGraph inlined (services, nodes, merge), plus the member services'
+// routes so the caller can draw each service along its alignment rather than
+// as straight chords between stops.
+type userScenarioGraphResponse struct {
+	*transit.TransitGraph
+	Routes []transit.Route `json:"routes"`
+}
+
+// memberRoutes loads the distinct routes the scenario's member services run on.
+// Returns an empty slice (never nil) so the JSON always carries a routes array.
+func memberRoutes(ctx context.Context, store CompileStore, serviceIDs []string) ([]transit.Route, error) {
+	services, err := store.ListUserServicesByIDs(ctx, serviceIDs)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]bool, len(services))
+	routeIDs := make([]string, 0, len(services))
+	for _, svc := range services {
+		if svc.RouteID == "" || seen[svc.RouteID] {
+			continue
+		}
+		seen[svc.RouteID] = true
+		routeIDs = append(routeIDs, svc.RouteID)
+	}
+	routes, err := store.ListRoutesByIDs(ctx, routeIDs)
+	if err != nil {
+		return nil, err
+	}
+	if routes == nil {
+		routes = []transit.Route{}
+	}
+	return routes, nil
 }
 
 // createCompileJob mints an id, fills in the queued status, and persists the
