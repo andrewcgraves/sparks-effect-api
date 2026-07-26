@@ -109,6 +109,9 @@ func (s *stubAuthDeps) GetLatestSucceededJob(context.Context, string, string) (t
 func (s *stubAuthDeps) GetLatestSucceededUserScenarioJob(context.Context, string) (transit.Job, bool, error) {
 	return transit.Job{}, false, nil
 }
+func (s *stubAuthDeps) GetLatestSucceededUserServiceJob(context.Context, string) (transit.Job, bool, error) {
+	return transit.Job{}, false, nil
+}
 func (s *stubAuthDeps) ListUserServicesByIDs(context.Context, []string) ([]transit.UserService, error) {
 	return nil, nil
 }
@@ -185,6 +188,8 @@ func TestProtectedRoutesRejectAnonymousCallers(t *testing.T) {
 		{http.MethodPost, "/api/scenarios/ca-hsr/compile"},
 		{http.MethodGet, "/api/jobs/some-id"},
 		{http.MethodPost, "/api/services/some-slug/compile"},
+		{http.MethodGet, "/api/services/some-slug/graph"},
+		{http.MethodPost, "/api/services/some-slug/isochrone"},
 		{http.MethodPost, "/api/user-scenarios"},
 		{http.MethodGet, "/api/user-scenarios"},
 		{http.MethodGet, "/api/user-scenarios/some-slug"},
@@ -249,6 +254,8 @@ func TestCompileJobRoutesAdmitValidTokens(t *testing.T) {
 		{http.MethodPost, "/api/scenarios/ca-hsr/compile"},
 		{http.MethodGet, "/api/jobs/some-id"},
 		{http.MethodPost, "/api/services/some-slug/compile"},
+		{http.MethodGet, "/api/services/some-slug/graph"},
+		{http.MethodPost, "/api/services/some-slug/isochrone"},
 		{http.MethodPost, "/api/user-scenarios/some-slug/compile"},
 		{http.MethodGet, "/api/user-scenarios/some-slug/graph"},
 	} {
@@ -384,6 +391,11 @@ func TestAuthRoutesReportUnavailableWithoutADatabase(t *testing.T) {
 		{http.MethodPost, "/api/user-scenarios"},
 		{http.MethodGet, "/api/user-scenarios"},
 		{http.MethodGet, "/api/user-scenarios/some-slug"},
+		// The 503 list is matched by path, and "/api/services/" is a subtree
+		// pattern — so a nested service route is covered without its own entry.
+		// Asserted rather than assumed, since the failure mode is a silent 404.
+		{http.MethodGet, "/api/services/some-slug/graph"},
+		{http.MethodPost, "/api/services/some-slug/isochrone"},
 	} {
 		t.Run(p.method+" "+p.path, func(t *testing.T) {
 			rec := request(t, h, p.method, p.path, adminToken)

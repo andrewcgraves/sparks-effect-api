@@ -208,3 +208,120 @@ func TestUserScenarioGraphNotYetCompiledIsNotFound(t *testing.T) {
 		t.Errorf("status = %d, want 404 before any compile", rec.Code)
 	}
 }
+
+// --- single-service graph read (SPA-140) ---
+
+// seedServiceCompileJob records a succeeded single-service compile for the
+// service the fixture stocks, which is what the graph read resolves by slug.
+func seedServiceCompileJob(store *fakeCompileStore, svcID string, result *transit.TransitGraph) {
+	store.jobs["job-1"] = transit.Job{
+		ID: "job-1", Kind: transit.JobKindCompileUserService, Status: transit.JobStatusSucceeded,
+		UserServiceID: &svcID,
+		Result:        result,
+	}
+}
+
+// A service compiled on its own is readable by its own slug, with its route
+// bundled alongside — the whole point of the endpoint, since the compiled graph
+// is pure topology and a client cannot draw the alignment without it.
+func TestUserServiceGraphReturnsCompiledGraphAndRouteForOwner(t *testing.T) {
+	store := newFakeCompileStore()
+	svcID, _ := store.compilableUserFixture("user-1")
+	seedServiceCompileJob(store, svcID, &transit.TransitGraph{
+		Services: []transit.ServiceGraph{{ServiceID: "usvc-1"}},
+	})
+
+	owner := transit.User{ID: "user-1"}
+	rec := getWithPathValueAs(t, handler.UserServiceGraph(store), "/api/services/line-a/graph", "slug", "line-a", &owner)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body.String())
+	}
+
+	var resp struct {
+		Services []transit.ServiceGraph `json:"services"`
+		Routes   []transit.Route        `json:"routes"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// The shape matches the scenario graph read exactly, so the frontend's
+	// graph-to-map helpers work against either without a service-specific path.
+	if len(resp.Services) != 1 || resp.Services[0].ServiceID != "usvc-1" {
+		t.Errorf("services = %+v, want the stored graph", resp.Services)
+	}
+	if len(resp.Routes) != 1 || resp.Routes[0].ID != "rt-user" {
+		t.Fatalf("routes = %+v, want the service's own route", resp.Routes)
+	}
+	if len(resp.Routes[0].Geometry.Coordinates) == 0 {
+		t.Errorf("route geometry was not bundled: %+v", resp.Routes[0])
+	}
+}
+
+func TestUserServiceGraphRejectsNonOwner(t *testing.T) {
+	store := newFakeCompileStore()
+	svcID, _ := store.compilableUserFixture("owner")
+	seedServiceCompileJob(store, svcID, &transit.TransitGraph{
+		Services: []transit.ServiceGraph{{ServiceID: "usvc-1"}},
+	})
+
+	stranger := transit.User{ID: "someone-else"}
+	rec := getWithPathValueAs(t, handler.UserServiceGraph(store), "/api/services/line-a/graph", "slug", "line-a", &stranger)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 for a non-owner", rec.Code)
+	}
+}
+
+func TestUserServiceGraphUnknownSlugIsNotFound(t *testing.T) {
+	store := newFakeCompileStore()
+
+	owner := transit.User{ID: "user-1"}
+	rec := getWithPathValueAs(t, handler.UserServiceGraph(store), "/api/services/nope/graph", "slug", "nope", &owner)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 for an unknown slug", rec.Code)
+	}
+}
+
+// A never-compiled service is a 404 the frontend acts on: it is the signal to
+// fire a compile, so it must stay distinguishable from a genuine failure.
+func TestUserServiceGraphNotYetCompiledIsNotFound(t *testing.T) {
+	store := newFakeCompileStore()
+	store.compilableUserFixture("user-1")
+
+	owner := transit.User{ID: "user-1"}
+	rec := getWithPathValueAs(t, handler.UserServiceGraph(store), "/api/services/line-a/graph", "slug", "line-a", &owner)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 before any compile", rec.Code)
+	}
+}
+
+// A scenario compile of the same service is not a single-service graph: the
+// reader is keyed on the service FK and the service compile kind, so a
+// scenario's result must not satisfy the service read.
+func TestUserServiceGraphIgnoresScenarioCompileJobs(t *testing.T) {
+	store := newFakeCompileStore()
+	_, scenarioID := store.compilableUserFixture("user-1")
+	store.jobs["job-1"] = transit.Job{
+		ID: "job-1", Kind: transit.JobKindCompileUserScenario, Status: transit.JobStatusSucceeded,
+		UserScenarioID: &scenarioID,
+		Result:         &transit.TransitGraph{Services: []transit.ServiceGraph{{ServiceID: "usvc-1"}}},
+	}
+
+	owner := transit.User{ID: "user-1"}
+	rec := getWithPathValueAs(t, handler.UserServiceGraph(store), "/api/services/line-a/graph", "slug", "line-a", &owner)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 when only a scenario compile exists", rec.Code)
+	}
+}
+
+func TestUserServiceGraphRejectsUnauthenticated(t *testing.T) {
+	store := newFakeCompileStore()
+	svcID, _ := store.compilableUserFixture("user-1")
+	seedServiceCompileJob(store, svcID, &transit.TransitGraph{
+		Services: []transit.ServiceGraph{{ServiceID: "usvc-1"}},
+	})
+
+	rec := getWithPathValueAs(t, handler.UserServiceGraph(store), "/api/services/line-a/graph", "slug", "line-a", nil)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401 without a session", rec.Code)
+	}
+}

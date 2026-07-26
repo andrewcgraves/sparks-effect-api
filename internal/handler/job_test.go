@@ -308,6 +308,34 @@ func (f *fakeCompileStore) GetLatestSucceededUserScenarioJob(_ context.Context, 
 	return latest, found, nil
 }
 
+// GetLatestSucceededUserServiceJob is the single-service twin of the reader
+// above: same scan, keyed on the service FK and the service compile kind.
+func (f *fakeCompileStore) GetLatestSucceededUserServiceJob(_ context.Context, slug string) (transit.Job, bool, error) {
+	if f.getGraphErr != nil {
+		return transit.Job{}, false, f.getGraphErr
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	svc, ok := f.userServices[slug]
+	if !ok {
+		return transit.Job{}, false, nil
+	}
+	var latest transit.Job
+	found := false
+	for _, j := range f.jobs {
+		if j.UserServiceID == nil || *j.UserServiceID != svc.ID {
+			continue
+		}
+		if j.Kind != transit.JobKindCompileUserService || j.Status != transit.JobStatusSucceeded {
+			continue
+		}
+		if !found || j.CreatedAt.After(latest.CreatedAt) {
+			latest, found = j, true
+		}
+	}
+	return latest, found, nil
+}
+
 func (f *fakeCompileStore) waitForCompletion(t *testing.T) transit.Job {
 	t.Helper()
 	select {

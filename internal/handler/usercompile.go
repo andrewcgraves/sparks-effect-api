@@ -134,18 +134,74 @@ func UserScenarioGraph(store CompileStore) http.HandlerFunc {
 			return
 		}
 
-		writeJSON(w, http.StatusOK, userScenarioGraphResponse{
+		writeJSON(w, http.StatusOK, compiledGraphResponse{
 			TransitGraph: job.Result,
 			Routes:       routes,
 		})
 	}
 }
 
-// userScenarioGraphResponse is the compiled graph as returned to a client: the
-// TransitGraph inlined (services, nodes, merge), plus the member services'
-// routes so the caller can draw each service along its alignment rather than
-// as straight chords between stops.
-type userScenarioGraphResponse struct {
+// UserServiceGraph returns a handler for GET /api/services/{slug}/graph: a
+// single service's compiled graph, addressed by slug.
+//
+// The twin of UserScenarioGraph for a service compiled alone as the degenerate
+// one-member scenario (see CompileUserService). Owner-scoped like the rest of
+// the service CRUD — a service the caller does not own answers 404, not 403,
+// so a non-owner cannot probe which slugs exist.
+//
+// Like the scenario graph read, this deliberately does not stale-check.
+// Staleness is enforced on the isochrone, where an out-of-date graph would
+// change the answer; drawing a slightly stale alignment would not.
+func UserServiceGraph(store CompileStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		svc, found, err := store.GetUserServiceBySlug(r.Context(), r.PathValue("slug"))
+		if err != nil {
+			writeInternalError(w, "looking up service", err)
+			return
+		}
+		if !found {
+			writeError(w, http.StatusNotFound, "service not found")
+			return
+		}
+		if !authorizeService(w, r, svc) {
+			return
+		}
+
+		job, found, err := store.GetLatestSucceededUserServiceJob(r.Context(), svc.Slug)
+		if err != nil {
+			writeInternalError(w, "looking up compiled graph", err)
+			return
+		}
+		if !found || job.Result == nil {
+			writeError(w, http.StatusNotFound, "no compiled graph for this service yet")
+			return
+		}
+
+		// Bundled for the same reason the scenario read bundles its members'
+		// routes: the compiled graph is pure topology, so without the alignment
+		// a client can only draw straight chords between stops.
+		routes, err := routesByIDs(r.Context(), store, serviceRouteIDs([]transit.UserService{svc}))
+		if err != nil {
+			writeInternalError(w, "loading service route", err)
+			return
+		}
+
+		writeJSON(w, http.StatusOK, compiledGraphResponse{
+			TransitGraph: job.Result,
+			Routes:       routes,
+		})
+	}
+}
+
+// compiledGraphResponse is a compiled graph as returned to a client: the
+// TransitGraph inlined (services, nodes, merge), plus the routes its services
+// run on so the caller can draw each along its alignment rather than as
+// straight chords between stops.
+//
+// One type serves both the scenario and single-service reads so the two
+// responses cannot drift apart — a client's graph-to-map code works against
+// either without knowing which it asked for.
+type compiledGraphResponse struct {
 	*transit.TransitGraph
 	Routes []transit.Route `json:"routes"`
 }
@@ -157,16 +213,29 @@ func memberRoutes(ctx context.Context, store CompileStore, serviceIDs []string) 
 	if err != nil {
 		return nil, err
 	}
+	return routesByIDs(ctx, store, serviceRouteIDs(services))
+}
+
+// serviceRouteIDs is the distinct set of routes a group of services runs on, in
+// first-seen order. A service with no route contributes nothing, so the result
+// can be shorter than the input — or empty.
+func serviceRouteIDs(services []transit.UserService) []string {
 	seen := make(map[string]bool, len(services))
-	routeIDs := make([]string, 0, len(services))
+	ids := make([]string, 0, len(services))
 	for _, svc := range services {
 		if svc.RouteID == "" || seen[svc.RouteID] {
 			continue
 		}
 		seen[svc.RouteID] = true
-		routeIDs = append(routeIDs, svc.RouteID)
+		ids = append(ids, svc.RouteID)
 	}
-	routes, err := store.ListRoutesByIDs(ctx, routeIDs)
+	return ids
+}
+
+// routesByIDs loads routes by id, normalising nil to an empty slice so the JSON
+// always carries a routes array rather than null.
+func routesByIDs(ctx context.Context, store CompileStore, ids []string) ([]transit.Route, error) {
+	routes, err := store.ListRoutesByIDs(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
