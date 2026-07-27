@@ -6,8 +6,8 @@
 # per non-terminus segment from the 2026 Business Plan minute matrix, then
 # proportionally recalibrating to the published 306-min all-stop figure.
 #
-# Segments are ordered in the primary service direction (SF → Anaheim for Phase 1).
-# Brightline West spur segments (Palmdale → Las Vegas) are commented out for later use.
+# Segments are ordered in the primary service direction (SF → Anaheim for Phase 1,
+# Palmdale → Las Vegas for the Brightline West spur, which branches at Palmdale).
 #
 # Multi-hop origin–destination times are derived by summing consecutive segments in code
 # (see Store.TravelTimeBetween). This replaces the full NxN matrix; callers do not store
@@ -70,13 +70,13 @@ segments:
     to: anaheim
     run_seconds: 1800
     route_id: "00000000-0000-4002-8001-000000000001"
-  # --- Brightline West (deferred) — Palmdale → Las Vegas ---
-  # Run-only estimates; dwell will be added at compile time.
-  # - from: palmdale
-  #   to: victor-valley
-  #   run_seconds: 1050
-  #   route_id: "00000000-0000-4002-8001-000000000002"
-  # - from: victor-valley
-  #   to: las-vegas
-  #   run_seconds: 5310
-  #   route_id: "00000000-0000-4002-8001-000000000002"
+  # --- Brightline West — Palmdale → Las Vegas ---
+  # Run-only estimates; dwell is added at compile time.
+  - from: palmdale
+    to: victor-valley
+    run_seconds: 1050
+    route_id: "00000000-0000-4002-8001-000000000002"
+  - from: victor-valley
+    to: las-vegas
+    run_seconds: 5310
+    route_id: "00000000-0000-4002-8001-000000000002"

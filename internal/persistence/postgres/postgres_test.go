@@ -114,11 +114,11 @@ func TestSeedAndCompiledReadPathAcrossRestart(t *testing.T) {
 	if !ok {
 		t.Fatal("ca-hsr scenario not found after restart")
 	}
-	if got := len(store.GetStationsByScenario(sc.ID)); got != 13 {
-		t.Errorf("stations: want 13 Phase 1 stations, got %d", got)
+	if got := len(store.GetStationsByScenario(sc.ID)); got != 15 {
+		t.Errorf("stations: want 15 (13 Phase 1 + Brightline West spur), got %d", got)
 	}
-	if got := len(store.GetServicesByScenario(sc.ID)); got != 2 {
-		t.Errorf("active services: want 2 (Express + Local), got %d", got)
+	if got := len(store.GetServicesByScenario(sc.ID)); got != 3 {
+		t.Errorf("active services: want 3 (Express + Local + Brightline West), got %d", got)
 	}
 
 	// Segment route ids survive the write/read round trip, so a restarted
@@ -158,8 +158,8 @@ func TestSeedAndCompiledReadPathAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListServiceIDsByScenario: %v", err)
 	}
-	if len(ids) != 2 {
-		t.Errorf("scenario_service membership: want 2, got %d", len(ids))
+	if len(ids) != 3 {
+		t.Errorf("scenario_service membership: want 3, got %d", len(ids))
 	}
 }
 

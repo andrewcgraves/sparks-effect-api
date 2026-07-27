@@ -313,7 +313,7 @@ func TestNewStore_holdsCompiledGraph(t *testing.T) {
 	if !ok {
 		t.Fatal("expected compiled TransitGraph for ca-hsr")
 	}
-	if len(g.Services) != 2 {
-		t.Fatalf("want 2 service graphs (Express + Local), got %d", len(g.Services))
+	if len(g.Services) != 3 {
+		t.Fatalf("want 3 service graphs (Express + Local + Brightline West), got %d", len(g.Services))
 	}
 }

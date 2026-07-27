@@ -61,11 +61,14 @@ func TestGetRoutesByScenario(t *testing.T) {
 	sc, _ := store.GetScenarioBySlug("ca-hsr")
 	routes := store.GetRoutesByScenario(sc.ID)
 
-	if len(routes) != 1 {
-		t.Fatalf("expected 1 active route (Phase 1; Brightline West deferred), got %d", len(routes))
+	if len(routes) != 2 {
+		t.Fatalf("expected 2 active routes (Phase 1 + Brightline West), got %d", len(routes))
 	}
 
 	for _, r := range routes {
+		if r.Slug == "" {
+			t.Errorf("route %q has empty slug", r.Name)
+		}
 		if r.Mode != "rail" {
 			t.Errorf("route %q mode: want rail, got %s", r.Name, r.Mode)
 		}
@@ -83,8 +86,8 @@ func TestGetStationsByScenario(t *testing.T) {
 	sc, _ := store.GetScenarioBySlug("ca-hsr")
 	stations := store.GetStationsByScenario(sc.ID)
 
-	if len(stations) != 13 {
-		t.Errorf("expected 13 Phase 1 stations (Brightline West deferred), got %d", len(stations))
+	if len(stations) != 15 {
+		t.Errorf("expected 15 stations (13 Phase 1 + Victor Valley and Las Vegas), got %d", len(stations))
 	}
 
 	slugsSeen := make(map[string]bool)
@@ -106,15 +109,11 @@ func TestGetStationsByScenario(t *testing.T) {
 
 	required := []string{"sf", "millbrae", "san-jose", "gilroy", "merced", "madera",
 		"fresno", "kings-tulare", "bakersfield", "palmdale",
-		"burbank-airport", "los-angeles", "anaheim"}
+		"burbank-airport", "los-angeles", "anaheim",
+		"victor-valley", "las-vegas"}
 	for _, slug := range required {
 		if !slugsSeen[slug] {
 			t.Errorf("missing required station slug %q", slug)
-		}
-	}
-	for _, deferred := range []string{"victor-valley", "las-vegas"} {
-		if slugsSeen[deferred] {
-			t.Errorf("deferred Brightline West station %q should not be loaded", deferred)
 		}
 	}
 }
@@ -163,8 +162,8 @@ func TestGetServicesByScenario(t *testing.T) {
 	sc, _ := store.GetScenarioBySlug("ca-hsr")
 	services := store.GetServicesByScenario(sc.ID)
 
-	if len(services) != 2 {
-		t.Fatalf("expected 2 active services (Express + Local; Brightline West deferred), got %d", len(services))
+	if len(services) != 3 {
+		t.Fatalf("expected 3 active services (Express + Local + Brightline West), got %d", len(services))
 	}
 
 	for _, svc := range services {
@@ -358,5 +357,94 @@ func TestLocalSFToAnaheim_compiledTime_approx306min(t *testing.T) {
 	if total < wantMin || total > wantMax {
 		t.Errorf("Local SF→Anaheim: got %d s (%d min), want %d–%d s (306 min ±120 s)",
 			total, total/60, wantMin, wantMax)
+	}
+}
+
+// The seeded travel-time set is what feeds the isochrone "Time between
+// stations" table, which groups by route. Brightline West run times are only a
+// distinct group there if they carry a route id of their own.
+func TestSeededTravelTimes_brightlineWestIsADistinctRouteGroup(t *testing.T) {
+	store := mustNewStore(t)
+	tt, ok := store.GetTravelTimes("ca-hsr")
+	if !ok {
+		t.Fatal("travel times not found for ca-hsr")
+	}
+
+	const (
+		phase1RouteID = "00000000-0000-4002-8001-000000000001"
+		bwRouteID     = "00000000-0000-4002-8001-000000000002"
+	)
+	byRoute := map[string][]string{}
+	for _, seg := range tt.Segments {
+		byRoute[seg.RouteID] = append(byRoute[seg.RouteID], seg.FromSlug+"→"+seg.ToSlug)
+	}
+
+	if len(byRoute) != 2 {
+		t.Errorf("want segments grouped under 2 routes, got %d: %v", len(byRoute), byRoute)
+	}
+	if got := len(byRoute[phase1RouteID]); got != 12 {
+		t.Errorf("Phase 1 route: want 12 segments, got %d", got)
+	}
+	want := []string{"palmdale→victor-valley", "victor-valley→las-vegas"}
+	got := byRoute[bwRouteID]
+	if len(got) != len(want) {
+		t.Fatalf("Brightline West route: want segments %v, got %v", want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("Brightline West segment %d: want %q, got %q", i, want[i], got[i])
+		}
+	}
+}
+
+func TestBrightlineWest_compiledPalmdaleToLasVegas(t *testing.T) {
+	// Run-only 1050 + 5310 = 6360 s, plus one 90 s dwell at the intermediate
+	// Victor Valley stop = 6450 s (107.5 min) end to end.
+	store := mustNewStore(t)
+	g, ok := store.Graph("ca-hsr")
+	if !ok {
+		t.Fatal("ca-hsr graph not found")
+	}
+
+	const bwSvcID = "00000000-0000-4004-8001-000000000003"
+	var bwSG *ServiceGraph
+	for i := range g.Services {
+		if g.Services[i].ServiceID == bwSvcID {
+			bwSG = &g.Services[i]
+			break
+		}
+	}
+	if bwSG == nil {
+		t.Fatal("Brightline West service graph not found")
+	}
+
+	adj := map[string]int{}
+	for _, e := range bwSG.Edges {
+		adj[e.FromSlug+"→"+e.ToSlug] = e.Seconds
+	}
+
+	total := 0
+	for _, key := range []string{"palmdale→victor-valley", "victor-valley→las-vegas"} {
+		secs, found := adj[key]
+		if !found {
+			t.Fatalf("edge %q not in Brightline West graph", key)
+		}
+		total += secs
+	}
+
+	const (
+		wantMin = 6330
+		wantMax = 6570
+	)
+	if total < wantMin || total > wantMax {
+		t.Errorf("Brightline West Palmdale→Las Vegas: got %d s (%d min), want %d–%d s",
+			total, total/60, wantMin, wantMax)
+	}
+
+	// The spur is a dead end off Palmdale, so it must not shortcut any Phase 1 pair.
+	if secs, _, _, ok := store.TravelTimeBetween("ca-hsr", "sf", "las-vegas"); !ok {
+		t.Error("sf→las-vegas should be reachable via Palmdale interchange")
+	} else if secs <= 6450 {
+		t.Errorf("sf→las-vegas: got %d s, want more than the spur alone (6450 s)", secs)
 	}
 }

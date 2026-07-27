@@ -2,8 +2,8 @@
 # Phase 1 alignment stitched from official construction sections (DTX, F-J, J-Y, M2M,
 # CP1, CP2-3, CP4, LGA, B-P, P-B, B-LA, LAUS, LA-Anaheim) in service order.
 # Source: https://services3.arcgis.com/rGGp0aiv6Rf11t2H/arcgis/rest/services/HSR_Statewide_Alignment/FeatureServer/1/query?where=1=1&outFields=*&outSR=4326&f=geojson
-# Brightline West (Palmdale–Las Vegas) alignment is approximate and commented out below
-# for later use — not in the CA HSR ArcGIS dataset.
+# Brightline West (Palmdale–Las Vegas) alignment is approximate — it is not in the
+# CA HSR ArcGIS dataset, so it is a hand-traced corridor sketch, not survey geometry.
 # Coordinate order: [longitude, latitude] (GeoJSON convention, WGS84).
 
 - id: "00000000-0000-4002-8001-000000000001"
@@ -20440,22 +20440,23 @@
       - [-117.879123, 33.802787]
       - [-117.877413, 33.802311]
 
-# --- Brightline West (deferred) — Palmdale to Las Vegas ---
-# - id: "00000000-0000-4002-8001-000000000002"
-#   scenario_id: "00000000-0000-4001-8001-000000000001"
-#   name: "Brightline West — Palmdale to Las Vegas"
-#   mode: "rail"
-#   bidirectional: true
-#   geometry:
-#     type: LineString
-#     coordinates:
-#       - [-118.116, 34.578]
-#       - [-117.8, 34.55]
-#       - [-117.45, 34.51]
-#       - [-117.185, 34.5]
-#       - [-116.9, 34.6]
-#       - [-116.7, 34.8]
-#       - [-116.5, 35.1]
-#       - [-115.8, 35.6]
-#       - [-115.3, 35.9]
-#       - [-115.136, 36.174]
+# --- Brightline West — Palmdale to Las Vegas ---
+- id: "00000000-0000-4002-8001-000000000002"
+  scenario_id: "00000000-0000-4001-8001-000000000001"
+  slug: "brightline-west-palmdale-to-las-vegas"
+  name: "Brightline West — Palmdale to Las Vegas"
+  mode: "rail"
+  bidirectional: true
+  geometry:
+    type: LineString
+    coordinates:
+      - [-118.116, 34.578]
+      - [-117.8, 34.55]
+      - [-117.45, 34.51]
+      - [-117.185, 34.5]
+      - [-116.9, 34.6]
+      - [-116.7, 34.8]
+      - [-116.5, 35.1]
+      - [-115.8, 35.6]
+      - [-115.3, 35.9]
+      - [-115.136, 36.174]
