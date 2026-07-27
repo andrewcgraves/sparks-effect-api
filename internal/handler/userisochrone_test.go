@@ -15,13 +15,13 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-func userIsochroneMux(store handler.UserIsochroneStore, sc stadia.Client) *http.ServeMux {
+func userIsochroneMux(store handler.ScenarioTargetStore, sc stadia.Client) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/user-scenarios/{slug}/isochrone", handler.UserScenarioIsochrone(store, sc, logger.Discard()))
 	return mux
 }
 
-func isoServeAs(t *testing.T, store handler.UserIsochroneStore, sc stadia.Client, user transit.User, target, body string) *httptest.ResponseRecorder {
+func isoServeAs(t *testing.T, store handler.ScenarioTargetStore, sc stadia.Client, user transit.User, target, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	r := httptest.NewRequest(http.MethodPost, target, strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
@@ -183,13 +183,13 @@ func TestUserScenarioIsochrone_200_fresh(t *testing.T) {
 
 // --- single-service isochrone (SPA-140) ---
 
-func userServiceIsochroneMux(store handler.UserServiceIsochroneStore, sc stadia.Client) *http.ServeMux {
+func userServiceIsochroneMux(store handler.ServiceTargetStore, sc stadia.Client) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/services/{slug}/isochrone", handler.UserServiceIsochrone(store, sc, logger.Discard()))
 	return mux
 }
 
-func svcIsoServeAs(t *testing.T, store handler.UserServiceIsochroneStore, sc stadia.Client, user transit.User, target, body string) *httptest.ResponseRecorder {
+func svcIsoServeAs(t *testing.T, store handler.ServiceTargetStore, sc stadia.Client, user transit.User, target, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	r := httptest.NewRequest(http.MethodPost, target, strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")

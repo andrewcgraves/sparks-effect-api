@@ -223,9 +223,16 @@ func DeleteService(store ServiceStore) http.HandlerFunc {
 	}
 }
 
+// serviceBySlugStore is the single lookup loadService needs, narrower than
+// ServiceStore so the compile, graph, and isochrone surfaces can resolve a
+// service through the same loader without carrying the whole CRUD slice.
+type serviceBySlugStore interface {
+	GetUserServiceBySlug(ctx context.Context, slug string) (transit.UserService, bool, error)
+}
+
 // loadService resolves the {slug} path value, writing 404 or 500 and reporting
 // false when it cannot.
-func loadService(w http.ResponseWriter, r *http.Request, store ServiceStore) (transit.UserService, bool) {
+func loadService(w http.ResponseWriter, r *http.Request, store serviceBySlugStore) (transit.UserService, bool) {
 	svc, found, err := store.GetUserServiceBySlug(r.Context(), r.PathValue("slug"))
 	if err != nil {
 		writeInternalError(w, "loading service", err)

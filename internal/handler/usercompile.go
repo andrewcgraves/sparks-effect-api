@@ -19,35 +19,7 @@ import (
 // a service they do not own answers 404, exactly as the service CRUD does.
 func CompileUserService(store CompileStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := auth.UserFrom(r.Context())
-		if !ok {
-			writeError(w, http.StatusUnauthorized, "authentication required")
-			return
-		}
-
-		svc, found, err := store.GetUserServiceBySlug(r.Context(), r.PathValue("slug"))
-		if err != nil {
-			writeInternalError(w, "looking up service", err)
-			return
-		}
-		if !found {
-			writeError(w, http.StatusNotFound, "service not found")
-			return
-		}
-		if !authorizeService(w, r, svc) {
-			return
-		}
-
-		job, ok := createCompileJob(w, r, store, transit.Job{
-			Kind:          transit.JobKindCompileUserService,
-			UserServiceID: &svc.ID,
-			OwnerID:       &user.ID,
-		})
-		if !ok {
-			return
-		}
-		enqueueCompile(store, job)
-		writeJSON(w, http.StatusAccepted, job)
+		compileAuthoredTarget(w, r, store, serviceTarget{store})
 	}
 }
 
@@ -58,36 +30,34 @@ func CompileUserService(store CompileStore) http.HandlerFunc {
 // caller does not own answers 404.
 func CompileUserScenario(store CompileStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := auth.UserFrom(r.Context())
-		if !ok {
-			writeError(w, http.StatusUnauthorized, "authentication required")
-			return
-		}
-
-		sc, found, err := store.GetUserScenarioBySlug(r.Context(), r.PathValue("slug"))
-		if err != nil {
-			writeInternalError(w, "looking up scenario", err)
-			return
-		}
-		if !found {
-			writeError(w, http.StatusNotFound, "scenario not found")
-			return
-		}
-		if !authorizeScenario(w, r, sc) {
-			return
-		}
-
-		job, ok := createCompileJob(w, r, store, transit.Job{
-			Kind:           transit.JobKindCompileUserScenario,
-			UserScenarioID: &sc.ID,
-			OwnerID:        &user.ID,
-		})
-		if !ok {
-			return
-		}
-		enqueueCompile(store, job)
-		writeJSON(w, http.StatusAccepted, job)
+		compileAuthoredTarget(w, r, store, scenarioTarget{store})
 	}
+}
+
+// compileAuthoredTarget triggers a compile of one authored target: the shared
+// body of both compile handlers.
+//
+// Authentication is checked before the target is resolved, so an unauthenticated
+// caller gets a 401 rather than the 404 an unknown slug would earn — the request
+// is unauthenticated regardless of which slug it names.
+func compileAuthoredTarget(w http.ResponseWriter, r *http.Request, store CompileStore, target authoredTarget) {
+	user, ok := auth.UserFrom(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+
+	owned, ok := target.load(w, r)
+	if !ok {
+		return
+	}
+
+	job, ok := createCompileJob(w, r, store, owned.compileJob(user.ID))
+	if !ok {
+		return
+	}
+	enqueueCompile(store, job)
+	writeJSON(w, http.StatusAccepted, job)
 }
 
 // UserScenarioGraph returns a handler for GET /api/user-scenarios/{slug}/graph:
@@ -100,44 +70,7 @@ func CompileUserScenario(store CompileStore) http.HandlerFunc {
 // scenario first, so the graph read never leaks a stranger's compiled result.
 func UserScenarioGraph(store CompileStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		sc, found, err := store.GetUserScenarioBySlug(r.Context(), r.PathValue("slug"))
-		if err != nil {
-			writeInternalError(w, "looking up scenario", err)
-			return
-		}
-		if !found {
-			writeError(w, http.StatusNotFound, "scenario not found")
-			return
-		}
-		if !authorizeScenario(w, r, sc) {
-			return
-		}
-
-		job, found, err := store.GetLatestSucceededUserScenarioJob(r.Context(), sc.Slug)
-		if err != nil {
-			writeInternalError(w, "looking up compiled graph", err)
-			return
-		}
-		if !found || job.Result == nil {
-			writeError(w, http.StatusNotFound, "no compiled graph for this scenario yet")
-			return
-		}
-
-		// The compiled graph is pure topology — its edges carry no geometry —
-		// so a client that wants to draw the scenario needs the member
-		// services' routes too. Load them at read time and bundle them
-		// alongside the graph, mirroring what the public /api/scenarios/{slug}
-		// read does; the persisted job result is left untouched.
-		routes, err := memberRoutes(r.Context(), store, sc.ServiceIDs)
-		if err != nil {
-			writeInternalError(w, "loading member routes", err)
-			return
-		}
-
-		writeJSON(w, http.StatusOK, compiledGraphResponse{
-			TransitGraph: job.Result,
-			Routes:       routes,
-		})
+		authoredTargetGraph(w, r, store, scenarioTarget{store})
 	}
 }
 
@@ -154,43 +87,44 @@ func UserScenarioGraph(store CompileStore) http.HandlerFunc {
 // change the answer; drawing a slightly stale alignment would not.
 func UserServiceGraph(store CompileStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		svc, found, err := store.GetUserServiceBySlug(r.Context(), r.PathValue("slug"))
-		if err != nil {
-			writeInternalError(w, "looking up service", err)
-			return
-		}
-		if !found {
-			writeError(w, http.StatusNotFound, "service not found")
-			return
-		}
-		if !authorizeService(w, r, svc) {
-			return
-		}
-
-		job, found, err := store.GetLatestSucceededUserServiceJob(r.Context(), svc.Slug)
-		if err != nil {
-			writeInternalError(w, "looking up compiled graph", err)
-			return
-		}
-		if !found || job.Result == nil {
-			writeError(w, http.StatusNotFound, "no compiled graph for this service yet")
-			return
-		}
-
-		// Bundled for the same reason the scenario read bundles its members'
-		// routes: the compiled graph is pure topology, so without the alignment
-		// a client can only draw straight chords between stops.
-		routes, err := routesByIDs(r.Context(), store, serviceRouteIDs([]transit.UserService{svc}))
-		if err != nil {
-			writeInternalError(w, "loading service route", err)
-			return
-		}
-
-		writeJSON(w, http.StatusOK, compiledGraphResponse{
-			TransitGraph: job.Result,
-			Routes:       routes,
-		})
+		authoredTargetGraph(w, r, store, serviceTarget{store})
 	}
+}
+
+// authoredTargetGraph reads one authored target's compiled graph: the shared
+// body of both graph handlers.
+//
+// The compiled graph is pure topology — its edges carry no geometry — so a
+// client that wants to draw the target needs the routes its member services run
+// on too. They are loaded at read time and bundled alongside the graph,
+// mirroring what the public /api/scenarios/{slug} read does; the persisted job
+// result is left untouched.
+func authoredTargetGraph(w http.ResponseWriter, r *http.Request, store routeStore, target authoredTarget) {
+	owned, ok := target.load(w, r)
+	if !ok {
+		return
+	}
+
+	job, ok := loadCompiledGraph(w, r, owned)
+	if !ok {
+		return
+	}
+
+	_, members, err := owned.members(r.Context())
+	if err != nil {
+		writeInternalError(w, "loading member services", err)
+		return
+	}
+	routes, err := routesByIDs(r.Context(), store, serviceRouteIDs(members))
+	if err != nil {
+		writeInternalError(w, "loading routes", err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, compiledGraphResponse{
+		TransitGraph: job.Result,
+		Routes:       routes,
+	})
 }
 
 // compiledGraphResponse is a compiled graph as returned to a client: the
@@ -206,14 +140,11 @@ type compiledGraphResponse struct {
 	Routes []transit.Route `json:"routes"`
 }
 
-// memberRoutes loads the distinct routes the scenario's member services run on.
-// Returns an empty slice (never nil) so the JSON always carries a routes array.
-func memberRoutes(ctx context.Context, store CompileStore, serviceIDs []string) ([]transit.Route, error) {
-	services, err := store.ListUserServicesByIDs(ctx, serviceIDs)
-	if err != nil {
-		return nil, err
-	}
-	return routesByIDs(ctx, store, serviceRouteIDs(services))
+// routeStore is the alignment lookup a graph read bundles from — the only part
+// of the repository the shared graph body touches itself, the rest coming
+// through the target adapter.
+type routeStore interface {
+	ListRoutesByIDs(ctx context.Context, ids []string) ([]transit.Route, error)
 }
 
 // serviceRouteIDs is the distinct set of routes a group of services runs on, in
@@ -234,7 +165,7 @@ func serviceRouteIDs(services []transit.UserService) []string {
 
 // routesByIDs loads routes by id, normalising nil to an empty slice so the JSON
 // always carries a routes array rather than null.
-func routesByIDs(ctx context.Context, store CompileStore, ids []string) ([]transit.Route, error) {
+func routesByIDs(ctx context.Context, store routeStore, ids []string) ([]transit.Route, error) {
 	routes, err := store.ListRoutesByIDs(ctx, ids)
 	if err != nil {
 		return nil, err

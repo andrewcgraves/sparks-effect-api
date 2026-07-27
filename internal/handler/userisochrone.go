@@ -1,11 +1,9 @@
 package handler
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
-	"time"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/isochrone"
 	"github.com/andrewcgraves/sparks-effect-api/internal/logger"
@@ -17,29 +15,6 @@ import (
 // stale compiled graph apart from any other 409 or error body: fire the
 // compile endpoint, poll, and retry (SPA-83 decision 4).
 const StaleGraphErrorCode = "stale_graph"
-
-// UserIsochroneStore is the slice of the repository UserScenarioIsochrone
-// needs: resolving and owning the scenario (ScenarioStore, shared with the
-// rest of the user-scenario CRUD), the member services' current timestamps,
-// and the latest compiled graph to stale-check and compute over.
-type UserIsochroneStore interface {
-	ScenarioStore
-	ListUserServicesByIDs(ctx context.Context, ids []string) ([]transit.UserService, error)
-	GetLatestSucceededUserScenarioJob(ctx context.Context, userScenarioSlug string) (transit.Job, bool, error)
-}
-
-// UserServiceIsochroneStore is the slice of the repository
-// UserServiceIsochrone needs: resolving and owning the service (ServiceStore,
-// shared with the service CRUD), and the latest compiled graph to stale-check
-// and compute over.
-//
-// Unlike UserIsochroneStore it has no ListUserServicesByIDs: a service is
-// always its own sole member, so the record loaded to authorize the request
-// already carries the UpdatedAt that staleness turns on.
-type UserServiceIsochroneStore interface {
-	ServiceStore
-	GetLatestSucceededUserServiceJob(ctx context.Context, userServiceSlug string) (transit.Job, bool, error)
-}
 
 type userIsochroneRequest struct {
 	Lat        float64 `json:"lat"`
@@ -86,61 +61,9 @@ func validateIsochroneRequest(w http.ResponseWriter, r *http.Request) (userIsoch
 // request's compiled graph — the production Chainer, which the seeded
 // /api/isochrone owns, cannot be reused because it is fixed to a different
 // IsochroneData at construction.
-func UserScenarioIsochrone(store UserIsochroneStore, stadiaClient stadia.Client, log *logger.Logger) http.HandlerFunc {
+func UserScenarioIsochrone(store ScenarioTargetStore, stadiaClient stadia.Client, log *logger.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		req, ok := validateIsochroneRequest(w, r)
-		if !ok {
-			return
-		}
-
-		sc, ok := loadScenario(w, r, store)
-		if !ok {
-			return
-		}
-		if !authorizeScenario(w, r, sc) {
-			return
-		}
-
-		job, found, err := store.GetLatestSucceededUserScenarioJob(r.Context(), sc.Slug)
-		if err != nil {
-			writeInternalError(w, "looking up compiled graph", err)
-			return
-		}
-		if !found || job.Result == nil {
-			writeError(w, http.StatusNotFound, "no compiled graph for this scenario yet")
-			return
-		}
-
-		members, err := store.ListUserServicesByIDs(r.Context(), sc.ServiceIDs)
-		if err != nil {
-			writeInternalError(w, "loading member services", err)
-			return
-		}
-		updatedAt := make(map[string]time.Time, len(members))
-		for _, m := range members {
-			updatedAt[m.ID] = m.UpdatedAt
-		}
-		if transit.GraphStale(job, sc.ServiceIDs, updatedAt) {
-			writeErrorCode(w, http.StatusConflict, StaleGraphErrorCode,
-				"compiled graph is stale; recompile the scenario and retry")
-			return
-		}
-
-		chainer := isochrone.New(stadiaClient, transit.CompiledGraphData{Graph: job.Result}, log)
-		resp, err := chainer.Chain(r.Context(), isochrone.ChainRequest{
-			Lat:          req.Lat,
-			Lng:          req.Lng,
-			BudgetMins:   req.BudgetMins,
-			Mode:         isochrone.Mode(req.Mode),
-			ScenarioSlug: sc.Slug,
-		})
-		if err != nil {
-			log.Debugf("user scenario isochrone chain error: %v", err)
-			writeChainError(w, err, "scenario not found")
-			return
-		}
-
-		writeJSON(w, http.StatusOK, resp)
+		authoredTargetIsochrone(w, r, scenarioTarget{store}, stadiaClient, log)
 	}
 }
 
@@ -159,61 +82,66 @@ func UserScenarioIsochrone(store UserIsochroneStore, stadiaClient stadia.Client,
 // In practice that reduces to the timestamp arm: a service is always its own
 // sole member, so it can only go stale by being edited — less often than a
 // scenario, which is also stale on a membership change or any member's edit.
-func UserServiceIsochrone(store UserServiceIsochroneStore, stadiaClient stadia.Client, log *logger.Logger) http.HandlerFunc {
+func UserServiceIsochrone(store ServiceTargetStore, stadiaClient stadia.Client, log *logger.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		req, ok := validateIsochroneRequest(w, r)
-		if !ok {
-			return
-		}
-
-		svc, ok := loadService(w, r, store)
-		if !ok {
-			return
-		}
-		if !authorizeService(w, r, svc) {
-			return
-		}
-
-		job, found, err := store.GetLatestSucceededUserServiceJob(r.Context(), svc.Slug)
-		if err != nil {
-			writeInternalError(w, "looking up compiled graph", err)
-			return
-		}
-		if !found || job.Result == nil {
-			writeError(w, http.StatusNotFound, "no compiled graph for this service yet")
-			return
-		}
-
-		if transit.GraphStale(job, []string{svc.ID}, map[string]time.Time{svc.ID: svc.UpdatedAt}) {
-			writeErrorCode(w, http.StatusConflict, StaleGraphErrorCode,
-				"compiled graph is stale; recompile the service and retry")
-			return
-		}
-
-		chainer := isochrone.New(stadiaClient, transit.CompiledGraphData{Graph: job.Result}, log)
-		resp, err := chainer.Chain(r.Context(), isochrone.ChainRequest{
-			Lat:        req.Lat,
-			Lng:        req.Lng,
-			BudgetMins: req.BudgetMins,
-			Mode:       isochrone.Mode(req.Mode),
-			// CompiledGraphData is already scoped to this one graph and ignores
-			// the slug on both its lookups, so a service slug resolves nothing
-			// here. Two places do still read it, neither fatal but both worth
-			// knowing: the chainer's `skipWait` literal (chainer.go:236), so a
-			// service whose name happens to slug to "ca-hsr" would silently be
-			// chained wait-free; and ChainMetadata.ScenarioSlug, so the response
-			// reports a service slug under "scenario_slug". Both belong to the
-			// wait model SPA-110 is to settle — recorded, not fixed here.
-			ScenarioSlug: svc.Slug,
-		})
-		if err != nil {
-			log.Debugf("user service isochrone chain error: %v", err)
-			writeChainError(w, err, "service not found")
-			return
-		}
-
-		writeJSON(w, http.StatusOK, resp)
+		authoredTargetIsochrone(w, r, serviceTarget{store}, stadiaClient, log)
 	}
+}
+
+// authoredTargetIsochrone computes an isochrone over one authored target's
+// compiled graph: the shared body of both isochrone handlers.
+func authoredTargetIsochrone(w http.ResponseWriter, r *http.Request, target authoredTarget,
+	stadiaClient stadia.Client, log *logger.Logger) {
+	req, ok := validateIsochroneRequest(w, r)
+	if !ok {
+		return
+	}
+
+	owned, ok := target.load(w, r)
+	if !ok {
+		return
+	}
+	noun := owned.noun()
+
+	job, ok := loadCompiledGraph(w, r, owned)
+	if !ok {
+		return
+	}
+
+	memberIDs, members, err := owned.members(r.Context())
+	if err != nil {
+		writeInternalError(w, "loading member services", err)
+		return
+	}
+	if transit.GraphStale(job, memberIDs, updatedAtByID(members)) {
+		writeErrorCode(w, http.StatusConflict, StaleGraphErrorCode,
+			"compiled graph is stale; recompile the "+noun+" and retry")
+		return
+	}
+
+	chainer := isochrone.New(stadiaClient, transit.CompiledGraphData{Graph: job.Result}, log)
+	resp, err := chainer.Chain(r.Context(), isochrone.ChainRequest{
+		Lat:        req.Lat,
+		Lng:        req.Lng,
+		BudgetMins: req.BudgetMins,
+		Mode:       isochrone.Mode(req.Mode),
+		// CompiledGraphData is already scoped to this one graph and ignores the
+		// slug on both its lookups, so the target's slug resolves nothing here.
+		// Two places do still read it, neither fatal but both worth knowing:
+		// the chainer's `skipWait` literal (chainer.go:236), so a target whose
+		// name happens to slug to "ca-hsr" would silently be chained wait-free;
+		// and ChainMetadata.ScenarioSlug, so a single service's response reports
+		// its slug under "scenario_slug". Both belong to the wait model SPA-110
+		// is to settle — recorded, not fixed here.
+		ScenarioSlug: owned.slug(),
+	})
+	if err != nil {
+		log.Debugf("user %s isochrone chain error: %v", noun, err)
+		writeChainError(w, err, noun+" not found")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // writeChainError maps a chainer failure onto a status code. notFoundMsg names

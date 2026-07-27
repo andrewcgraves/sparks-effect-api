@@ -18,7 +18,7 @@ import (
 )
 
 // fakeServiceStore is an in-memory handler.ServiceStore. It also backs
-// handler.UserServiceIsochroneStore (userisochrone_test.go) via jobs, rather
+// handler.ServiceTargetStore (userisochrone_test.go) via jobs, rather
 // than a second fake, since both seams read the same service rows.
 type fakeServiceStore struct {
 	services map[string]transit.UserService // keyed by ID
