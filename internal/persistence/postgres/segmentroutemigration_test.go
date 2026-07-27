@@ -25,11 +25,16 @@ import (
 // migrating partially keeps the test honest — it runs the real migration file,
 // not a copy of its SQL.
 //
-// It is the tail of the rewind chain in snapmigration_test.go: every earlier
-// rewind ends here, because goose refuses to re-apply an earlier migration
-// while a later one is still recorded as applied.
+// It is a link in the rewind chain in snapmigration_test.go: every earlier
+// rewind ends up here, because goose refuses to re-apply an earlier migration
+// while a later one is still recorded as applied. It passes the chain on to
+// 00012, the current tail.
+//
+// 00012 is unwound first, before the column drop below: it deletes the spur's
+// segments by route_id, which is the very column this rewind removes.
 func rewindSegmentRouteIDMigration(t *testing.T, url string) {
 	t.Helper()
+	rewindBrightlineWestMigration(t, url)
 	exec(t, url,
 		`DROP INDEX IF EXISTS segments_route_id_idx`,
 		`ALTER TABLE segments DROP COLUMN IF EXISTS route_id`,
