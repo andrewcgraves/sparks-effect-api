@@ -274,6 +274,45 @@ func decodeServiceRequest(w http.ResponseWriter, r *http.Request) (serviceReques
 	return req, true
 }
 
+// StopPlacementErrorCode marks a 422 whose detail is a stopPlacementDetail: the
+// submitted stops broke a placement rule, and the response names which ones.
+//
+// A client keys per-stop feedback off this rather than off the message text.
+// SPA-146 recovered stop names from that prose with regular expressions, so a
+// rewording silently cost the authoring UI its stop-row highlighting; the code
+// and detail exist so wording is free to change.
+const StopPlacementErrorCode = "stop_placement"
+
+// stopPlacementDetail is the wire form of transit.StopPlacementFault.
+//
+// It exists rather than the fault being marshalled directly because one field
+// is deliberately withheld: Backwards decides only how the message reads, and
+// publishing it would invite a client to render a distinction that is not a
+// fault at all — a service running against its route's drawn direction is
+// perfectly ordinary. The stops need no such filtering, so they are the transit
+// type itself rather than a handler clone of the same five fields.
+type stopPlacementDetail struct {
+	// Fault is the kind, "off_route" or "chainage_order". A client that does
+	// not recognise the value should fall back to displaying the message.
+	Fault     transit.StopPlacementFaultKind `json:"fault"`
+	RouteSlug string                         `json:"route_slug"`
+	// ThresholdM is echoed on an off-route fault so the client draws the same
+	// boundary the server enforced, matching the snap preview's
+	// off_route_threshold_m. An order fault is not measured against a distance,
+	// so it is omitted there rather than reported as a meaningless zero.
+	ThresholdM float64               `json:"threshold_m,omitempty"`
+	Stops      []transit.FaultedStop `json:"stops"`
+}
+
+func stopPlacementDetailFrom(fault *transit.StopPlacementFault) stopPlacementDetail {
+	return stopPlacementDetail{
+		Fault:      fault.Kind,
+		RouteSlug:  fault.RouteSlug,
+		ThresholdM: fault.ThresholdM,
+		Stops:      fault.Stops,
+	}
+}
+
 // validateAndSnapService resolves the route the request names, validates the
 // service against it, and snaps its stops onto that route's alignment — after
 // which svc holds the coordinates that will be stored.
@@ -311,6 +350,12 @@ func validateAndSnapService(w http.ResponseWriter, r *http.Request, store Servic
 		// they submitted a valid service against a route we cannot project on.
 		if errors.Is(err, transit.ErrRouteGeometry) {
 			writeInternalError(w, "snapping stops", err)
+			return false
+		}
+		var fault *transit.StopPlacementFault
+		if errors.As(err, &fault) {
+			writeErrorDetail(w, http.StatusUnprocessableEntity,
+				StopPlacementErrorCode, fault.Error(), stopPlacementDetailFrom(fault))
 			return false
 		}
 		writeError(w, http.StatusUnprocessableEntity, err.Error())

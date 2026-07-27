@@ -33,6 +33,97 @@ const OffRouteThresholdM = 500.0
 // not 422: the client has done nothing wrong and cannot fix it.
 var ErrRouteGeometry = errors.New("route geometry is unusable")
 
+// StopPlacementFaultKind names which placement rule a submitted service broke.
+// The values are the wire contract a client branches on, so they are stable
+// strings rather than an integer enum whose meaning depends on declaration
+// order.
+type StopPlacementFaultKind string
+
+const (
+	// OffRouteFault is a stop further than OffRouteThresholdM from the
+	// alignment. One stop is at fault.
+	OffRouteFault StopPlacementFaultKind = "off_route"
+	// ChainageOrderFault is an authored sequence that doubles back along the
+	// line — see FirstChainageOrderFault. Two adjacent stops are at fault.
+	ChainageOrderFault StopPlacementFaultKind = "chainage_order"
+)
+
+// FaultedStop identifies one stop a fault is about, and where it landed.
+//
+// Seq is the one field that always maps back to a row in what the client
+// submitted, since it is that stop's position in the request. Name and Slug are
+// reported alongside it for display and for a caller working from a stored
+// service, but neither is a reliable key on a refused write: the slug is minted
+// from the name (MintStopSlugs), so an edit that renames a stop reports a slug
+// the client has never seen, and a rejected create stores nothing under it.
+//
+// The json tags are here rather than on a handler copy of this struct because
+// the fields are the same either way, and a second struct to restate them is a
+// clone that can drift. The surrounding fault is not serialized directly —
+// see StopPlacementFault.Backwards.
+type FaultedStop struct {
+	Seq       int     `json:"seq"`
+	Name      string  `json:"name"`
+	Slug      string  `json:"slug"`
+	ChainageM float64 `json:"chainage_m"`
+	OffsetM   float64 `json:"offset_m"`
+}
+
+// StopPlacementFault is a refusal SnapToRoute can attribute to specific stops,
+// as opposed to ErrRouteGeometry, which is the stored route's fault.
+//
+// It exists so the placement rules have a machine-readable form. The prose from
+// Error() remains what a user reads, but it is no longer the contract: SPA-146
+// recovered stop identities from that wording with regular expressions, which
+// made every rewording a silent break of the authoring UI's per-stop feedback.
+//
+// A caller mapping this to HTTP should answer 422 — the client submitted stops
+// it can move.
+type StopPlacementFault struct {
+	Kind      StopPlacementFaultKind
+	RouteSlug string
+	// ThresholdM is the distance the fault was measured against. It is echoed
+	// for OffRouteFault only, so a client renders the boundary the server
+	// applied rather than keeping its own copy of the number.
+	ThresholdM float64
+	// Backwards records that the sequence had established a descending
+	// direction along the line before it doubled back. It decides only how the
+	// message reads — running against the drawn direction is not itself a
+	// fault — and is deliberately absent from the wire contract.
+	Backwards bool
+	// Stops are the offending stops in authored order: one for OffRouteFault,
+	// the adjacent pair for ChainageOrderFault.
+	Stops []FaultedStop
+}
+
+// Error renders the fault as the sentence a user reads. The wording is
+// unchanged from when it was the whole of the refusal, so nothing that displays
+// it has to change; it is simply no longer what a client reasons about.
+//
+// Each kind is matched together with the stops its message needs, and anything
+// that satisfies neither falls back to a bare sentence. A fault this package
+// did not construct is the only way to get there, but the alternative is
+// indexing into Stops on faith, and a message that confidently names the wrong
+// rule is worse than one that names none.
+func (f *StopPlacementFault) Error() string {
+	switch {
+	case f.Kind == OffRouteFault && len(f.Stops) >= 1:
+		stop := f.Stops[0]
+		return fmt.Sprintf("stop %q is %s from route %q",
+			stop.Name, formatDistance(stop.OffsetM), f.RouteSlug)
+	case f.Kind == ChainageOrderFault && len(f.Stops) >= 2:
+		from, to := f.Stops[0], f.Stops[1]
+		relation := "after"
+		if f.Backwards {
+			relation = "before"
+		}
+		return fmt.Sprintf("stop %q (seq %d) lies %s %q (seq %d) along this route",
+			from.Name, from.Seq, relation, to.Name, to.Seq)
+	default:
+		return fmt.Sprintf("stops are placed invalidly on route %q", f.RouteSlug)
+	}
+}
+
 // SnapToRoute projects every stop onto rt's alignment and rewrites it in place
 // with where it landed: snapped lat/lng, chainage along the line, and how far
 // it moved to get there.
@@ -52,8 +143,13 @@ var ErrRouteGeometry = errors.New("route geometry is unusable")
 //     would build a different stopping pattern from the one the service states.
 //
 // rt must be the route svc references; SnapToRoute does not check that, since
-// the caller resolved it. Errors other than ErrRouteGeometry name the offending
-// stop and are safe to return to the client verbatim.
+// the caller resolved it. Both refusals come back as a *StopPlacementFault,
+// which names the offending stops in fields and whose message is safe to return
+// to the client verbatim. Only ErrRouteGeometry is anything else.
+//
+// Stop identity in the fault is whatever svc carries, so a caller that wants
+// slugs in it must have minted them (MintStopSlugs) first — as the write path
+// does, well before it snaps.
 func (s *UserService) SnapToRoute(rt Route) error {
 	line, err := ToPhysicsLine(rt.Geometry)
 	if err != nil {
@@ -72,10 +168,24 @@ func (s *UserService) SnapToRoute(rt Route) error {
 		return fmt.Errorf("%w: route %q: %w", ErrRouteGeometry, rt.Slug, err)
 	}
 
+	faultedStop := func(i int) FaultedStop {
+		return FaultedStop{
+			Seq:       s.Stops[i].Seq,
+			Name:      s.Stops[i].Name,
+			Slug:      s.Stops[i].Slug,
+			ChainageM: snapped[i].ChainageM,
+			OffsetM:   snapped[i].OffsetM,
+		}
+	}
+
 	for i, sn := range snapped {
 		if sn.OffsetM > OffRouteThresholdM {
-			return fmt.Errorf("stop %q is %s from route %q",
-				s.Stops[i].Name, formatDistance(sn.OffsetM), rt.Slug)
+			return &StopPlacementFault{
+				Kind:       OffRouteFault,
+				RouteSlug:  rt.Slug,
+				ThresholdM: OffRouteThresholdM,
+				Stops:      []FaultedStop{faultedStop(i)},
+			}
 		}
 	}
 	chainages := make([]float64, len(snapped))
@@ -83,13 +193,12 @@ func (s *UserService) SnapToRoute(rt Route) error {
 		chainages[i] = sn.ChainageM
 	}
 	if i, backwards, faulty := FirstChainageOrderFault(chainages); faulty {
-		from, to := s.Stops[i], s.Stops[i+1]
-		relation := "after"
-		if backwards {
-			relation = "before"
+		return &StopPlacementFault{
+			Kind:      ChainageOrderFault,
+			RouteSlug: rt.Slug,
+			Backwards: backwards,
+			Stops:     []FaultedStop{faultedStop(i), faultedStop(i + 1)},
 		}
-		return fmt.Errorf("stop %q (seq %d) lies %s %q (seq %d) along this route",
-			from.Name, from.Seq, relation, to.Name, to.Seq)
 	}
 
 	// Every check has passed, so committing the rewrite cannot leave the
