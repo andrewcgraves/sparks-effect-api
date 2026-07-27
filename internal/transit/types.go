@@ -146,10 +146,19 @@ type Service struct {
 // For bidirectional services the reverse direction uses the same time.
 // Multi-hop origin–destination times are derived by summing consecutive segments;
 // see Store.TravelTimeBetween.
+//
+// RouteID names the route this span is track of, not the service that runs over
+// it: several services share one corridor (CA HSR Express and Local both run
+// Phase 1), so the route is the only identity a segment actually has. It is the
+// grouping key for a "time between stations" table once a scenario spans more
+// than one corridor. Compilation stays route-blind — buildSegmentAdj still walks
+// every segment as one physical graph, so services can path across corridors
+// that meet at a shared station.
 type SegmentTime struct {
 	FromSlug   string `yaml:"from"        json:"from"`
 	ToSlug     string `yaml:"to"          json:"to"`
 	RunSeconds int    `yaml:"run_seconds" json:"run_seconds"`
+	RouteID    string `yaml:"route_id"    json:"route_id"`
 }
 
 // TravelTimes holds adjacent segment run times for a scenario.

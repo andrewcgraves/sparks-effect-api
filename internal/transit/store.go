@@ -141,6 +141,9 @@ func (s *Store) loadScenario(slug string) error {
 	if err := unmarshalFile(dataFS, base+"/segment_run_times.yaml", &tt); err != nil {
 		return err
 	}
+	if err := validateSegmentRoutes(routes, tt); err != nil {
+		return err
+	}
 	s.travelTimes[slug] = tt
 
 	g, err := Compile(sc, routes, stations, services, vts, tt)

@@ -121,6 +121,25 @@ func TestSeedAndCompiledReadPathAcrossRestart(t *testing.T) {
 		t.Errorf("active services: want 2 (Express + Local), got %d", got)
 	}
 
+	// Segment route ids survive the write/read round trip, so a restarted
+	// process can still group run times by corridor.
+	tt, ok := store.GetTravelTimes("ca-hsr")
+	if !ok {
+		t.Fatal("travel times not found for ca-hsr after restart")
+	}
+	if len(tt.Segments) == 0 {
+		t.Fatal("segments empty after restart")
+	}
+	routeIDs := make(map[string]bool)
+	for _, rt := range store.GetRoutesByScenario(sc.ID) {
+		routeIDs[rt.ID] = true
+	}
+	for _, seg := range tt.Segments {
+		if !routeIDs[seg.RouteID] {
+			t.Errorf("segment %s→%s: route_id %q not a route of ca-hsr", seg.FromSlug, seg.ToSlug, seg.RouteID)
+		}
+	}
+
 	// The compiled-graph read path must still produce isochrone travel times
 	// from the stored rows: sf→millbrae = 760 run + 90 dwell = 850.
 	secs, _, svcID, ok := store.TravelTimeBetween("ca-hsr", "sf", "millbrae")

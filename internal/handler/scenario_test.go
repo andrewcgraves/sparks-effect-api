@@ -344,7 +344,17 @@ func TestScenarioTravelTimes_found(t *testing.T) {
 	}
 	segments, ok := body["segments"].([]any)
 	if !ok || len(segments) == 0 {
-		t.Error("expected non-empty segments")
+		t.Fatal("expected non-empty segments")
+	}
+	// Each segment names its route so the client can group run times by corridor.
+	for i, raw := range segments {
+		seg, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("segment %d: want object, got %T", i, raw)
+		}
+		if seg["route_id"] == "" || seg["route_id"] == nil {
+			t.Errorf("segment %d: route_id missing or empty", i)
+		}
 	}
 }
 

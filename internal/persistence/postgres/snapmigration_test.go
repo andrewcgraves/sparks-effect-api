@@ -67,6 +67,7 @@ func rewindInterchangePairsMigration(t *testing.T, url string) {
 	exec(t, url,
 		`ALTER TABLE user_scenarios DROP COLUMN IF EXISTS interchange_pairs`,
 		`DELETE FROM goose_db_version WHERE version_id = 10`)
+	rewindSegmentRouteIDMigration(t, url)
 }
 
 func exec(t *testing.T, url string, statements ...string) {

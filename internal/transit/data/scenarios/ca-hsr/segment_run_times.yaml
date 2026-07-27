@@ -13,7 +13,9 @@
 # (see Store.TravelTimeBetween). This replaces the full NxN matrix; callers do not store
 # computed OD times — the store sums on demand.
 #
-# Station slugs match stations.yaml slug values.
+# Station slugs match stations.yaml slug values; route_id matches routes.yaml ids.
+# route_id is the corridor a span is track of — Express and Local share Phase 1,
+# so the route, not the service, is what a segment belongs to.
 
 scenario_slug: "ca-hsr"
 provenance: calibrated
@@ -23,44 +25,58 @@ segments:
   - from: sf
     to: millbrae
     run_seconds: 760
+    route_id: "00000000-0000-4002-8001-000000000001"
   - from: millbrae
     to: san-jose
     run_seconds: 2110
+    route_id: "00000000-0000-4002-8001-000000000001"
   - from: san-jose
     to: gilroy
     run_seconds: 1100
+    route_id: "00000000-0000-4002-8001-000000000001"
   - from: gilroy
     to: merced
     run_seconds: 3050
+    route_id: "00000000-0000-4002-8001-000000000001"
   - from: merced
     to: madera
     run_seconds: 1040
+    route_id: "00000000-0000-4002-8001-000000000001"
   - from: madera
     to: fresno
     run_seconds: 420
+    route_id: "00000000-0000-4002-8001-000000000001"
   - from: fresno
     to: kings-tulare
     run_seconds: 650
+    route_id: "00000000-0000-4002-8001-000000000001"
   - from: kings-tulare
     to: bakersfield
     run_seconds: 1320
+    route_id: "00000000-0000-4002-8001-000000000001"
   - from: bakersfield
     to: palmdale
     run_seconds: 1660
+    route_id: "00000000-0000-4002-8001-000000000001"
   - from: palmdale
     to: burbank-airport
     run_seconds: 2500
+    route_id: "00000000-0000-4002-8001-000000000001"
   - from: burbank-airport
     to: los-angeles
     run_seconds: 870
+    route_id: "00000000-0000-4002-8001-000000000001"
   - from: los-angeles
     to: anaheim
     run_seconds: 1800
+    route_id: "00000000-0000-4002-8001-000000000001"
   # --- Brightline West (deferred) — Palmdale → Las Vegas ---
   # Run-only estimates; dwell will be added at compile time.
   # - from: palmdale
   #   to: victor-valley
   #   run_seconds: 1050
+  #   route_id: "00000000-0000-4002-8001-000000000002"
   # - from: victor-valley
   #   to: las-vegas
   #   run_seconds: 5310
+  #   route_id: "00000000-0000-4002-8001-000000000002"
