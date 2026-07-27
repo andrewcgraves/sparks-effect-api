@@ -97,7 +97,7 @@
     type: Point
     coordinates: [-118.119, 34.591]
 
-# --- Brightline West ---
+# Brightline West spur — branches off Phase 1 at Palmdale, above.
 - id: "00000000-0000-4005-8001-00000000000b"
   scenario_id: "00000000-0000-4001-8001-000000000001"
   slug: "victor-valley"
@@ -134,7 +134,7 @@
     type: Point
     coordinates: [-117.878, 33.803]
 
-# --- Brightline West ---
+# Brightline West spur terminus.
 - id: "00000000-0000-4005-8001-00000000000f"
   scenario_id: "00000000-0000-4001-8001-000000000001"
   slug: "las-vegas"

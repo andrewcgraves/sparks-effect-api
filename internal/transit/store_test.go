@@ -309,6 +309,40 @@ func TestTravelTimeBetween(t *testing.T) {
 	}
 }
 
+// serviceEdges returns the named service's compiled edges keyed "from→to", so a
+// test can assert an end-to-end time by naming the stops it runs through.
+func serviceEdges(t *testing.T, g *TransitGraph, serviceID, name string) map[string]int {
+	t.Helper()
+	for i := range g.Services {
+		if g.Services[i].ServiceID != serviceID {
+			continue
+		}
+		adj := make(map[string]int, len(g.Services[i].Edges))
+		for _, e := range g.Services[i].Edges {
+			adj[e.FromSlug+"→"+e.ToSlug] = e.Seconds
+		}
+		return adj
+	}
+	t.Fatalf("%s service graph not found", name)
+	return nil
+}
+
+// sumStopToStop walks consecutive stops through adj, failing if any hop is
+// missing rather than silently under-counting the total.
+func sumStopToStop(t *testing.T, adj map[string]int, name string, stops []string) int {
+	t.Helper()
+	total := 0
+	for i := 0; i+1 < len(stops); i++ {
+		key := stops[i] + "→" + stops[i+1]
+		secs, found := adj[key]
+		if !found {
+			t.Fatalf("edge %q not in %s graph", key, name)
+		}
+		total += secs
+	}
+	return total
+}
+
 func TestLocalSFToAnaheim_compiledTime_approx306min(t *testing.T) {
 	// Table 3-4, 2026 Business Plan: all-stop SF→Anaheim = 306 min.
 	// Compiled Local = run sum 17280 s + 12×90 s dwell = 18360 s = 306.0 min exactly.
@@ -319,36 +353,14 @@ func TestLocalSFToAnaheim_compiledTime_approx306min(t *testing.T) {
 	}
 
 	const localSvcID = "00000000-0000-4004-8001-000000000002"
-	var localSG *ServiceGraph
-	for i := range g.Services {
-		if g.Services[i].ServiceID == localSvcID {
-			localSG = &g.Services[i]
-			break
-		}
-	}
-	if localSG == nil {
-		t.Fatal("HSR Local service graph not found")
-	}
-
-	adj := map[string]int{}
-	for _, e := range localSG.Edges {
-		adj[e.FromSlug+"→"+e.ToSlug] = e.Seconds
-	}
+	adj := serviceEdges(t, g, localSvcID, "HSR Local")
 
 	allStops := []string{
 		"sf", "millbrae", "san-jose", "gilroy", "merced", "madera",
 		"fresno", "kings-tulare", "bakersfield", "palmdale",
 		"burbank-airport", "los-angeles", "anaheim",
 	}
-	total := 0
-	for i := 0; i+1 < len(allStops); i++ {
-		key := allStops[i] + "→" + allStops[i+1]
-		secs, found := adj[key]
-		if !found {
-			t.Fatalf("edge %q not in HSR Local graph", key)
-		}
-		total += secs
-	}
+	total := sumStopToStop(t, adj, "HSR Local", allStops)
 
 	const (
 		wantMin = 18240
@@ -397,9 +409,12 @@ func TestSeededTravelTimes_brightlineWestIsADistinctRouteGroup(t *testing.T) {
 	}
 }
 
+// spurEndToEndSecs is the compiled Palmdale→Las Vegas time: run-only
+// 1050 + 5310 = 6360 s, plus one 90 s dwell at the intermediate Victor Valley
+// stop = 6450 s (107.5 min).
+const spurEndToEndSecs = 6450
+
 func TestBrightlineWest_compiledPalmdaleToLasVegas(t *testing.T) {
-	// Run-only 1050 + 5310 = 6360 s, plus one 90 s dwell at the intermediate
-	// Victor Valley stop = 6450 s (107.5 min) end to end.
 	store := mustNewStore(t)
 	g, ok := store.Graph("ca-hsr")
 	if !ok {
@@ -407,44 +422,35 @@ func TestBrightlineWest_compiledPalmdaleToLasVegas(t *testing.T) {
 	}
 
 	const bwSvcID = "00000000-0000-4004-8001-000000000003"
-	var bwSG *ServiceGraph
-	for i := range g.Services {
-		if g.Services[i].ServiceID == bwSvcID {
-			bwSG = &g.Services[i]
-			break
-		}
+	adj := serviceEdges(t, g, bwSvcID, "Brightline West")
+
+	stops := []string{"palmdale", "victor-valley", "las-vegas"}
+	total := sumStopToStop(t, adj, "Brightline West", stops)
+
+	const tolerance = 120
+	if total < spurEndToEndSecs-tolerance || total > spurEndToEndSecs+tolerance {
+		t.Errorf("Brightline West Palmdale→Las Vegas: got %d s (%d min), want %d s ±%d",
+			total, total/60, spurEndToEndSecs, tolerance)
 	}
-	if bwSG == nil {
-		t.Fatal("Brightline West service graph not found")
+}
+
+// The spur hangs off Palmdale rather than rejoining Phase 1, so reaching Las
+// Vegas from the Bay Area has to traverse Phase 1 first — it must never come
+// out as the spur's own length.
+func TestBrightlineWest_spurDoesNotShortcutPhase1(t *testing.T) {
+	store := mustNewStore(t)
+
+	secs, _, _, ok := store.TravelTimeBetween("ca-hsr", "sf", "las-vegas")
+	if !ok {
+		t.Fatal("sf→las-vegas should be reachable via the Palmdale interchange")
+	}
+	if secs <= spurEndToEndSecs {
+		t.Errorf("sf→las-vegas: got %d s, want more than the spur alone (%d s)", secs, spurEndToEndSecs)
 	}
 
-	adj := map[string]int{}
-	for _, e := range bwSG.Edges {
-		adj[e.FromSlug+"→"+e.ToSlug] = e.Seconds
-	}
-
-	total := 0
-	for _, key := range []string{"palmdale→victor-valley", "victor-valley→las-vegas"} {
-		secs, found := adj[key]
-		if !found {
-			t.Fatalf("edge %q not in Brightline West graph", key)
-		}
-		total += secs
-	}
-
-	const (
-		wantMin = 6330
-		wantMax = 6570
-	)
-	if total < wantMin || total > wantMax {
-		t.Errorf("Brightline West Palmdale→Las Vegas: got %d s (%d min), want %d–%d s",
-			total, total/60, wantMin, wantMax)
-	}
-
-	// The spur is a dead end off Palmdale, so it must not shortcut any Phase 1 pair.
-	if secs, _, _, ok := store.TravelTimeBetween("ca-hsr", "sf", "las-vegas"); !ok {
-		t.Error("sf→las-vegas should be reachable via Palmdale interchange")
-	} else if secs <= 6450 {
-		t.Errorf("sf→las-vegas: got %d s, want more than the spur alone (6450 s)", secs)
+	// Phase 1 pairs must be unchanged by the spur's presence: sf→anaheim still
+	// runs the mainline, never through Victor Valley.
+	if _, _, _, ok := store.TravelTimeBetween("ca-hsr", "sf", "anaheim"); !ok {
+		t.Error("sf→anaheim should still be reachable")
 	}
 }
