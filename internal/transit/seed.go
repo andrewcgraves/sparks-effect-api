@@ -102,9 +102,32 @@ func seedScenario(ctx context.Context, repo Repository, slug string) error {
 	if err := unmarshalFile(dataFS, base+"/segment_run_times.yaml", &tt); err != nil {
 		return err
 	}
+	if err := validateSegmentRoutes(routes, tt); err != nil {
+		return err
+	}
 	if err := repo.UpsertTravelTimes(ctx, tt); err != nil {
 		return fmt.Errorf("upserting travel times: %w", err)
 	}
 
+	return nil
+}
+
+// validateSegmentRoutes asserts every segment names a route the scenario
+// actually has. The database enforces the same thing with a foreign key, but
+// only on the seeding path — the store also builds itself straight from the
+// embedded YAML, where a mistyped route id would otherwise surface much later
+// as a segment no client can group.
+func validateSegmentRoutes(routes []Route, tt TravelTimes) error {
+	known := make(map[string]bool, len(routes))
+	for _, rt := range routes {
+		known[rt.ID] = true
+	}
+	for _, seg := range tt.Segments {
+		if !known[seg.RouteID] {
+			return fmt.Errorf(
+				"transit: segment %s→%s names route %q, which is not a route of scenario %q",
+				seg.FromSlug, seg.ToSlug, seg.RouteID, tt.ScenarioSlug)
+		}
+	}
 	return nil
 }

@@ -67,6 +67,19 @@ func rewindInterchangePairsMigration(t *testing.T, url string) {
 	exec(t, url,
 		`ALTER TABLE user_scenarios DROP COLUMN IF EXISTS interchange_pairs`,
 		`DELETE FROM goose_db_version WHERE version_id = 10`)
+	rewindSegmentRouteIDMigration(t, url)
+}
+
+// rewindSegmentRouteIDMigration unwinds 00011 (segments.route_id), for the same
+// reason 00010 is unwound alongside the earlier migrations: goose refuses to
+// re-apply an earlier migration while a later one is still recorded as applied.
+// It is the tail of the chain — every rewind above ends here.
+func rewindSegmentRouteIDMigration(t *testing.T, url string) {
+	t.Helper()
+	exec(t, url,
+		`DROP INDEX IF EXISTS segments_route_id_idx`,
+		`ALTER TABLE segments DROP COLUMN IF EXISTS route_id`,
+		`DELETE FROM goose_db_version WHERE version_id = 11`)
 }
 
 func exec(t *testing.T, url string, statements ...string) {

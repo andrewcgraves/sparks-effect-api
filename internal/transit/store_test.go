@@ -239,6 +239,31 @@ func TestGetTravelTimes(t *testing.T) {
 	}
 }
 
+// Every seeded segment names the route it is a span of, so a client can group
+// "time between stations" by corridor once a scenario carries more than one.
+func TestGetTravelTimesSegmentsCarryKnownRouteID(t *testing.T) {
+	store := mustNewStore(t)
+
+	sc, ok := store.GetScenarioBySlug("ca-hsr")
+	if !ok {
+		t.Fatal("ca-hsr scenario not found")
+	}
+	known := make(map[string]bool)
+	for _, rt := range store.GetRoutesByScenario(sc.ID) {
+		known[rt.ID] = true
+	}
+
+	tt, ok := store.GetTravelTimes("ca-hsr")
+	if !ok {
+		t.Fatal("travel times not found for ca-hsr")
+	}
+	for _, seg := range tt.Segments {
+		if !known[seg.RouteID] {
+			t.Errorf("segment %s→%s: route_id %q is not a route of ca-hsr", seg.FromSlug, seg.ToSlug, seg.RouteID)
+		}
+	}
+}
+
 func TestTravelTimeBetween(t *testing.T) {
 	store := mustNewStore(t)
 
