@@ -195,9 +195,16 @@ func DeleteUserScenario(store ScenarioStore) http.HandlerFunc {
 	}
 }
 
+// scenarioBySlugStore is the single lookup loadScenario needs, narrower than
+// ScenarioStore for the same reason as serviceBySlugStore: the compile, graph,
+// and isochrone surfaces resolve a scenario through this loader too.
+type scenarioBySlugStore interface {
+	GetUserScenarioBySlug(ctx context.Context, slug string) (transit.UserScenario, bool, error)
+}
+
 // loadScenario resolves the {slug} path value, writing 404 or 500 and
 // reporting false when it cannot.
-func loadScenario(w http.ResponseWriter, r *http.Request, store ScenarioStore) (transit.UserScenario, bool) {
+func loadScenario(w http.ResponseWriter, r *http.Request, store scenarioBySlugStore) (transit.UserScenario, bool) {
 	sc, found, err := store.GetUserScenarioBySlug(r.Context(), r.PathValue("slug"))
 	if err != nil {
 		writeInternalError(w, "loading scenario", err)
