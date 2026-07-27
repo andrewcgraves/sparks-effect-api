@@ -313,10 +313,76 @@ func validateAndSnapService(w http.ResponseWriter, r *http.Request, store Servic
 			writeInternalError(w, "snapping stops", err)
 			return false
 		}
+		var fault *transit.StopPlacementFault
+		if errors.As(err, &fault) {
+			writeErrorDetail(w, http.StatusUnprocessableEntity,
+				StopPlacementErrorCode, fault.Error(), stopPlacementDetailFrom(fault))
+			return false
+		}
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
 		return false
 	}
 	return true
+}
+
+// StopPlacementErrorCode marks a 422 whose detail is a stopPlacementDetail: the
+// submitted stops broke a placement rule, and the response names which ones.
+//
+// A client keys per-stop feedback off this rather than off the message text.
+// SPA-146 recovered stop names from that prose with regular expressions, so a
+// rewording silently cost the authoring UI its stop-row highlighting; the code
+// and detail exist so wording is free to change.
+const StopPlacementErrorCode = "stop_placement"
+
+// stopPlacementDetail is the wire form of transit.StopPlacementFault.
+//
+// It is a handler type rather than JSON tags on the transit fault because this
+// is an HTTP contract, not part of the model: the fault carries a Backwards
+// flag that only decides how the message reads, and publishing it would invite
+// a client to render a distinction that is not a fault at all — a service
+// running against its route's drawn direction is perfectly ordinary.
+type stopPlacementDetail struct {
+	// Fault is transit.StopPlacementFaultKind — "off_route" or
+	// "chainage_order". A client that does not recognise the value should fall
+	// back to displaying the message.
+	Fault     string `json:"fault"`
+	RouteSlug string `json:"route_slug"`
+	// ThresholdM is echoed on an off-route fault so the client draws the same
+	// boundary the server enforced, matching the snap preview's
+	// off_route_threshold_m. An order fault is not measured against a distance,
+	// so it is omitted there rather than reported as a meaningless zero.
+	ThresholdM float64             `json:"threshold_m,omitempty"`
+	Stops      []stopPlacementStop `json:"stops"`
+}
+
+// stopPlacementStop names one offending stop three ways, since a client may
+// hold any of them: an authoring UI mid-create knows the seq and the name it
+// typed, while anything working from a stored service has the slug.
+type stopPlacementStop struct {
+	Seq       int     `json:"seq"`
+	Name      string  `json:"name"`
+	Slug      string  `json:"slug"`
+	ChainageM float64 `json:"chainage_m"`
+	OffsetM   float64 `json:"offset_m"`
+}
+
+func stopPlacementDetailFrom(fault *transit.StopPlacementFault) stopPlacementDetail {
+	stops := make([]stopPlacementStop, len(fault.Stops))
+	for i, s := range fault.Stops {
+		stops[i] = stopPlacementStop{
+			Seq:       s.Seq,
+			Name:      s.Name,
+			Slug:      s.Slug,
+			ChainageM: s.ChainageM,
+			OffsetM:   s.OffsetM,
+		}
+	}
+	return stopPlacementDetail{
+		Fault:      string(fault.Kind),
+		RouteSlug:  fault.RouteSlug,
+		ThresholdM: fault.ThresholdM,
+		Stops:      stops,
+	}
 }
 
 // maxSlugAttempts bounds the collision-suffix search. Exhausting it means

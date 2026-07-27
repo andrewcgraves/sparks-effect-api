@@ -253,6 +253,80 @@ func TestSnapToRouteResetsOffsetWhenAnAlreadySnappedStopIsResubmitted(t *testing
 	}
 }
 
+// TestOffRouteRefusalCarriesAStructuredFault pins the machine-readable half of
+// an off-route refusal (SPA-151). The prose stays the message a user reads; the
+// fault is what a client branches on, so it names the stop by fields rather
+// than leaving the caller to recover it from wording.
+func TestOffRouteRefusalCarriesAStructuredFault(t *testing.T) {
+	svc := serviceOnSnapRoute(0, -121.8, -121.4)
+	svc.Slug = "central-valley-express"
+	svc.MintStopSlugs()
+	svc.Stops[1].Lat = 37.01 // ~1112 m north of the alignment
+
+	var fault *transit.StopPlacementFault
+	if err := svc.SnapToRoute(snapTestRoute()); !errors.As(err, &fault) {
+		t.Fatalf("SnapToRoute error = %v (%T), want a *transit.StopPlacementFault", err, err)
+	}
+
+	if fault.Kind != transit.OffRouteFault {
+		t.Errorf("kind = %q, want %q", fault.Kind, transit.OffRouteFault)
+	}
+	if fault.RouteSlug != "ca-hsr-central-valley" {
+		t.Errorf("route slug = %q, want the route the stop missed", fault.RouteSlug)
+	}
+	if fault.ThresholdM != transit.OffRouteThresholdM {
+		t.Errorf("threshold = %v, want %v", fault.ThresholdM, transit.OffRouteThresholdM)
+	}
+	if len(fault.Stops) != 1 {
+		t.Fatalf("got %d faulted stops, want 1: %+v", len(fault.Stops), fault.Stops)
+	}
+	got := fault.Stops[0]
+	if got.Name != "B" || got.Seq != 1 || got.Slug != "central-valley-express--b" {
+		t.Errorf("faulted stop = %+v, want B at seq 1 with its minted slug", got)
+	}
+	if math.Abs(got.OffsetM-offsetForDegLat(0.01)) > 1 {
+		t.Errorf("faulted stop offset = %v m, want ~%v m", got.OffsetM, offsetForDegLat(0.01))
+	}
+}
+
+// TestChainageOrderRefusalNamesBothStops covers the fault whose prose was the
+// harder of the two to parse: the offending pair is what the authoring UI
+// highlights, and either stop alone does not describe the disagreement.
+func TestChainageOrderRefusalNamesBothStops(t *testing.T) {
+	// A and B run east; C doubles back between them.
+	svc := serviceOnSnapRoute(0, -121.8, -121.4, -121.6)
+	svc.Slug = "central-valley-express"
+	svc.MintStopSlugs()
+
+	var fault *transit.StopPlacementFault
+	if err := svc.SnapToRoute(snapTestRoute()); !errors.As(err, &fault) {
+		t.Fatalf("SnapToRoute error = %v (%T), want a *transit.StopPlacementFault", err, err)
+	}
+
+	if fault.Kind != transit.ChainageOrderFault {
+		t.Errorf("kind = %q, want %q", fault.Kind, transit.ChainageOrderFault)
+	}
+	if len(fault.Stops) != 2 {
+		t.Fatalf("got %d faulted stops, want the offending pair: %+v", len(fault.Stops), fault.Stops)
+	}
+	// Reported in authored order, so the pair reads the way the message does.
+	if fault.Stops[0].Name != "B" || fault.Stops[1].Name != "C" {
+		t.Errorf("faulted pair = %q, %q, want B then C", fault.Stops[0].Name, fault.Stops[1].Name)
+	}
+	if fault.Stops[0].Seq != 1 || fault.Stops[1].Seq != 2 {
+		t.Errorf("faulted seqs = %d, %d, want 1 then 2", fault.Stops[0].Seq, fault.Stops[1].Seq)
+	}
+	if fault.Stops[0].Slug != "central-valley-express--b" {
+		t.Errorf("faulted stop slug = %q, want the minted identity", fault.Stops[0].Slug)
+	}
+	// Chainage is what the pair disagrees about, so it is reported for both:
+	// C sits short of B despite being authored after it.
+	if fault.Stops[1].ChainageM >= fault.Stops[0].ChainageM {
+		t.Errorf("chainages = %v, %v, want C short of B — that is the fault",
+			fault.Stops[0].ChainageM, fault.Stops[1].ChainageM)
+	}
+}
+
 func TestSnapToRouteReportsUnusableGeometry(t *testing.T) {
 	rt := snapTestRoute()
 	rt.Geometry.Coordinates = [][]float64{{-122.0, 37.0}}

@@ -672,6 +672,156 @@ func TestCreateRejectsStopsOutOfChainageOrder(t *testing.T) {
 	}
 }
 
+// --- Structured placement faults (SPA-151) ---
+
+// stopPlacementBody is the machine-readable half of a 422 from the write path.
+// Declared here rather than reusing a handler type so the test pins the wire
+// contract by name: a renamed JSON key has to fail here, not silently pass by
+// following the struct it broke.
+type stopPlacementBody struct {
+	Error  string `json:"error"`
+	Code   string `json:"code"`
+	Detail struct {
+		Fault      string  `json:"fault"`
+		RouteSlug  string  `json:"route_slug"`
+		ThresholdM float64 `json:"threshold_m"`
+		Stops      []struct {
+			Seq       int     `json:"seq"`
+			Name      string  `json:"name"`
+			Slug      string  `json:"slug"`
+			ChainageM float64 `json:"chainage_m"`
+			OffsetM   float64 `json:"offset_m"`
+		} `json:"stops"`
+	} `json:"detail"`
+}
+
+func decodePlacementFault(t *testing.T, rec *httptest.ResponseRecorder) stopPlacementBody {
+	t.Helper()
+	var body stopPlacementBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decoding error body: %v (body %s)", err, rec.Body)
+	}
+	return body
+}
+
+func TestOffRouteRejectionCarriesStructuredDetail(t *testing.T) {
+	store := newFakeServiceStore()
+	body := snapPayload("diagonal", [3]string{"On line", "1", "1"}, [3]string{"Gilroy", "10", "20"})
+
+	rec := serveAs(t, store, svcOwner, http.MethodPost, "/api/services", body)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("got %d, want %d (body %s)", rec.Code, http.StatusUnprocessableEntity, rec.Body)
+	}
+
+	got := decodePlacementFault(t, rec)
+	if got.Code != handler.StopPlacementErrorCode {
+		t.Errorf("code = %q, want %q", got.Code, handler.StopPlacementErrorCode)
+	}
+	if got.Detail.Fault != string(transit.OffRouteFault) {
+		t.Errorf("fault = %q, want %q", got.Detail.Fault, transit.OffRouteFault)
+	}
+	if got.Detail.RouteSlug != "diagonal" {
+		t.Errorf("route_slug = %q, want %q", got.Detail.RouteSlug, "diagonal")
+	}
+	if got.Detail.ThresholdM != transit.OffRouteThresholdM {
+		t.Errorf("threshold_m = %v, want %v", got.Detail.ThresholdM, transit.OffRouteThresholdM)
+	}
+	if len(got.Detail.Stops) != 1 {
+		t.Fatalf("got %d stops in detail, want 1: %+v", len(got.Detail.Stops), got.Detail.Stops)
+	}
+	stop := got.Detail.Stops[0]
+	if stop.Name != "Gilroy" || stop.Seq != 1 {
+		t.Errorf("detail stop = %+v, want Gilroy at seq 1", stop)
+	}
+	// The slug is minted before the snap, so even a create that never reached
+	// the store names the stop the way a stored one would be named.
+	if stop.Slug != "snapped--gilroy" {
+		t.Errorf("detail stop slug = %q, want %q", stop.Slug, "snapped--gilroy")
+	}
+	if stop.OffsetM <= transit.OffRouteThresholdM {
+		t.Errorf("detail offset_m = %v, want it past the threshold it breached", stop.OffsetM)
+	}
+	// The prose survives as the user-facing message; it is just no longer the
+	// only thing a client has to work from.
+	if !strings.Contains(got.Error, "Gilroy") {
+		t.Errorf("error message %q no longer names the stop", got.Error)
+	}
+}
+
+func TestChainageOrderRejectionCarriesBothStopsInDetail(t *testing.T) {
+	store := newFakeServiceStore()
+	// Authored A→C→B, but C lies beyond B along the line.
+	body := snapPayload("diagonal",
+		[3]string{"A", "1", "1"}, [3]string{"C", "3", "3"}, [3]string{"B", "2", "2"})
+
+	rec := serveAs(t, store, svcOwner, http.MethodPost, "/api/services", body)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("got %d, want %d (body %s)", rec.Code, http.StatusUnprocessableEntity, rec.Body)
+	}
+
+	got := decodePlacementFault(t, rec)
+	if got.Code != handler.StopPlacementErrorCode {
+		t.Errorf("code = %q, want %q", got.Code, handler.StopPlacementErrorCode)
+	}
+	if got.Detail.Fault != string(transit.ChainageOrderFault) {
+		t.Errorf("fault = %q, want %q", got.Detail.Fault, transit.ChainageOrderFault)
+	}
+	if len(got.Detail.Stops) != 2 {
+		t.Fatalf("got %d stops in detail, want the offending pair: %+v", len(got.Detail.Stops), got.Detail.Stops)
+	}
+	if got.Detail.Stops[0].Name != "C" || got.Detail.Stops[1].Name != "B" {
+		t.Errorf("detail pair = %q, %q, want C then B (authored order)",
+			got.Detail.Stops[0].Name, got.Detail.Stops[1].Name)
+	}
+	if got.Detail.Stops[0].Seq != 1 || got.Detail.Stops[1].Seq != 2 {
+		t.Errorf("detail seqs = %d, %d, want 1 then 2", got.Detail.Stops[0].Seq, got.Detail.Stops[1].Seq)
+	}
+	// An order fault is not measured against a distance, so echoing one would
+	// invite a client to render a boundary that decided nothing here.
+	if got.Detail.ThresholdM != 0 {
+		t.Errorf("threshold_m = %v, want it absent from an order fault", got.Detail.ThresholdM)
+	}
+}
+
+// TestUpdateRejectionCarriesStructuredDetailToo pins that the two write paths
+// answer the same way. The authoring UI edits far more often than it creates,
+// so a detail that only appeared on create would be missing where it matters.
+func TestUpdateRejectionCarriesStructuredDetailToo(t *testing.T) {
+	store := newFakeServiceStore()
+	seedService(store, "svc-1", "seeded", svcOwner.ID)
+
+	body := snapPayload("diagonal", [3]string{"A", "1", "1"}, [3]string{"Gilroy", "10", "20"})
+	rec := serveAs(t, store, svcOwner, http.MethodPut, "/api/services/seeded", body)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("got %d, want %d (body %s)", rec.Code, http.StatusUnprocessableEntity, rec.Body)
+	}
+
+	got := decodePlacementFault(t, rec)
+	if got.Detail.Fault != string(transit.OffRouteFault) {
+		t.Errorf("fault = %q, want %q", got.Detail.Fault, transit.OffRouteFault)
+	}
+	if len(got.Detail.Stops) != 1 || got.Detail.Stops[0].Name != "Gilroy" {
+		t.Errorf("detail stops = %+v, want Gilroy alone", got.Detail.Stops)
+	}
+}
+
+// TestOtherValidationFailuresCarryNoPlacementDetail keeps the detail meaning
+// one specific thing. A client that branched on its presence would otherwise
+// have to re-check the fault kind on every 422 the write path can produce.
+func TestOtherValidationFailuresCarryNoPlacementDetail(t *testing.T) {
+	body := `{"route_slug":"nonexistent","name":"No route",
+		"vehicle":{"max_speed_kmh":100,"acceleration_ms2":1,"deceleration_ms2":1},
+		"stops":[{"name":"A","lat":1,"lng":1},{"name":"B","lat":2,"lng":2}]}`
+
+	rec := serveAs(t, newFakeServiceStore(), svcOwner, http.MethodPost, "/api/services", body)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("got %d, want %d (body %s)", rec.Code, http.StatusUnprocessableEntity, rec.Body)
+	}
+	if strings.Contains(rec.Body.String(), "detail") || strings.Contains(rec.Body.String(), "code") {
+		t.Errorf("body %s carries a placement detail for an unrelated validation failure", rec.Body)
+	}
+}
+
 func TestCreateRequiresARouteSlug(t *testing.T) {
 	body := `{"name":"No route","vehicle":{"max_speed_kmh":100,"acceleration_ms2":1,"deceleration_ms2":1},
 		"stops":[{"name":"A","lat":1,"lng":1},{"name":"B","lat":2,"lng":2}]}`
