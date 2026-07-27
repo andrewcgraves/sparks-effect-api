@@ -253,11 +253,21 @@ func TestSnapToRouteResetsOffsetWhenAnAlreadySnappedStopIsResubmitted(t *testing
 	}
 }
 
-// TestOffRouteRefusalCarriesAStructuredFault pins the machine-readable half of
+func TestSnapToRouteReportsUnusableGeometry(t *testing.T) {
+	rt := snapTestRoute()
+	rt.Geometry.Coordinates = [][]float64{{-122.0, 37.0}}
+
+	svc := serviceOnSnapRoute(0, -121.8, -121.4)
+	if err := svc.SnapToRoute(rt); !errors.Is(err, transit.ErrRouteGeometry) {
+		t.Fatalf("SnapToRoute error = %v, want it to wrap ErrRouteGeometry", err)
+	}
+}
+
+// TestSnapToRouteReportsAnOffRouteStopAsAStructuredFault pins the machine-readable half of
 // an off-route refusal (SPA-151). The prose stays the message a user reads; the
 // fault is what a client branches on, so it names the stop by fields rather
 // than leaving the caller to recover it from wording.
-func TestOffRouteRefusalCarriesAStructuredFault(t *testing.T) {
+func TestSnapToRouteReportsAnOffRouteStopAsAStructuredFault(t *testing.T) {
 	svc := serviceOnSnapRoute(0, -121.8, -121.4)
 	svc.Slug = "central-valley-express"
 	svc.MintStopSlugs()
@@ -289,10 +299,10 @@ func TestOffRouteRefusalCarriesAStructuredFault(t *testing.T) {
 	}
 }
 
-// TestChainageOrderRefusalNamesBothStops covers the fault whose prose was the
+// TestSnapToRouteReportsBothStopsOfAnOrderFault covers the fault whose prose was the
 // harder of the two to parse: the offending pair is what the authoring UI
 // highlights, and either stop alone does not describe the disagreement.
-func TestChainageOrderRefusalNamesBothStops(t *testing.T) {
+func TestSnapToRouteReportsBothStopsOfAnOrderFault(t *testing.T) {
 	// A and B run east; C doubles back between them.
 	svc := serviceOnSnapRoute(0, -121.8, -121.4, -121.6)
 	svc.Slug = "central-valley-express"
@@ -327,13 +337,26 @@ func TestChainageOrderRefusalNamesBothStops(t *testing.T) {
 	}
 }
 
-func TestSnapToRouteReportsUnusableGeometry(t *testing.T) {
-	rt := snapTestRoute()
-	rt.Geometry.Coordinates = [][]float64{{-122.0, 37.0}}
+// TestSnapToRouteReadsAWestboundOrderFaultAgainstItsOwnDirection covers the
+// other half of the order message. A westbound service that doubles back is
+// still at fault, but the offending stop lies *before* its successor rather
+// than after it: the direction the sequence established is what the fault reads
+// against, not the direction the route was drawn in.
+func TestSnapToRouteReadsAWestboundOrderFaultAgainstItsOwnDirection(t *testing.T) {
+	// A→B runs west, establishing a descending direction; C then doubles back
+	// east of B.
+	svc := serviceOnSnapRoute(0, -121.2, -121.6, -121.4)
 
-	svc := serviceOnSnapRoute(0, -121.8, -121.4)
-	if err := svc.SnapToRoute(rt); !errors.Is(err, transit.ErrRouteGeometry) {
-		t.Fatalf("SnapToRoute error = %v, want it to wrap ErrRouteGeometry", err)
+	var fault *transit.StopPlacementFault
+	if err := svc.SnapToRoute(snapTestRoute()); !errors.As(err, &fault) {
+		t.Fatalf("SnapToRoute error = %v (%T), want a *transit.StopPlacementFault", err, err)
+	}
+
+	if !fault.Backwards {
+		t.Error("fault does not record that the sequence was running backwards along the line")
+	}
+	if !strings.Contains(fault.Error(), `lies before "C"`) {
+		t.Errorf("message %q, want it to read that B lies before C", fault.Error())
 	}
 }
 

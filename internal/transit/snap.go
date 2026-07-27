@@ -50,17 +50,23 @@ const (
 
 // FaultedStop identifies one stop a fault is about, and where it landed.
 //
-// All three identity fields are reported because a client may hold any of
-// them: an authoring UI mid-create knows the seq and the name it typed but not
-// the slug, which the server mints, while anything working from a stored
-// service has the slug. Naming the stop three ways costs nothing and means no
-// caller has to reconstruct an identity it was not given.
+// Seq is the one field that always maps back to a row in what the client
+// submitted, since it is that stop's position in the request. Name and Slug are
+// reported alongside it for display and for a caller working from a stored
+// service, but neither is a reliable key on a refused write: the slug is minted
+// from the name (MintStopSlugs), so an edit that renames a stop reports a slug
+// the client has never seen, and a rejected create stores nothing under it.
+//
+// The json tags are here rather than on a handler copy of this struct because
+// the fields are the same either way, and a second struct to restate them is a
+// clone that can drift. The surrounding fault is not serialized directly —
+// see StopPlacementFault.Backwards.
 type FaultedStop struct {
-	Seq       int
-	Name      string
-	Slug      string
-	ChainageM float64
-	OffsetM   float64
+	Seq       int     `json:"seq"`
+	Name      string  `json:"name"`
+	Slug      string  `json:"slug"`
+	ChainageM float64 `json:"chainage_m"`
+	OffsetM   float64 `json:"offset_m"`
 }
 
 // StopPlacementFault is a refusal SnapToRoute can attribute to specific stops,
@@ -90,9 +96,22 @@ type StopPlacementFault struct {
 	Stops []FaultedStop
 }
 
+// Error renders the fault as the sentence a user reads. The wording is
+// unchanged from when it was the whole of the refusal, so nothing that displays
+// it has to change; it is simply no longer what a client reasons about.
+//
+// Each kind is matched together with the stops its message needs, and anything
+// that satisfies neither falls back to a bare sentence. A fault this package
+// did not construct is the only way to get there, but the alternative is
+// indexing into Stops on faith, and a message that confidently names the wrong
+// rule is worse than one that names none.
 func (f *StopPlacementFault) Error() string {
-	switch f.Kind {
-	case ChainageOrderFault:
+	switch {
+	case f.Kind == OffRouteFault && len(f.Stops) >= 1:
+		stop := f.Stops[0]
+		return fmt.Sprintf("stop %q is %s from route %q",
+			stop.Name, formatDistance(stop.OffsetM), f.RouteSlug)
+	case f.Kind == ChainageOrderFault && len(f.Stops) >= 2:
 		from, to := f.Stops[0], f.Stops[1]
 		relation := "after"
 		if f.Backwards {
@@ -101,9 +120,7 @@ func (f *StopPlacementFault) Error() string {
 		return fmt.Sprintf("stop %q (seq %d) lies %s %q (seq %d) along this route",
 			from.Name, from.Seq, relation, to.Name, to.Seq)
 	default:
-		stop := f.Stops[0]
-		return fmt.Sprintf("stop %q is %s from route %q",
-			stop.Name, formatDistance(stop.OffsetM), f.RouteSlug)
+		return fmt.Sprintf("stops are placed invalidly on route %q", f.RouteSlug)
 	}
 }
 

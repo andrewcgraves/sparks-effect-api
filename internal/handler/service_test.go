@@ -704,7 +704,7 @@ func decodePlacementFault(t *testing.T, rec *httptest.ResponseRecorder) stopPlac
 	return body
 }
 
-func TestOffRouteRejectionCarriesStructuredDetail(t *testing.T) {
+func TestCreateOffRouteRejectionCarriesStructuredDetail(t *testing.T) {
 	store := newFakeServiceStore()
 	body := snapPayload("diagonal", [3]string{"On line", "1", "1"}, [3]string{"Gilroy", "10", "20"})
 
@@ -748,7 +748,7 @@ func TestOffRouteRejectionCarriesStructuredDetail(t *testing.T) {
 	}
 }
 
-func TestChainageOrderRejectionCarriesBothStopsInDetail(t *testing.T) {
+func TestCreateChainageOrderRejectionCarriesBothStopsInDetail(t *testing.T) {
 	store := newFakeServiceStore()
 	// Authored A→C→B, but C lies beyond B along the line.
 	body := snapPayload("diagonal",
@@ -777,9 +777,16 @@ func TestChainageOrderRejectionCarriesBothStopsInDetail(t *testing.T) {
 		t.Errorf("detail seqs = %d, %d, want 1 then 2", got.Detail.Stops[0].Seq, got.Detail.Stops[1].Seq)
 	}
 	// An order fault is not measured against a distance, so echoing one would
-	// invite a client to render a boundary that decided nothing here.
-	if got.Detail.ThresholdM != 0 {
-		t.Errorf("threshold_m = %v, want it absent from an order fault", got.Detail.ThresholdM)
+	// invite a client to render a boundary that decided nothing here. Checked
+	// on the raw keys, since a decoded zero cannot be told from an absent one.
+	var raw struct {
+		Detail map[string]any `json:"detail"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decoding error body: %v (body %s)", err, rec.Body)
+	}
+	if _, present := raw.Detail["threshold_m"]; present {
+		t.Errorf("body %s reports a threshold on an order fault", rec.Body)
 	}
 }
 
@@ -817,8 +824,20 @@ func TestOtherValidationFailuresCarryNoPlacementDetail(t *testing.T) {
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("got %d, want %d (body %s)", rec.Code, http.StatusUnprocessableEntity, rec.Body)
 	}
-	if strings.Contains(rec.Body.String(), "detail") || strings.Contains(rec.Body.String(), "code") {
-		t.Errorf("body %s carries a placement detail for an unrelated validation failure", rec.Body)
+
+	// Decoded rather than string-matched: the message itself is free to contain
+	// the words "code" or "detail", and only the keys are the contract.
+	var body422 map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body422); err != nil {
+		t.Fatalf("decoding error body: %v (body %s)", err, rec.Body)
+	}
+	for _, key := range []string{"code", "detail"} {
+		if _, present := body422[key]; present {
+			t.Errorf("body %s carries %q for an unrelated validation failure", rec.Body, key)
+		}
+	}
+	if body422["error"] == "" {
+		t.Errorf("body %s has no message to display", rec.Body)
 	}
 }
 
