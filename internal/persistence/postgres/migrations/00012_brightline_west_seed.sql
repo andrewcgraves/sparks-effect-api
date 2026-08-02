@@ -37,8 +37,11 @@ SELECT
     'brightline-west-palmdale-to-las-vegas',
     'Brightline West — Palmdale to Las Vegas',
     'rail',
+    -- First vertex is the Palmdale station coordinate exactly, so the spur
+    -- starts at the Phase 1 junction rather than ~1.5 km short of it. Must stay
+    -- identical to the YAML geometry — see routes.yaml.
     '{"type":"LineString","coordinates":[
-        [-118.116,34.578],[-117.8,34.55],[-117.45,34.51],[-117.185,34.5],
+        [-118.119,34.591],[-117.8,34.55],[-117.45,34.51],[-117.185,34.5],
         [-116.9,34.6],[-116.7,34.8],[-116.5,35.1],[-115.8,35.6],
         [-115.3,35.9],[-115.136,36.174]]}'::jsonb,
     true

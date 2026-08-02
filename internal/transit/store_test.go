@@ -2,6 +2,8 @@ package transit
 
 import (
 	"testing"
+
+	"github.com/andrewcgraves/sparks-effect-api/internal/physics"
 )
 
 func mustNewStore(t *testing.T) *Store {
@@ -452,5 +454,69 @@ func TestBrightlineWest_spurDoesNotShortcutPhase1(t *testing.T) {
 	// runs the mainline, never through Victor Valley.
 	if _, _, _, ok := store.TravelTimeBetween("ca-hsr", "sf", "anaheim"); !ok {
 		t.Error("sf→anaheim should still be reachable")
+	}
+}
+
+// Seeded services never pass through SnapToRoute — they are written from YAML
+// with a station_id per stop, so nothing checks that the station is anywhere
+// near the alignment the service runs on. The physics compile path
+// (CompileScenario → CompileServicePhysics → physics.ProjectStops) projects
+// them anyway and does so silently, clamping a stop past either end of the line
+// to that terminus. A seeded stop far off its route therefore produces no error
+// and no warning; it produces wrong chainage, and from that wrong span
+// distances and run times.
+//
+// This holds the seed to the same OffRouteThresholdM the authoring API enforces
+// on user-drawn services. The bar is deliberately the shared constant rather
+// than a number of its own: seed data a user could not have authored through
+// the product is seed data the product's own rules call invalid.
+//
+// It caught the Brightline West spur starting ~1.5 km short of Palmdale, where
+// the offset was 1471 m and Palmdale clamped to chainage 0.
+func TestSeededServiceStopsLieOnTheirRouteAlignment(t *testing.T) {
+	store := mustNewStore(t)
+	sc, ok := store.GetScenarioBySlug("ca-hsr")
+	if !ok {
+		t.Fatal("ca-hsr scenario not found")
+	}
+
+	routesByID := make(map[string]Route)
+	for _, rt := range store.GetRoutesByScenario(sc.ID) {
+		routesByID[rt.ID] = rt
+	}
+	stations := store.GetStationsByScenario(sc.ID)
+
+	for _, svc := range store.GetServicesByScenario(sc.ID) {
+		rt, ok := routesByID[svc.RouteID]
+		if !ok {
+			t.Errorf("service %q references unknown route %q", svc.Name, svc.RouteID)
+			continue
+		}
+		cs, err := CompilableFromService(rt, stations, svc, VehicleType{})
+		if err != nil {
+			t.Errorf("service %q: %v", svc.Name, err)
+			continue
+		}
+		line, err := ToPhysicsLine(rt.Geometry)
+		if err != nil {
+			t.Errorf("route %q: %v", rt.Slug, err)
+			continue
+		}
+
+		stops := make([]physics.Stop, len(cs.Stops))
+		for i, stop := range cs.Stops {
+			stops[i] = physics.Stop{ID: stop.Slug, Location: physics.Point{Lng: stop.Lng, Lat: stop.Lat}}
+		}
+		snapped, err := physics.SnapStops(line, stops)
+		if err != nil {
+			t.Errorf("service %q: %v", svc.Name, err)
+			continue
+		}
+		for i, sn := range snapped {
+			if sn.OffsetM > OffRouteThresholdM {
+				t.Errorf("service %q stop %q is %.0f m from route %q, over the %.0f m threshold",
+					svc.Name, stops[i].ID, sn.OffsetM, rt.Slug, OffRouteThresholdM)
+			}
+		}
 	}
 }

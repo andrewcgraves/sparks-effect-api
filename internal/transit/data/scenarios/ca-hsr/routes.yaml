@@ -20441,6 +20441,12 @@
       - [-117.877413, 33.802311]
 
 # --- Brightline West — Palmdale to Las Vegas ---
+# The three vertices that carry a stop are the station coordinates themselves,
+# so each of this service's stops projects onto the line with zero offset. That
+# matters most at the first one: Palmdale is where the spur meets Phase 1, and
+# an endpoint merely *near* the station is not a junction — a stop past the end
+# of a line clamps to its terminus, so the spur would start counting chainage
+# from a point the service never calls at.
 - id: "00000000-0000-4002-8001-000000000002"
   scenario_id: "00000000-0000-4001-8001-000000000001"
   slug: "brightline-west-palmdale-to-las-vegas"
@@ -20450,7 +20456,7 @@
   geometry:
     type: LineString
     coordinates:
-      - [-118.116, 34.578]
+      - [-118.119, 34.591]
       - [-117.8, 34.55]
       - [-117.45, 34.51]
       - [-117.185, 34.5]
