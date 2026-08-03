@@ -34,6 +34,7 @@ type fakeCompileStore struct {
 	stations     []transit.Station
 	services     []transit.Service
 	vehicleTypes []transit.VehicleType
+	travelTimes  map[string]transit.TravelTimes
 
 	createJobErr   error
 	getScenarioErr error
@@ -84,6 +85,13 @@ func (f *fakeCompileStore) compilableFixture() {
 		ID: "vt-1", MaxSpeedKMH: 36, AccelerationMS2: 1, DecelerationMS2: 1,
 		FloorHeight: "high", DwellLevelS: 30, DwellStepS: 60,
 	}}
+	// A seeded scenario compiles from its calibrated run times, so the fixture
+	// is only compilable with them present.
+	f.travelTimes = map[string]transit.TravelTimes{
+		"scenario-a": {ScenarioSlug: "scenario-a", Segments: []transit.SegmentTime{
+			{FromSlug: "a", ToSlug: "b", RunSeconds: 600, RouteID: "rt-1"},
+		}},
+	}
 }
 
 // compilableUserFixture equips the store with a user-authored service (owned by
@@ -110,6 +118,23 @@ func (f *fakeCompileStore) compilableUserFixture(ownerID string) (svcID, scenari
 	sc := transit.UserScenario{ID: "uscn-1", Slug: "trip", OwnerID: ownerID, ServiceIDs: []string{svc.ID}}
 	f.userScenarios[sc.Slug] = sc
 	return svc.ID, sc.ID
+}
+
+func (f *fakeCompileStore) GetTravelTimes(_ context.Context, scenarioSlug string) (transit.TravelTimes, bool, error) {
+	tt, ok := f.travelTimes[scenarioSlug]
+	return tt, ok, nil
+}
+
+func (f *fakeCompileStore) GetScenarioByID(_ context.Context, id string) (transit.Scenario, bool, error) {
+	if f.getScenarioErr != nil {
+		return transit.Scenario{}, false, f.getScenarioErr
+	}
+	for _, sc := range f.scenarios {
+		if sc.ID == id {
+			return sc, true, nil
+		}
+	}
+	return transit.Scenario{}, false, nil
 }
 
 func (f *fakeCompileStore) GetScenarioBySlug(_ context.Context, slug string) (transit.Scenario, bool, error) {
@@ -407,13 +432,13 @@ func TestCompileScenarioReturnsQueuedJobAndCompilesAsync(t *testing.T) {
 	}
 }
 
-// A scenario the physics compiler rejects fails the job with its error
-// recorded, rather than the POST itself failing — the caller already has a
-// 202 and a job id by the time the compile runs.
+// A scenario the compiler rejects fails the job with its error recorded,
+// rather than the POST itself failing — the caller already has a 202 and a job
+// id by the time the compile runs.
 func TestCompileScenarioFailsJobOnBadScenarioData(t *testing.T) {
 	store := newFakeCompileStore()
 	store.compilableFixture()
-	store.services[0].RouteID = "no-such-route"
+	store.services[0].VehicleTypeID = "no-such-vehicle-type"
 
 	rec := postAs(t, handler.CompileScenario(store), "/api/scenarios/scenario-a/compile", "slug", "scenario-a",
 		transit.User{ID: "user-1"})

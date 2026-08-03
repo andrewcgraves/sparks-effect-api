@@ -16,7 +16,6 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
 	"github.com/andrewcgraves/sparks-effect-api/internal/ids"
-	"github.com/andrewcgraves/sparks-effect-api/internal/isochrone"
 	internlog "github.com/andrewcgraves/sparks-effect-api/internal/logger"
 	"github.com/andrewcgraves/sparks-effect-api/internal/persistence/postgres"
 	"github.com/andrewcgraves/sparks-effect-api/internal/server"
@@ -67,9 +66,8 @@ func main() {
 	}
 
 	stadiaClient := stadia.NewHTTPClient(cfg.StadiaAPIKey).WithLogger(lg)
-	isoChainer := isochrone.New(stadiaClient, store, lg)
 
-	srv := server.New(cfg, store, deps, isoChainer, stadiaClient, lg)
+	srv := server.New(cfg, store, deps, stadiaClient, lg)
 
 	go func() {
 		log.Printf("listening on %s", srv.Addr)
@@ -90,9 +88,11 @@ func main() {
 }
 
 // loadStore builds the compiled transit Store. When DATABASE_URL is set it runs
-// migrations, seeds the embedded scenario data on first boot, and loads rows
-// from Postgres. Otherwise it falls back to the read-only embedded YAML store so
-// local dev works without a database, and the returned repo is nil.
+// migrations, seeds the embedded scenario data on first boot, compiles what it
+// seeded, and loads rows from Postgres. Otherwise it falls back to the
+// read-only embedded YAML store so local dev works without a database, and the
+// returned repo is nil — in which case there are no compile jobs and the
+// isochrone routes answer 503 (see server.registerCompileRoutes).
 // The returned cleanup closes any DB pool.
 func loadStore(ctx context.Context, cfg config.Config, lg *internlog.Logger) (*transit.Store, *postgres.Repo, func(), error) {
 	noop := func() {}
@@ -119,6 +119,19 @@ func loadStore(ctx context.Context, cfg config.Config, lg *internlog.Logger) (*t
 	}
 	if seeded {
 		lg.Printf("seeded embedded scenario data into empty database")
+	}
+
+	// Compile what was seeded, so a freshly deployed environment can answer the
+	// public isochrone without an admin triggering a compile by hand (SPA-181).
+	// A scenario that already has a compiled graph is skipped, so a restart
+	// against a populated database does no work here.
+	compiled, err := transit.CompileSeededIfNeeded(ctx, repo)
+	if err != nil {
+		repo.Close()
+		return nil, nil, noop, err
+	}
+	if compiled > 0 {
+		lg.Printf("compiled %d seeded scenario(s)", compiled)
 	}
 
 	store, err := transit.LoadStore(ctx, repo)

@@ -36,17 +36,24 @@ func validateIsochroneRequest(w http.ResponseWriter, r *http.Request) (userIsoch
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return req, false
 	}
-	if req.BudgetMins <= 0 {
+	return req, validateIsochroneParams(w, req.BudgetMins, req.Mode)
+}
+
+// validateIsochroneParams checks the budget and mode every isochrone request
+// carries, whatever else its body holds — the seeded request names its scenario
+// there, the authored ones take theirs from the path.
+func validateIsochroneParams(w http.ResponseWriter, budgetMins int, mode string) bool {
+	if budgetMins <= 0 {
 		writeError(w, http.StatusBadRequest, "budget_mins must be greater than 0")
-		return req, false
+		return false
 	}
-	switch isochrone.Mode(req.Mode) {
+	switch isochrone.Mode(mode) {
 	case isochrone.ModeWalk, isochrone.ModeBike, isochrone.ModeDrive:
 	default:
 		writeError(w, http.StatusBadRequest, "invalid mode: must be walk, bike, or drive")
-		return req, false
+		return false
 	}
-	return req, true
+	return true
 }
 
 // UserScenarioIsochrone returns a handler for

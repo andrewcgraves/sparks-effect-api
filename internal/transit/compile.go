@@ -53,14 +53,16 @@ type GraphNode struct {
 // so the poller contract is unchanged — a client already reading the graph
 // reads the report from the same payload.
 //
-// Nodes gives every graph key a position and display names, so the physics
-// compile carries its own geometry (see GraphNode). It is populated by the
-// physics/scenario path (CompileServices) with exactly one node per key the
-// edges name — closure the graph would otherwise lack — and is empty for the
-// hand-authored Compile, whose seeded isochrone still sources positions from
-// GetStationsByScenario. The field is additive and optional on decode: a
-// jobs.result row written before it unmarshals unchanged, with Nodes nil, and
-// no historical rows are backfilled.
+// Nodes gives every graph key a position and display names, so a compiled
+// graph carries its own geometry (see GraphNode). The physics path
+// (CompileServices) populates it with exactly one node per key the edges name;
+// the hand-authored Compile populates it with one node per station of the
+// scenario (seededNodes), which is the same set plus any station no service
+// calls at. Both are closure the graph would otherwise lack, and since SPA-181
+// the seeded isochrone reads its nodes from here rather than from the station
+// rows. The field is additive and optional on decode: a jobs.result row written
+// before it unmarshals unchanged, with Nodes nil, and no historical rows are
+// backfilled — such a job compiles again to gain them.
 type TransitGraph struct {
 	Services []ServiceGraph `json:"services"`
 	Merge    MergeReport    `json:"merge,omitempty"`
@@ -92,7 +94,7 @@ func Compile(
 		return nil, err
 	}
 
-	graph := &TransitGraph{}
+	graph := &TransitGraph{Nodes: seededNodes(stations)}
 	for _, svc := range services {
 		if !svc.Active {
 			continue
@@ -136,6 +138,35 @@ func Compile(
 		graph.Services = append(graph.Services, sg)
 	}
 	return graph, nil
+}
+
+// seededNodes turns a seeded scenario's stations into the graph's node set:
+// one node per station, carrying the position and name the station row already
+// holds.
+//
+// It is every station of the scenario, not only those some service calls at,
+// because that is exactly what Store.Nodes offered the chainer before the
+// seeded isochrone moved onto the compiled graph (SPA-181) — an uncalled
+// station is still a place the origin polygon may reach, it simply leads
+// nowhere by transit.
+//
+// Unlike the physics compile, no clustering runs here: seeded services share a
+// Station row outright, so stops that interchange already carry one slug and
+// there is nothing to merge. Names is therefore always the station's own single
+// name rather than a merged cluster's list.
+func seededNodes(stations []Station) []GraphNode {
+	if len(stations) == 0 {
+		return nil
+	}
+	nodes := make([]GraphNode, len(stations))
+	for i, st := range stations {
+		var lat, lng float64
+		if len(st.Location.Coordinates) == 2 {
+			lng, lat = st.Location.Coordinates[0], st.Location.Coordinates[1]
+		}
+		nodes[i] = GraphNode{Slug: st.Slug, Lat: lat, Lng: lng, Names: []string{st.Name}}
+	}
+	return nodes
 }
 
 type segEdge struct {

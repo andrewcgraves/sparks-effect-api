@@ -317,3 +317,44 @@ func TestNewStore_holdsCompiledGraph(t *testing.T) {
 		t.Fatalf("want 2 service graphs (Express + Local), got %d", len(g.Services))
 	}
 }
+
+// A compiled graph must carry its own geometry: the seeded isochrone now reads
+// its nodes off the compile job's result rather than the station rows, so a
+// graph without nodes has nothing to plot from (SPA-181).
+func TestCompile_emitsOneNodePerStation(t *testing.T) {
+	sc := Scenario{ID: "sc-1", Slug: "test"}
+	stations := []Station{
+		{ID: "st-a", Slug: "a", Name: "A", Location: GeoPoint{Coordinates: []float64{-122.4, 37.7}}},
+		{ID: "st-b", Slug: "b", Name: "B", Location: GeoPoint{Coordinates: []float64{-122.5, 37.8}}},
+		{ID: "st-c", Slug: "c", Name: "C", Location: GeoPoint{Coordinates: []float64{-122.6, 37.9}}},
+	}
+	services := []Service{{
+		ID: "svc-local", Active: true, VehicleTypeID: "vt-1",
+		Stops: []ServiceStop{{StationID: "st-a", Sequence: 1}, {StationID: "st-b", Sequence: 2}},
+	}}
+
+	g, err := Compile(sc, nil, stations, services, []VehicleType{testVehicle()}, testSegments())
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+
+	// Every station of the scenario is a node, including "c" which no service
+	// calls at — the seeded store offered all of them as isochrone origins.
+	if len(g.Nodes) != len(stations) {
+		t.Fatalf("len(Nodes) = %d, want %d (one per station)", len(g.Nodes), len(stations))
+	}
+	byslug := make(map[string]GraphNode, len(g.Nodes))
+	for _, n := range g.Nodes {
+		byslug[n.Slug] = n
+	}
+	a, ok := byslug["a"]
+	if !ok {
+		t.Fatalf("no node for station a; nodes = %+v", g.Nodes)
+	}
+	if a.Lat != 37.7 || a.Lng != -122.4 {
+		t.Errorf("node a position = (%v, %v), want (37.7, -122.4)", a.Lat, a.Lng)
+	}
+	if len(a.Names) != 1 || a.Names[0] != "A" {
+		t.Errorf("node a Names = %v, want [A]", a.Names)
+	}
+}

@@ -4,8 +4,16 @@ import "fmt"
 
 // CompileScenario builds a scenario's TransitGraph directly from track
 // geometry and vehicle kinematics — CompileServicePhysics per active service —
-// as an alternative to Compile's hand-authored segment-run-time table. This is
-// the "graph build" step an async compile job (internal/worker) runs.
+// as an alternative to Compile's hand-authored segment-run-time table.
+//
+// It is not what a seeded scenario's compile job runs. Since SPA-181 that goes
+// through CompileSeededScenario (the calibrated table) instead, because the
+// public isochrone now answers off the compiled graph and a physics profile
+// over the same alignment gives materially different times from the published
+// timetable the seed data is calibrated to. This remains the seeded model's
+// physics path, adapting it onto the same compiler the user-authored stack
+// uses, for when a seeded corridor is authored with geometry rather than a
+// run-time table.
 //
 // It adapts the seeded model onto CompilableService and hands off to
 // CompileServices, so the co-located-stop merge that turns a set of services

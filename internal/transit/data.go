@@ -11,10 +11,15 @@ type Node struct {
 // IsochroneData is the read-only seam the isochrone chainer requires, narrowed
 // to exactly what it reads (SPA-83 decision 3). Nodes collapses scenario
 // resolution and station lookup into the one thing that two-step ever
-// accomplished; TravelTimeBetween is unchanged. *Store satisfies this against
-// the seeded scenario data; a compiled user-authored graph (CompiledGraphData)
-// is a second, narrower implementation with no scenario or station rows to
-// fabricate.
+// accomplished; TravelTimeBetween is unchanged.
+//
+// Every isochrone the API serves now reads through CompiledGraphData: since
+// SPA-181 the seeded scenario resolves its graph from a compile job like the
+// authored ones do, rather than from the embedded store. *Store still satisfies
+// this interface, but as the reference the two agree on rather than as a live
+// request path — it is what the equivalence test pins the compiled graph
+// against, so a change to either side that moved the public answer would fail
+// there first.
 type IsochroneData interface {
 	Nodes(scenarioSlug string) ([]Node, bool)
 	TravelTimeBetween(scenarioSlug, fromSlug, toSlug string) (seconds, waitSecs int, serviceID string, ok bool)

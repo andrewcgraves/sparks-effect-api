@@ -20,6 +20,8 @@ type fakeStore struct {
 	services     []transit.Service
 	vehicleTypes []transit.VehicleType
 
+	scenarios     map[string]transit.Scenario
+	travelTimes   map[string]transit.TravelTimes
 	userScenarios map[string]transit.UserScenario
 	userServices  map[string]transit.UserService
 
@@ -51,6 +53,22 @@ func (f *fakeStore) ListServicesByScenario(_ context.Context, _ string) ([]trans
 
 func (f *fakeStore) ListVehicleTypes(_ context.Context) ([]transit.VehicleType, error) {
 	return f.vehicleTypes, nil
+}
+
+func (f *fakeStore) GetScenarioByID(_ context.Context, id string) (transit.Scenario, bool, error) {
+	if f.listErr != nil {
+		return transit.Scenario{}, false, f.listErr
+	}
+	sc, ok := f.scenarios[id]
+	return sc, ok, nil
+}
+
+func (f *fakeStore) GetTravelTimes(_ context.Context, scenarioSlug string) (transit.TravelTimes, bool, error) {
+	if f.listErr != nil {
+		return transit.TravelTimes{}, false, f.listErr
+	}
+	tt, ok := f.travelTimes[scenarioSlug]
+	return tt, ok, nil
 }
 
 func (f *fakeStore) GetUserScenarioByID(_ context.Context, id string) (transit.UserScenario, bool, error) {
@@ -142,6 +160,14 @@ func fixtureStore() *fakeStore {
 			ID: "vt-1", MaxSpeedKMH: 36, AccelerationMS2: 1, DecelerationMS2: 1,
 			FloorHeight: "high", DwellLevelS: 30, DwellStepS: 60,
 		}},
+		scenarios: map[string]transit.Scenario{
+			"sc-1": {ID: "sc-1", Slug: "test"},
+		},
+		travelTimes: map[string]transit.TravelTimes{
+			"test": {ScenarioSlug: "test", Segments: []transit.SegmentTime{
+				{FromSlug: "a", ToSlug: "b", RunSeconds: 600, RouteID: "rt-1"},
+			}},
+		},
 	}
 }
 
@@ -258,12 +284,12 @@ func TestCompileUnknownKindFailsJob(t *testing.T) {
 	}
 }
 
-// A scenario whose data the physics compiler rejects (here, a service
-// pointing at a route id that doesn't exist in the loaded set) fails the job
-// with the error recorded, rather than panicking or silently succeeding.
+// A scenario whose data the compiler rejects (here, a service pointing at a
+// vehicle type that doesn't exist in the loaded set) fails the job with the
+// error recorded, rather than panicking or silently succeeding.
 func TestCompileRecordsFailureOnBadScenarioData(t *testing.T) {
 	store := fixtureStore()
-	store.services[0].RouteID = "no-such-route"
+	store.services[0].VehicleTypeID = "no-such-vehicle-type"
 
 	if err := worker.Compile(context.Background(), store, scenarioJob()); err != nil {
 		t.Fatalf("Compile() error = %v, want nil (failure belongs on the job)", err)
@@ -317,5 +343,39 @@ func TestCompileSucceedsForAnEmptyScenario(t *testing.T) {
 	}
 	if store.completedWith == nil || len(store.completedWith.Services) != 0 {
 		t.Errorf("completed result = %+v, want an empty graph", store.completedWith)
+	}
+}
+
+// A seeded scenario compiles from its calibrated segment run times, not from
+// track physics. The public isochrone answers off this graph since SPA-181, and
+// the calibrated table is what it has always answered with — a physics profile
+// over the same alignment gives materially different times.
+func TestCompileScenarioUsesCalibratedRunTimes(t *testing.T) {
+	store := fixtureStore()
+
+	if err := worker.Compile(context.Background(), store, scenarioJob()); err != nil {
+		t.Fatalf("Compile() error = %v, want nil", err)
+	}
+	if store.completedWith == nil || len(store.completedWith.Services) != 1 {
+		t.Fatalf("completed result = %+v, want one compiled service", store.completedWith)
+	}
+
+	// 600 s of run time plus the dwell resolved at the arriving stop: b's
+	// platform matches the vehicle floor (level, 30 s), a's does not (step, 60 s).
+	want := map[string]int{"a->b": 630, "b->a": 660}
+	got := make(map[string]int)
+	for _, e := range store.completedWith.Services[0].Edges {
+		got[e.FromSlug+"->"+e.ToSlug] = e.Seconds
+	}
+	for k, w := range want {
+		if got[k] != w {
+			t.Errorf("edge %s = %d s, want %d s (calibrated run time + dwell)", k, got[k], w)
+		}
+	}
+
+	// The graph carries its own geometry, which is what the isochrone plots from.
+	if len(store.completedWith.Nodes) != len(store.stations) {
+		t.Errorf("len(Nodes) = %d, want %d (one per station)",
+			len(store.completedWith.Nodes), len(store.stations))
 	}
 }

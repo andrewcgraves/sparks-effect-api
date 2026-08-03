@@ -21,6 +21,7 @@ func seedCompilableScenario(t *testing.T, repo interface {
 	CreateStation(ctx context.Context, st transit.Station) error
 	CreateVehicleType(ctx context.Context, vt transit.VehicleType) error
 	CreateService(ctx context.Context, svc transit.Service) error
+	UpsertTravelTimes(ctx context.Context, tt transit.TravelTimes) error
 }, slug string) transit.Scenario {
 	t.Helper()
 	ctx := context.Background()
@@ -67,6 +68,15 @@ func seedCompilableScenario(t *testing.T, repo interface {
 		},
 	}); err != nil {
 		t.Fatalf("CreateService: %v", err)
+	}
+
+	// A seeded scenario compiles from its calibrated run times, so a scenario
+	// without them has nothing to compile.
+	if err := repo.UpsertTravelTimes(ctx, transit.TravelTimes{
+		ScenarioSlug: slug, Provenance: "calibrated",
+		Segments: []transit.SegmentTime{{FromSlug: "a", ToSlug: "b", RunSeconds: 600, RouteID: routeID}},
+	}); err != nil {
+		t.Fatalf("UpsertTravelTimes: %v", err)
 	}
 
 	return sc
@@ -141,7 +151,8 @@ func TestIntegration_AsyncCompileJobLifecycle(t *testing.T) {
 		t.Errorf("graph = %+v, want one service with 2 edges", graph)
 	}
 
-	// The existing synchronous isochrone path is untouched by any of this.
+	// The isochrone path still exists — it now reads the graph compiled above
+	// (see TestIntegration_SeededIsochroneServedFromCompiledGraph).
 	isoRec := request(t, h, http.MethodPost, "/api/isochrone", token)
 	if isoRec.Code == http.StatusNotFound {
 		t.Error("POST /api/isochrone: route disappeared, want it still registered")

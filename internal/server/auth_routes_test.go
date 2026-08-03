@@ -10,7 +10,6 @@ import (
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
-	"github.com/andrewcgraves/sparks-effect-api/internal/isochrone"
 	"github.com/andrewcgraves/sparks-effect-api/internal/logger"
 	"github.com/andrewcgraves/sparks-effect-api/internal/stadia"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
@@ -95,6 +94,12 @@ func (s *stubAuthDeps) ListRouteSummaries(context.Context) ([]transit.RouteSumma
 func (s *stubAuthDeps) GetScenarioBySlug(context.Context, string) (transit.Scenario, bool, error) {
 	return transit.Scenario{}, false, nil
 }
+func (s *stubAuthDeps) GetScenarioByID(context.Context, string) (transit.Scenario, bool, error) {
+	return transit.Scenario{}, false, nil
+}
+func (s *stubAuthDeps) GetTravelTimes(context.Context, string) (transit.TravelTimes, bool, error) {
+	return transit.TravelTimes{}, false, nil
+}
 func (s *stubAuthDeps) CreateJob(context.Context, transit.Job) error { return nil }
 func (s *stubAuthDeps) GetJobByID(context.Context, string) (transit.Job, bool, error) {
 	return transit.Job{}, false, nil
@@ -142,9 +147,8 @@ func newTestServer(t *testing.T, deps AuthDeps) http.Handler {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	chainer := isochrone.New(&stadia.FakeClient{}, store, logger.Discard())
 	cfg := config.Config{Port: "8080", SessionTTL: time.Hour}
-	return New(cfg, store, deps, chainer, &stadia.FakeClient{}, logger.Discard()).Handler
+	return New(cfg, store, deps, &stadia.FakeClient{}, logger.Discard()).Handler
 }
 
 func newStubDeps() *stubAuthDeps {
