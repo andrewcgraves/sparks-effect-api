@@ -5,12 +5,25 @@ import (
 	"testing"
 )
 
+// Stations carry coordinates because a compiled graph carries its own geometry
+// (TransitGraph.Nodes) — a station with no usable location fails the compile.
 func testStations() []Station {
 	return []Station{
-		{ID: "st-a", Slug: "a", Name: "A"},
-		{ID: "st-b", Slug: "b", Name: "B"},
-		{ID: "st-c", Slug: "c", Name: "C"},
+		{ID: "st-a", Slug: "a", Name: "A", Location: GeoPoint{Coordinates: []float64{-122.4, 37.7}}},
+		{ID: "st-b", Slug: "b", Name: "B", Location: GeoPoint{Coordinates: []float64{-122.5, 37.8}}},
+		{ID: "st-c", Slug: "c", Name: "C", Location: GeoPoint{Coordinates: []float64{-122.6, 37.9}}},
 	}
+}
+
+// platformStations is testStations with the platform heights a dwell test
+// varies. The coordinates come along because a compile needs them, not because
+// these tests care about position.
+func platformStations(heights ...string) []Station {
+	sts := testStations()
+	for i, h := range heights {
+		sts[i].PlatformHeight = h
+	}
+	return sts
 }
 
 func testSegments() TravelTimes {
@@ -74,11 +87,7 @@ func TestCompile_createsServiceGraphsWithEdges(t *testing.T) {
 
 func TestCompile_edgeSecondsIncludeRunAndDwell(t *testing.T) {
 	sc := Scenario{ID: "sc-1", Slug: "test"}
-	stations := []Station{
-		{ID: "st-a", Slug: "a", PlatformHeight: "high"},
-		{ID: "st-b", Slug: "b", PlatformHeight: "high"},
-		{ID: "st-c", Slug: "c", PlatformHeight: "high"},
-	}
+	stations := platformStations("high", "high", "high")
 	services := []Service{{
 		ID:            "svc-local",
 		Active:        true,
@@ -110,11 +119,7 @@ func TestCompile_edgeSecondsIncludeRunAndDwell(t *testing.T) {
 
 func TestCompile_expressSkipsIntermediateDwell(t *testing.T) {
 	sc := Scenario{ID: "sc-1", Slug: "test"}
-	stations := []Station{
-		{ID: "st-a", Slug: "a", PlatformHeight: "high"},
-		{ID: "st-b", Slug: "b", PlatformHeight: "high"},
-		{ID: "st-c", Slug: "c", PlatformHeight: "high"},
-	}
+	stations := platformStations("high", "high", "high")
 	express := Service{
 		ID:            "svc-express",
 		Active:        true,
@@ -179,11 +184,7 @@ func TestCompile_expressSkipsIntermediateDwell(t *testing.T) {
 func TestCompile_dwellResolution(t *testing.T) {
 	sc := Scenario{ID: "sc-1", Slug: "test"}
 	override := 30
-	stations := []Station{
-		{ID: "st-a", Slug: "a", PlatformHeight: "high"},
-		{ID: "st-b", Slug: "b", PlatformHeight: "low"},
-		{ID: "st-c", Slug: "c", PlatformHeight: "high"},
-	}
+	stations := platformStations("high", "low", "high")
 	segments := TravelTimes{Segments: []SegmentTime{
 		{FromSlug: "a", ToSlug: "b", RunSeconds: 60},
 		{FromSlug: "b", ToSlug: "c", RunSeconds: 60},
@@ -323,11 +324,7 @@ func TestNewStore_holdsCompiledGraph(t *testing.T) {
 // graph without nodes has nothing to plot from (SPA-181).
 func TestCompile_emitsOneNodePerStation(t *testing.T) {
 	sc := Scenario{ID: "sc-1", Slug: "test"}
-	stations := []Station{
-		{ID: "st-a", Slug: "a", Name: "A", Location: GeoPoint{Coordinates: []float64{-122.4, 37.7}}},
-		{ID: "st-b", Slug: "b", Name: "B", Location: GeoPoint{Coordinates: []float64{-122.5, 37.8}}},
-		{ID: "st-c", Slug: "c", Name: "C", Location: GeoPoint{Coordinates: []float64{-122.6, 37.9}}},
-	}
+	stations := testStations()
 	services := []Service{{
 		ID: "svc-local", Active: true, VehicleTypeID: "vt-1",
 		Stops: []ServiceStop{{StationID: "st-a", Sequence: 1}, {StationID: "st-b", Sequence: 2}},
@@ -356,5 +353,32 @@ func TestCompile_emitsOneNodePerStation(t *testing.T) {
 	}
 	if len(a.Names) != 1 || a.Names[0] != "A" {
 		t.Errorf("node a Names = %v, want [A]", a.Names)
+	}
+}
+
+// A station whose location is malformed must fail the compile, not quietly
+// become a node at (0, 0) — that coordinate is a real place in the Gulf of
+// Guinea, and it would be baked into a persisted graph and plotted from.
+func TestCompile_rejectsStationWithMalformedLocation(t *testing.T) {
+	sc := Scenario{ID: "sc-1", Slug: "test"}
+	stations := []Station{
+		{ID: "st-a", Slug: "a", Name: "A", Location: GeoPoint{Coordinates: []float64{-122.4, 37.7}}},
+		{ID: "st-b", Slug: "b", Name: "B", Location: GeoPoint{Coordinates: []float64{-122.5}}},
+	}
+	services := []Service{{
+		ID: "svc-local", Active: true, VehicleTypeID: "vt-1",
+		Stops: []ServiceStop{{StationID: "st-a", Sequence: 1}, {StationID: "st-b", Sequence: 2}},
+	}}
+
+	segments := TravelTimes{ScenarioSlug: "test", Segments: []SegmentTime{
+		{FromSlug: "a", ToSlug: "b", RunSeconds: 600},
+	}}
+
+	_, err := Compile(sc, nil, stations, services, []VehicleType{testVehicle()}, segments)
+	if err == nil {
+		t.Fatal("Compile() error = nil, want an error for a station with no usable location")
+	}
+	if !strings.Contains(err.Error(), "b") {
+		t.Errorf("error = %v, want it to name the offending station", err)
 	}
 }

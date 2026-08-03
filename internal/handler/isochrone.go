@@ -16,7 +16,7 @@ import (
 // that scenario's graph.
 type SeededGraphStore interface {
 	GetScenarioBySlug(ctx context.Context, slug string) (transit.Scenario, bool, error)
-	GetLatestSucceededJob(ctx context.Context, scenarioSlug, kind string) (transit.Job, bool, error)
+	SeededGraphReader
 }
 
 type isochroneRequest struct {
@@ -81,9 +81,10 @@ func Isochrone(store SeededGraphStore, stadiaClient stadia.Client, log *logger.L
 // loadSeededGraph resolves a seeded scenario's compiled graph by slug, writing
 // the 404 and reporting ok=false when there is none.
 //
-// An unknown scenario and a known one that has never compiled are told apart
-// deliberately: the first is the caller's mistake, the second is a deployment
-// that has not finished coming up, and only the second is worth retrying.
+// It checks the scenario exists first so an unknown slug and a known scenario
+// that has never compiled are told apart: the first is the caller's mistake,
+// the second is a deployment that has not finished coming up, and only the
+// second is worth retrying.
 func loadSeededGraph(w http.ResponseWriter, r *http.Request, store SeededGraphStore, slug string) (*transit.TransitGraph, bool) {
 	if _, found, err := store.GetScenarioBySlug(r.Context(), slug); err != nil {
 		writeInternalError(w, "looking up scenario", err)
@@ -93,14 +94,5 @@ func loadSeededGraph(w http.ResponseWriter, r *http.Request, store SeededGraphSt
 		return nil, false
 	}
 
-	job, found, err := store.GetLatestSucceededJob(r.Context(), slug, transit.JobKindCompileScenario)
-	if err != nil {
-		writeInternalError(w, "looking up compiled graph", err)
-		return nil, false
-	}
-	if !found || job.Result == nil {
-		writeError(w, http.StatusNotFound, "no compiled graph for this scenario yet")
-		return nil, false
-	}
-	return job.Result, true
+	return latestSeededGraph(w, r, store, slug)
 }

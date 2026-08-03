@@ -271,6 +271,8 @@ func TestIsochrone_429_stadiaRateLimit(t *testing.T) {
 }
 
 func TestIsochrone_contentType(t *testing.T) {
+	clientError := fakeStadia()
+	clientError.IsochroneErr = stadia.ErrStadiaBadRequest
 	rateLimited := fakeStadia()
 	rateLimited.IsochroneErr = stadia.ErrStadiaRateLimit
 	unavailable := fakeStadia()
@@ -284,6 +286,7 @@ func TestIsochrone_contentType(t *testing.T) {
 	}{
 		{"200", validIsochroneBody, compiledStore(), fakeStadia()},
 		{"400-budget", `{"lat":37.7,"lng":-122.4,"budget_mins":0,"mode":"walk","scenario_slug":"ca-hsr"}`, compiledStore(), fakeStadia()},
+		{"400-client-error", validIsochroneBody, compiledStore(), clientError},
 		{"404", `{"lat":37.7,"lng":-122.4,"budget_mins":30,"mode":"walk","scenario_slug":"nope"}`, compiledStore(), fakeStadia()},
 		{"429", validIsochroneBody, compiledStore(), rateLimited},
 		{"502", validIsochroneBody, compiledStore(), unavailable},

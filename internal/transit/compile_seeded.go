@@ -122,9 +122,11 @@ func CompileSeededIfNeeded(ctx context.Context, store SeededCompileStore) (int, 
 //
 // The job is created first and completed second, mirroring the async path's
 // queued → succeeded transition rather than inventing a way to write a finished
-// job in one shot. A compile that fails leaves the queued row behind, which is
-// harmless: only succeeded jobs are ever resolved, and the next boot simply
-// tries again.
+// job in one shot. A compile that fails leaves the queued row behind and
+// returns the error, which aborts the boot — the same stance LoadStore already
+// takes, since it compiles the same rows from the same data and would fail
+// immediately afterwards regardless. Only succeeded jobs are ever resolved, so
+// the abandoned row means nothing to a reader.
 func compileAndRecord(ctx context.Context, store SeededCompileStore, sc Scenario) error {
 	graph, err := CompileSeededScenario(ctx, store, sc)
 	if err != nil {
@@ -149,19 +151,4 @@ func compileAndRecord(ctx context.Context, store SeededCompileStore, sc Scenario
 		return fmt.Errorf("transit: recording compiled graph for %q: %w", sc.Slug, err)
 	}
 	return nil
-}
-
-// CompiledServiceIDs is the set of member service ids a compiled graph
-// contains, in the order the graph lists them. Every ServiceGraph is keyed by
-// its source service id, so the graph is itself the record of what compiled —
-// no separate bookkeeping that could drift from it.
-func CompiledServiceIDs(g TransitGraph) []string {
-	if len(g.Services) == 0 {
-		return nil
-	}
-	ids := make([]string, len(g.Services))
-	for i, sg := range g.Services {
-		ids[i] = sg.ServiceID
-	}
-	return ids
 }

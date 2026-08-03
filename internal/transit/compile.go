@@ -94,7 +94,12 @@ func Compile(
 		return nil, err
 	}
 
-	graph := &TransitGraph{Nodes: seededNodes(stations)}
+	nodes, err := seededNodes(stations)
+	if err != nil {
+		return nil, err
+	}
+
+	graph := &TransitGraph{Nodes: nodes}
 	for _, svc := range services {
 		if !svc.Active {
 			continue
@@ -154,19 +159,43 @@ func Compile(
 // Station row outright, so stops that interchange already carry one slug and
 // there is nothing to merge. Names is therefore always the station's own single
 // name rather than a merged cluster's list.
-func seededNodes(stations []Station) []GraphNode {
+// A station with no usable location is an error rather than a node at (0, 0):
+// that coordinate is a real place, and the graph this builds is persisted and
+// plotted from, so a silent default would put a station in the Gulf of Guinea
+// and stay there.
+func seededNodes(stations []Station) ([]GraphNode, error) {
 	if len(stations) == 0 {
-		return nil
+		return nil, nil
 	}
 	nodes := make([]GraphNode, len(stations))
 	for i, st := range stations {
-		var lat, lng float64
-		if len(st.Location.Coordinates) == 2 {
-			lng, lat = st.Location.Coordinates[0], st.Location.Coordinates[1]
+		if len(st.Location.Coordinates) != 2 {
+			return nil, fmt.Errorf("compile: station %q has no usable location: %v",
+				st.Slug, st.Location.Coordinates)
 		}
-		nodes[i] = GraphNode{Slug: st.Slug, Lat: lat, Lng: lng, Names: []string{st.Name}}
+		nodes[i] = GraphNode{
+			Slug:  st.Slug,
+			Lat:   st.Location.Coordinates[1],
+			Lng:   st.Location.Coordinates[0],
+			Names: []string{st.Name},
+		}
 	}
-	return nodes
+	return nodes, nil
+}
+
+// CompiledServiceIDs is the set of member service ids a compiled graph
+// contains, in the order the graph lists them. Every ServiceGraph is keyed by
+// its source service id, so the graph is itself the record of what compiled —
+// no separate bookkeeping that could drift from it.
+func CompiledServiceIDs(g TransitGraph) []string {
+	if len(g.Services) == 0 {
+		return nil
+	}
+	ids := make([]string, len(g.Services))
+	for i, sg := range g.Services {
+		ids[i] = sg.ServiceID
+	}
+	return ids
 }
 
 type segEdge struct {

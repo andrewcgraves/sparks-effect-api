@@ -65,9 +65,9 @@ func validateIsochroneParams(w http.ResponseWriter, budgetMins int, mode string)
 // rather than rendering a graph that no longer reflects the scenario's
 // current membership; see transit.GraphStale for what "stale" means and why.
 // stadiaClient is threaded through to build a Chainer scoped to this one
-// request's compiled graph — the production Chainer, which the seeded
-// /api/isochrone owns, cannot be reused because it is fixed to a different
-// IsochroneData at construction.
+// request's compiled graph, since a Chainer is fixed to a single IsochroneData
+// at construction and the graph is only known per request. The seeded
+// /api/isochrone builds its own the same way (SPA-181).
 func UserScenarioIsochrone(store ScenarioTargetStore, stadiaClient stadia.Client, log *logger.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		authoredTargetIsochrone(w, r, scenarioTarget{store}, stadiaClient, log)
