@@ -4,8 +4,9 @@ Go REST API for the Sparks Effect project. It serves scenario seed data and
 computes multimodal isochrones by chaining compiled rail travel times with
 Stadia Maps access/egress isochrones.
 
-There is no GTFS in this stack. Travel times come from an in-process
-**TransitGraph** compiled at store construction from embedded YAML seed data.
+There is no GTFS in this stack. Travel times come from a **TransitGraph**
+compiled from the scenario's seed data and persisted as a compile job's result;
+an isochrone is plotted over the graph that job produced.
 
 ## Pipeline
 
@@ -13,12 +14,13 @@ There is no GTFS in this stack. Travel times come from an in-process
 seed YAML (domain model + segment times)
         │
         ▼
-Compile() → TransitGraph
+Compile() → TransitGraph, stored as a succeeded compile job
   • per-service edges (run seconds + dwell)
   • boarding wait = best headway / 2
+  • nodes (position + names) so the graph plots on its own
         │
         ▼
-POST /api/isochrone (chainer)
+POST /api/isochrone (chainer over the scenario's latest succeeded compile)
   • Stadia: access matrix + origin/egress isochrones
   • TransitGraph: Dijkstra over union of service edges (seconds)
   • remaining budget → egress isochrones
@@ -159,14 +161,18 @@ native `uuid`/`timestamptz`/`boolean` types throughout.
 
 - **Connection:** set `DATABASE_URL` (Railway injects this via its private
   network). Cap the pool with `DATABASE_MAX_CONNS`. When `DATABASE_URL` is unset,
-  the server falls back to the read-only embedded YAML store so local dev works
+  the server falls back to the read-only embedded YAML store, so the scenario
+  reads work without a database — but the isochrone routes answer `503`, since a
+  graph is identified by the compile job that produced it and there are no jobs
   without a database.
 - **Migrations:** plain-SQL [`goose`](https://github.com/pressly/goose)
   migrations in `internal/persistence/postgres/migrations/`, embedded into the
   binary and run automatically on boot.
 - **Seed:** on first boot against an empty database, the embedded `ca-hsr` seed
-  data is written through the repository. The compiled-`TransitGraph` read path
-  then loads those rows and produces isochrones as before.
+  data is written through the repository and then compiled, leaving a succeeded
+  compile job whose result is the scenario's graph — no manual step, no admin
+  credentials. A boot that finds a graph already there leaves it alone, so
+  restarting is not a recompile.
 
 ## Authentication
 

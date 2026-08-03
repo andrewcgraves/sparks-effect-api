@@ -87,6 +87,23 @@ func (r *Repo) CreateScenario(ctx context.Context, sc transit.Scenario) error {
 	return wrap("CreateScenario", err)
 }
 
+// GetScenarioByID resolves a scenario the way a compile job names it. Its slug
+// is what the scenario's calibrated run times are addressed by, so a job
+// carrying only the id still reaches everything a compile needs.
+func (r *Repo) GetScenarioByID(ctx context.Context, id string) (transit.Scenario, bool, error) {
+	var sc transit.Scenario
+	err := r.pool.QueryRow(ctx,
+		`SELECT `+scenarioColumns+` FROM scenarios WHERE id = $1`,
+		id).Scan(&sc.ID, &sc.Slug, &sc.Name, &sc.Description, &sc.Status, &sc.OwnerID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return transit.Scenario{}, false, nil
+	}
+	if err != nil {
+		return transit.Scenario{}, false, wrap("GetScenarioByID", err)
+	}
+	return sc, true, nil
+}
+
 func (r *Repo) GetScenarioBySlug(ctx context.Context, slug string) (transit.Scenario, bool, error) {
 	var sc transit.Scenario
 	err := r.pool.QueryRow(ctx,

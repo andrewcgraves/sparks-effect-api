@@ -227,29 +227,6 @@ func TestTransitGraph_omitsNodesWhenEmpty(t *testing.T) {
 	}
 }
 
-// The hand-authored Compile is left carrying no nodes: its seeded isochrone
-// still sources positions from GetStationsByScenario, and making Nodes
-// authoritative there is a separate, migration-shaped decision.
-func TestCompile_handAuthoredGraphHasNoNodes(t *testing.T) {
-	sc := Scenario{ID: "sc-1", Slug: "test"}
-	services := []Service{{
-		ID: "svc-local", Active: true, Name: "Local", VehicleTypeID: "vt-1",
-		Stops: []ServiceStop{
-			{StationID: "st-a", Sequence: 1},
-			{StationID: "st-b", Sequence: 2},
-			{StationID: "st-c", Sequence: 3},
-		},
-	}}
-
-	g, err := Compile(sc, nil, testStations(), services, []VehicleType{testVehicle()}, testSegments())
-	if err != nil {
-		t.Fatalf("Compile: %v", err)
-	}
-	if g.Nodes != nil {
-		t.Errorf("Nodes = %+v, want nil for a hand-authored compile", g.Nodes)
-	}
-}
-
 func nodeBySlug(nodes []GraphNode) map[string]GraphNode {
 	out := make(map[string]GraphNode, len(nodes))
 	for _, n := range nodes {

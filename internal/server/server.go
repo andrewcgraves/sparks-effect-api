@@ -10,7 +10,6 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
-	"github.com/andrewcgraves/sparks-effect-api/internal/isochrone"
 	"github.com/andrewcgraves/sparks-effect-api/internal/logger"
 	"github.com/andrewcgraves/sparks-effect-api/internal/stadia"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
@@ -43,12 +42,11 @@ type AuthDeps interface {
 // New builds an *http.Server with all routes registered, ready to be
 // started by the caller. deps may be nil when no database is configured.
 //
-// stadiaClient is threaded through separately from chainer: chainer is the
-// seeded /api/isochrone's Chainer, fixed to the embedded store at
-// construction, while the user-scenario isochrone route builds a fresh
-// Chainer per request scoped to that request's compiled graph (see
-// handler.UserScenarioIsochrone) and needs the raw client to do it.
-func New(cfg config.Config, store *transit.Store, deps AuthDeps, chainer isochrone.Chainer, stadiaClient stadia.Client, lg *logger.Logger) *http.Server {
+// stadiaClient is the raw routing client rather than a ready-made Chainer:
+// every isochrone route — the public seeded one included, since SPA-181 — is
+// computed over one request's compiled graph, and a Chainer is fixed to a
+// single IsochroneData at construction.
+func New(cfg config.Config, store *transit.Store, deps AuthDeps, stadiaClient stadia.Client, lg *logger.Logger) *http.Server {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", handler.Health)
@@ -67,10 +65,8 @@ func New(cfg config.Config, store *transit.Store, deps AuthDeps, chainer isochro
 	mux.HandleFunc("GET /api/scenarios/{slug}/stations", handler.ScenarioStations(store))
 	mux.HandleFunc("GET /api/scenarios/{slug}/travel-times", handler.ScenarioTravelTimes(store))
 
-	mux.HandleFunc("POST /api/isochrone", handler.Isochrone(chainer, lg))
-
 	registerRouteRoutes(mux, deps)
-	registerCompileRoutes(mux, deps)
+	registerCompileRoutes(mux, deps, stadiaClient, lg)
 	registerAuthRoutes(mux, cfg, deps, stadiaClient, lg)
 
 	h := cors(mux, cfg.AllowLocalhostCORS)
@@ -107,16 +103,26 @@ func registerRouteRoutes(mux *http.ServeMux, deps AuthDeps) {
 }
 
 // registerCompileRoutes wires the public read half of the async compile job
-// model: the compiled graph, fetched by scenario slug. Triggering a compile
-// and polling the resulting job both require authentication and are
-// registered in registerAuthRoutes instead, alongside the other identity-gated
-// routes.
-func registerCompileRoutes(mux *http.ServeMux, deps AuthDeps) {
+// model: the compiled graph fetched by scenario slug, and the isochrone plotted
+// over that same graph. Triggering a compile and polling the resulting job both
+// require authentication and are registered in registerAuthRoutes instead,
+// alongside the other identity-gated routes.
+//
+// The seeded isochrone belongs here rather than beside the embedded-store reads
+// above because since SPA-181 it resolves its transit data through the compile
+// job that produced the scenario's graph, exactly as the authored isochrones
+// do. That also makes it Postgres-backed: with no database configured there are
+// no compile jobs to resolve, so it answers 503 like every other route whose
+// storage is missing, rather than silently falling back to a graph with no
+// identity to offer.
+func registerCompileRoutes(mux *http.ServeMux, deps AuthDeps, stadiaClient stadia.Client, lg *logger.Logger) {
 	if deps == nil {
 		mux.HandleFunc("GET /api/scenarios/{slug}/graph", serviceUnavailable("compiled graph storage is unavailable"))
+		mux.HandleFunc("POST /api/isochrone", serviceUnavailable("compiled graph storage is unavailable"))
 		return
 	}
 	mux.HandleFunc("GET /api/scenarios/{slug}/graph", handler.ScenarioGraph(deps))
+	mux.HandleFunc("POST /api/isochrone", handler.Isochrone(deps, stadiaClient, lg))
 }
 
 // registerAuthRoutes wires the invite-only auth surface.

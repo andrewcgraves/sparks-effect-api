@@ -15,7 +15,6 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
 	"github.com/andrewcgraves/sparks-effect-api/internal/ids"
-	"github.com/andrewcgraves/sparks-effect-api/internal/isochrone"
 	"github.com/andrewcgraves/sparks-effect-api/internal/logger"
 	"github.com/andrewcgraves/sparks-effect-api/internal/persistence/postgres"
 	"github.com/andrewcgraves/sparks-effect-api/internal/stadia"
@@ -63,9 +62,8 @@ func integrationServer(t *testing.T) (http.Handler, *postgres.Repo) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	chainer := isochrone.New(&stadia.FakeClient{}, store, logger.Discard())
 	cfg := config.Config{Port: "8080", SessionTTL: time.Hour}
-	return New(cfg, store, repo, chainer, &stadia.FakeClient{}, logger.Discard()).Handler, repo
+	return New(cfg, store, repo, &stadia.FakeClient{}, logger.Discard()).Handler, repo
 }
 
 // provisionAdmin stands in for the bootstrap-admin path in main.

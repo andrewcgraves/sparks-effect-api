@@ -230,6 +230,11 @@ func (s *Store) GetTravelTimes(scenarioSlug string) (TravelTimes, bool) {
 // TravelTimeBetween returns the Dijkstra travel time in seconds, the boarding wait seconds,
 // the boarding service ID, and reachability over the compiled TransitGraph. Returns false
 // if the scenario is missing or no path exists between the stations.
+//
+// No request path reads this since SPA-181 — the isochrone goes through the
+// compile job's graph instead. It stays as the reference half of the
+// equivalence test (see IsochroneData), which is what guarantees the two
+// produce the same answer.
 func (s *Store) TravelTimeBetween(scenarioSlug, fromSlug, toSlug string) (seconds, waitSecs int, serviceID string, ok bool) {
 	g, gOK := s.graphs[scenarioSlug]
 	if !gOK {

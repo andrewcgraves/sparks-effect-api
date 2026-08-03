@@ -1,7 +1,12 @@
 // Package worker runs async compile jobs to completion: given a job, it loads
 // the job's target composition (a seeded scenario, a user-authored scenario, or
-// a single user-authored service), physics-compiles it, and records the outcome
-// on the job row so a poller sees queued -> running -> succeeded/failed.
+// a single user-authored service), compiles it, and records the outcome on the
+// job row so a poller sees queued -> running -> succeeded/failed.
+//
+// The two kinds of target compile differently, by what data they have: a
+// user-authored target is compiled from track geometry and vehicle kinematics,
+// while a seeded scenario is compiled from its calibrated segment run times
+// (see transit.CompileSeededScenario).
 package worker
 
 import (
@@ -20,11 +25,11 @@ import (
 // backs every compile kind — the whole queued → running → succeeded/failed
 // surface is shared, and Compile dispatches to the right loader by job kind.
 type Store interface {
-	// Seeded scenario composition.
-	ListRoutesByScenario(ctx context.Context, scenarioID string) ([]transit.Route, error)
-	ListStationsByScenario(ctx context.Context, scenarioID string) ([]transit.Station, error)
-	ListServicesByScenario(ctx context.Context, scenarioID string) ([]transit.Service, error)
-	ListVehicleTypes(ctx context.Context) ([]transit.VehicleType, error)
+	// Seeded scenario composition. The scenario itself is read by id because a
+	// job names its target that way, while its calibrated run times — the edge
+	// weights a seeded compile is built from — are addressed by slug.
+	GetScenarioByID(ctx context.Context, id string) (transit.Scenario, bool, error)
+	transit.SeededCompileSource
 
 	// User-authored composition. A user scenario resolves to its member
 	// services; a single-service compile is the one-member degenerate case.
@@ -42,9 +47,8 @@ type Store interface {
 }
 
 // Compile runs one compile job to completion: marks it running, loads and
-// compiles the job's target by kind (the physics compile — stop-snapping, speed
-// limits, profile integration — and graph build), then stores the result or
-// records the error.
+// compiles the job's target by kind (see the package comment for what each kind
+// compiles from), then stores the result or records the error.
 //
 // A compile failure (bad target data) is recorded on the job and does not make
 // Compile itself return an error — that only happens when the job store itself
@@ -63,7 +67,7 @@ func Compile(ctx context.Context, store Store, job transit.Job) error {
 		return nil
 	}
 
-	if err := store.CompleteJob(ctx, job.ID, graph, compiledServiceIDs(graph)); err != nil {
+	if err := store.CompleteJob(ctx, job.ID, graph, transit.CompiledServiceIDs(graph)); err != nil {
 		return fmt.Errorf("worker: completing job %s: %w", job.ID, err)
 	}
 	return nil
@@ -95,24 +99,18 @@ func compile(ctx context.Context, store Store, job transit.Job) (transit.Transit
 	}
 }
 
+// compileScenario compiles a seeded scenario through transit's one seeded
+// compile path — the same call the boot-time compile makes (SPA-181), so a
+// graph produced here and one produced on startup are the same graph.
 func compileScenario(ctx context.Context, store Store, scenarioID string) (transit.TransitGraph, error) {
-	routes, err := store.ListRoutesByScenario(ctx, scenarioID)
+	sc, found, err := store.GetScenarioByID(ctx, scenarioID)
 	if err != nil {
-		return transit.TransitGraph{}, fmt.Errorf("worker: loading routes: %w", err)
+		return transit.TransitGraph{}, fmt.Errorf("worker: loading scenario: %w", err)
 	}
-	stations, err := store.ListStationsByScenario(ctx, scenarioID)
-	if err != nil {
-		return transit.TransitGraph{}, fmt.Errorf("worker: loading stations: %w", err)
+	if !found {
+		return transit.TransitGraph{}, fmt.Errorf("worker: scenario %q not found", scenarioID)
 	}
-	services, err := store.ListServicesByScenario(ctx, scenarioID)
-	if err != nil {
-		return transit.TransitGraph{}, fmt.Errorf("worker: loading services: %w", err)
-	}
-	vehicleTypes, err := store.ListVehicleTypes(ctx)
-	if err != nil {
-		return transit.TransitGraph{}, fmt.Errorf("worker: loading vehicle types: %w", err)
-	}
-	return transit.CompileScenario(routes, stations, services, vehicleTypes)
+	return transit.CompileSeededScenario(ctx, store, sc)
 }
 
 // compileUserScenario loads a user scenario's current member services and the
@@ -173,21 +171,6 @@ func routeIDsOf(services []transit.UserService) []string {
 		}
 		seen[svc.RouteID] = true
 		ids = append(ids, svc.RouteID)
-	}
-	return ids
-}
-
-// compiledServiceIDs is the set of member service ids a compiled graph contains,
-// in the order the graph lists them. Every ServiceGraph is keyed by its source
-// service id, so the graph is itself the record of what compiled — no separate
-// bookkeeping that could drift from it.
-func compiledServiceIDs(g transit.TransitGraph) []string {
-	if len(g.Services) == 0 {
-		return nil
-	}
-	ids := make([]string, len(g.Services))
-	for i, sg := range g.Services {
-		ids[i] = sg.ServiceID
 	}
 	return ids
 }

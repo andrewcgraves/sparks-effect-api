@@ -53,14 +53,16 @@ type GraphNode struct {
 // so the poller contract is unchanged — a client already reading the graph
 // reads the report from the same payload.
 //
-// Nodes gives every graph key a position and display names, so the physics
-// compile carries its own geometry (see GraphNode). It is populated by the
-// physics/scenario path (CompileServices) with exactly one node per key the
-// edges name — closure the graph would otherwise lack — and is empty for the
-// hand-authored Compile, whose seeded isochrone still sources positions from
-// GetStationsByScenario. The field is additive and optional on decode: a
-// jobs.result row written before it unmarshals unchanged, with Nodes nil, and
-// no historical rows are backfilled.
+// Nodes gives every graph key a position and display names, so a compiled
+// graph carries its own geometry (see GraphNode). The physics path
+// (CompileServices) populates it with exactly one node per key the edges name;
+// the hand-authored Compile populates it with one node per station of the
+// scenario (seededNodes), which is the same set plus any station no service
+// calls at. Both are closure the graph would otherwise lack, and since SPA-181
+// the seeded isochrone reads its nodes from here rather than from the station
+// rows. The field is additive and optional on decode: a jobs.result row written
+// before it unmarshals unchanged, with Nodes nil, and no historical rows are
+// backfilled — such a job compiles again to gain them.
 type TransitGraph struct {
 	Services []ServiceGraph `json:"services"`
 	Merge    MergeReport    `json:"merge,omitempty"`
@@ -92,7 +94,12 @@ func Compile(
 		return nil, err
 	}
 
-	graph := &TransitGraph{}
+	nodes, err := seededNodes(stations)
+	if err != nil {
+		return nil, err
+	}
+
+	graph := &TransitGraph{Nodes: nodes}
 	for _, svc := range services {
 		if !svc.Active {
 			continue
@@ -136,6 +143,59 @@ func Compile(
 		graph.Services = append(graph.Services, sg)
 	}
 	return graph, nil
+}
+
+// seededNodes turns a seeded scenario's stations into the graph's node set:
+// one node per station, carrying the position and name the station row already
+// holds.
+//
+// It is every station of the scenario, not only those some service calls at,
+// because that is exactly what Store.Nodes offered the chainer before the
+// seeded isochrone moved onto the compiled graph (SPA-181) — an uncalled
+// station is still a place the origin polygon may reach, it simply leads
+// nowhere by transit.
+//
+// Unlike the physics compile, no clustering runs here: seeded services share a
+// Station row outright, so stops that interchange already carry one slug and
+// there is nothing to merge. Names is therefore always the station's own single
+// name rather than a merged cluster's list.
+// A station with no usable location is an error rather than a node at (0, 0):
+// that coordinate is a real place, and the graph this builds is persisted and
+// plotted from, so a silent default would put a station in the Gulf of Guinea
+// and stay there.
+func seededNodes(stations []Station) ([]GraphNode, error) {
+	if len(stations) == 0 {
+		return nil, nil
+	}
+	nodes := make([]GraphNode, len(stations))
+	for i, st := range stations {
+		if len(st.Location.Coordinates) != 2 {
+			return nil, fmt.Errorf("compile: station %q has no usable location: %v",
+				st.Slug, st.Location.Coordinates)
+		}
+		nodes[i] = GraphNode{
+			Slug:  st.Slug,
+			Lat:   st.Location.Coordinates[1],
+			Lng:   st.Location.Coordinates[0],
+			Names: []string{st.Name},
+		}
+	}
+	return nodes, nil
+}
+
+// CompiledServiceIDs is the set of member service ids a compiled graph
+// contains, in the order the graph lists them. Every ServiceGraph is keyed by
+// its source service id, so the graph is itself the record of what compiled —
+// no separate bookkeeping that could drift from it.
+func CompiledServiceIDs(g TransitGraph) []string {
+	if len(g.Services) == 0 {
+		return nil
+	}
+	ids := make([]string, len(g.Services))
+	for i, sg := range g.Services {
+		ids[i] = sg.ServiceID
+	}
+	return ids
 }
 
 type segEdge struct {

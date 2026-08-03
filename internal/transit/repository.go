@@ -14,6 +14,9 @@ import "context"
 type Repository interface {
 	// Scenarios.
 	CreateScenario(ctx context.Context, sc Scenario) error
+	// GetScenarioByID resolves a scenario the way a compile job names its
+	// target; GetScenarioBySlug is how every request-facing path addresses one.
+	GetScenarioByID(ctx context.Context, id string) (Scenario, bool, error)
 	GetScenarioBySlug(ctx context.Context, slug string) (Scenario, bool, error)
 	ListScenarios(ctx context.Context) ([]Scenario, error)
 

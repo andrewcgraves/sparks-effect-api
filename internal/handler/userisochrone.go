@@ -36,17 +36,24 @@ func validateIsochroneRequest(w http.ResponseWriter, r *http.Request) (userIsoch
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return req, false
 	}
-	if req.BudgetMins <= 0 {
+	return req, validateIsochroneParams(w, req.BudgetMins, req.Mode)
+}
+
+// validateIsochroneParams checks the budget and mode every isochrone request
+// carries, whatever else its body holds — the seeded request names its scenario
+// there, the authored ones take theirs from the path.
+func validateIsochroneParams(w http.ResponseWriter, budgetMins int, mode string) bool {
+	if budgetMins <= 0 {
 		writeError(w, http.StatusBadRequest, "budget_mins must be greater than 0")
-		return req, false
+		return false
 	}
-	switch isochrone.Mode(req.Mode) {
+	switch isochrone.Mode(mode) {
 	case isochrone.ModeWalk, isochrone.ModeBike, isochrone.ModeDrive:
 	default:
 		writeError(w, http.StatusBadRequest, "invalid mode: must be walk, bike, or drive")
-		return req, false
+		return false
 	}
-	return req, true
+	return true
 }
 
 // UserScenarioIsochrone returns a handler for
@@ -58,9 +65,9 @@ func validateIsochroneRequest(w http.ResponseWriter, r *http.Request) (userIsoch
 // rather than rendering a graph that no longer reflects the scenario's
 // current membership; see transit.GraphStale for what "stale" means and why.
 // stadiaClient is threaded through to build a Chainer scoped to this one
-// request's compiled graph — the production Chainer, which the seeded
-// /api/isochrone owns, cannot be reused because it is fixed to a different
-// IsochroneData at construction.
+// request's compiled graph, since a Chainer is fixed to a single IsochroneData
+// at construction and the graph is only known per request. The seeded
+// /api/isochrone builds its own the same way (SPA-181).
 func UserScenarioIsochrone(store ScenarioTargetStore, stadiaClient stadia.Client, log *logger.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		authoredTargetIsochrone(w, r, scenarioTarget{store}, stadiaClient, log)
