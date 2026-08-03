@@ -3,6 +3,6 @@ slug: "ca-hsr"
 name: "California High-Speed Rail"
 description: >
   The California High-Speed Rail system connecting San Francisco to Anaheim via the
-  Central Valley. Phase 1 opens the SF–LA/Anaheim corridor. Brightline West
-  (Palmdale–Las Vegas) is seeded but commented out for later reactivation.
+  Central Valley. Phase 1 opens the SF–LA/Anaheim corridor, and the Brightline West
+  spur (Palmdale–Victor Valley–Las Vegas) branches off it at Palmdale.
 status: "published"

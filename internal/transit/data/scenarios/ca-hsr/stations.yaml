@@ -3,8 +3,8 @@
 # official CAHSR Business Plan station maps). Coordinates cross-checked against
 # CEQA project notices (e.g. 36°56′11″N 119°59′11″W for Madera per ceqanet.lci.ca.gov/2023110616)
 # and Wikipedia infobox coordinates for each station.
-# Phase 1 stations (SF–Anaheim) are active. Brightline West stations (Victor Valley,
-# Las Vegas) are commented out below for later reactivation; they share Palmdale.
+# Phase 1 stations (SF–Anaheim) and the Brightline West spur stations (Victor Valley,
+# Las Vegas) are all active; the spur joins Phase 1 at the shared Palmdale stop.
 # platform_height: high = level boarding with Siemens Venture EMU trainsets.
 
 - id: "00000000-0000-4005-8001-000000000001"
@@ -97,15 +97,18 @@
     type: Point
     coordinates: [-118.119, 34.591]
 
-# --- Brightline West (deferred) ---
-# - id: "00000000-0000-4005-8001-00000000000b"
-#   scenario_id: "00000000-0000-4001-8001-000000000001"
-#   slug: "victor-valley"
-#   name: "Victor Valley (Apple Valley)"
-#   platform_height: "high"
-#   location:
-#     type: Point
-#     coordinates: [-117.185, 34.500]
+# Brightline West spur — branches off Phase 1 at Palmdale, above.
+# Victor Valley is an in-line station in the I-15 median at Dale Evans Parkway
+# (exit 161), the site FRA cleared in 2023 — not Apple Valley town centre, which
+# is where this used to sit and is 16 km off the corridor the trains run in.
+- id: "00000000-0000-4005-8001-00000000000b"
+  scenario_id: "00000000-0000-4001-8001-000000000001"
+  slug: "victor-valley"
+  name: "Victor Valley (Apple Valley)"
+  platform_height: "high"
+  location:
+    type: Point
+    coordinates: [-117.218, 34.6443]
 
 - id: "00000000-0000-4005-8001-00000000000c"
   scenario_id: "00000000-0000-4001-8001-000000000001"
@@ -134,12 +137,12 @@
     type: Point
     coordinates: [-117.878, 33.803]
 
-# --- Brightline West (deferred) ---
-# - id: "00000000-0000-4005-8001-00000000000f"
-#   scenario_id: "00000000-0000-4001-8001-000000000001"
-#   slug: "las-vegas"
-#   name: "Las Vegas"
-#   platform_height: "high"
-#   location:
-#     type: Point
-#     coordinates: [-115.136, 36.174]
+# Brightline West spur terminus.
+- id: "00000000-0000-4005-8001-00000000000f"
+  scenario_id: "00000000-0000-4001-8001-000000000001"
+  slug: "las-vegas"
+  name: "Las Vegas"
+  platform_height: "high"
+  location:
+    type: Point
+    coordinates: [-115.136, 36.174]

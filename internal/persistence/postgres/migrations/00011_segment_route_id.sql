@@ -11,9 +11,17 @@
 --
 -- The deployed database is already seeded and SeedIfEmpty will not re-seed a
 -- populated one, so this migration — not the seed — is what gives existing
--- rows their route. Every seeded scenario has exactly one route today
--- (ca-hsr's Phase 1 alignment; Brightline West is still commented out in
--- routes.yaml), which makes the mapping unambiguous.
+-- rows their route. Every seeded scenario had exactly one route when this
+-- migration was written (ca-hsr's Phase 1 alignment; Brightline West was still
+-- commented out in routes.yaml), which made the mapping unambiguous.
+--
+-- SPA-153 has since activated Brightline West, so ca-hsr now seeds two routes
+-- and this premise no longer describes fresh data. That does not affect an
+-- applied migration: on an empty database the assertion runs before any seed,
+-- and on a deployed one it already ran against single-route data. It does mean
+-- a down/up replay against a database seeded from SPA-153 onwards will fire the
+-- assertion — correctly, since the remedy below is exactly what that database
+-- needs, and segment_run_times.yaml now carries the route_id to backfill from.
 --
 -- That premise is asserted rather than assumed, because the two ways it can
 -- break both fail silently if left to a plain UPDATE:

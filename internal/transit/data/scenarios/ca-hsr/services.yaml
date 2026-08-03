@@ -2,7 +2,7 @@
 #
 # HSR Express: key stops only (skips Madera and Kings/Tulare).
 # HSR Local: all Phase 1 stops SF–Anaheim.
-# Brightline West: Palmdale–Victor Valley–Las Vegas spur — commented out for later use.
+# Brightline West: Palmdale–Victor Valley–Las Vegas spur, interchanging with Phase 1 at Palmdale.
 #
 # Frequency windows are representative of the 2026 Business Plan peak/off-peak headways.
 # HeadwayS 1800 = every 30 min (peak), 3600 = every 60 min (off-peak).
@@ -89,23 +89,23 @@
       end_time: "20:00"
       headway_s: 5400
 
-# --- Brightline West (deferred) — Palmdale–Victor Valley–Las Vegas ---
-# - id: "00000000-0000-4004-8001-000000000003"
-#   scenario_id: "00000000-0000-4001-8001-000000000001"
-#   route_id: "00000000-0000-4002-8001-000000000002"
-#   vehicle_type_id: "00000000-0000-4003-8001-000000000001"
-#   name: "Brightline West"
-#   direction: "both"
-#   active: true
-#   provenance: calibrated
-#   stops:
-#     - station_id: "00000000-0000-4005-8001-00000000000a"
-#       sequence: 1
-#     - station_id: "00000000-0000-4005-8001-00000000000b"
-#       sequence: 2
-#     - station_id: "00000000-0000-4005-8001-00000000000f"
-#       sequence: 3
-#   frequency_windows:
-#     - start_time: "06:00"
-#       end_time: "22:00"
-#       headway_s: 7200
+# --- Brightline West — Palmdale–Victor Valley–Las Vegas ---
+- id: "00000000-0000-4004-8001-000000000003"
+  scenario_id: "00000000-0000-4001-8001-000000000001"
+  route_id: "00000000-0000-4002-8001-000000000002"
+  vehicle_type_id: "00000000-0000-4003-8001-000000000001"
+  name: "Brightline West"
+  direction: "both"
+  active: true
+  provenance: calibrated
+  stops:
+    - station_id: "00000000-0000-4005-8001-00000000000a"
+      sequence: 1
+    - station_id: "00000000-0000-4005-8001-00000000000b"
+      sequence: 2
+    - station_id: "00000000-0000-4005-8001-00000000000f"
+      sequence: 3
+  frequency_windows:
+    - start_time: "06:00"
+      end_time: "22:00"
+      headway_s: 7200
