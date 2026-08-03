@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
+	"github.com/andrewcgraves/sparks-effect-api/internal/routing"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
@@ -162,7 +163,7 @@ func TestAuthoredTargetIsochroneStaleNamesItsTarget(t *testing.T) {
 			CompiledServiceIDs: []string{"svc-1"}, Result: freshGraph(),
 		}
 
-		rec := svcIsoServeAs(t, store, fakeStadia(), svcOwner, "/api/services/line-a/isochrone", isoValidBody)
+		rec := svcIsoServeAs(t, store, &routing.FakePublisher{}, svcOwner, "/api/services/line-a/isochrone", isoValidBody)
 		assertStale(t, rec, "compiled graph is stale; recompile the service and retry")
 	})
 
@@ -175,7 +176,7 @@ func TestAuthoredTargetIsochroneStaleNamesItsTarget(t *testing.T) {
 			CompiledServiceIDs: []string{"svc-1"}, Result: freshGraph(),
 		}
 
-		rec := isoServeAs(t, store, fakeStadia(), scnOwner, "/api/user-scenarios/trip/isochrone", isoValidBody)
+		rec := isoServeAs(t, store, &routing.FakePublisher{}, scnOwner, "/api/user-scenarios/trip/isochrone", isoValidBody)
 		assertStale(t, rec, "compiled graph is stale; recompile the scenario and retry")
 	})
 }
@@ -201,7 +202,7 @@ func TestAuthoredTargetIsochroneNotYetCompiledNamesItsTarget(t *testing.T) {
 		store := newFakeServiceStore()
 		seedServiceRow(store, "svc-1", "line-a", svcOwner.ID, time.Now())
 
-		rec := svcIsoServeAs(t, store, fakeStadia(), svcOwner, "/api/services/line-a/isochrone", isoValidBody)
+		rec := svcIsoServeAs(t, store, &routing.FakePublisher{}, svcOwner, "/api/services/line-a/isochrone", isoValidBody)
 		if rec.Code != http.StatusNotFound {
 			t.Fatalf("status = %d, want 404; body %s", rec.Code, rec.Body.String())
 		}
@@ -214,7 +215,7 @@ func TestAuthoredTargetIsochroneNotYetCompiledNamesItsTarget(t *testing.T) {
 		store := newFakeScenarioStore()
 		seedScenarioRow(store, "scn-1", "trip", scnOwner.ID, []string{"svc-1"})
 
-		rec := isoServeAs(t, store, fakeStadia(), scnOwner, "/api/user-scenarios/trip/isochrone", isoValidBody)
+		rec := isoServeAs(t, store, &routing.FakePublisher{}, scnOwner, "/api/user-scenarios/trip/isochrone", isoValidBody)
 		if rec.Code != http.StatusNotFound {
 			t.Fatalf("status = %d, want 404; body %s", rec.Code, rec.Body.String())
 		}

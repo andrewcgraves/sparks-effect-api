@@ -18,17 +18,14 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/ids"
 	internlog "github.com/andrewcgraves/sparks-effect-api/internal/logger"
 	"github.com/andrewcgraves/sparks-effect-api/internal/persistence/postgres"
+	"github.com/andrewcgraves/sparks-effect-api/internal/routing"
 	"github.com/andrewcgraves/sparks-effect-api/internal/server"
-	"github.com/andrewcgraves/sparks-effect-api/internal/stadia"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
 func main() {
 	_ = godotenv.Load()
 	cfg := config.Load()
-	if cfg.StadiaAPIKey == "" {
-		log.Fatal("STADIA_API_KEY must be set")
-	}
 
 	lg := internlog.Default(cfg.Debug)
 	if cfg.Debug {
@@ -65,9 +62,20 @@ func main() {
 		}
 	}
 
-	stadiaClient := stadia.NewHTTPClient(cfg.StadiaAPIKey).WithLogger(lg)
+	// publisher stays nil (not a typed nil) with no broker configured, so the
+	// server can register the isochrone routes as 503s. It connects lazily, so
+	// constructing one here does not require the broker to be up yet.
+	var publisher routing.Publisher
+	if cfg.AMQPURL != "" {
+		amqpPublisher := routing.NewAMQPPublisher(cfg.AMQPURL, cfg.RoutingQueue, lg)
+		defer amqpPublisher.Close()
+		publisher = amqpPublisher
+		lg.Printf("routing jobs will be published to %q", cfg.RoutingQueue)
+	} else {
+		lg.Printf("AMQP_URL not set; the isochrone endpoints will answer 503")
+	}
 
-	srv := server.New(cfg, store, deps, stadiaClient, lg)
+	srv := server.New(cfg, store, deps, publisher, lg)
 
 	go func() {
 		log.Printf("listening on %s", srv.Addr)

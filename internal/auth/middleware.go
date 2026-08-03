@@ -66,6 +66,51 @@ func RequireAuth(lookup SessionLookup) func(http.Handler) http.Handler {
 	}
 }
 
+// OptionalAuth returns middleware that attaches the authenticated user when the
+// request carries a valid bearer token, and otherwise passes the request
+// through unchanged. Handlers behind it must treat UserFrom's ok=false as
+// "anonymous", not as an error.
+//
+// It exists for endpoints serving a mix of public and owned resources, where
+// authentication is not the gate — the resource decides. The routing job poll
+// is the case: a job with no owner is the public seeded isochrone and is
+// readable by anyone holding its id, while an owned one is readable only by its
+// owner or an admin. RequireAuth would lock anonymous callers out of the public
+// half; no middleware at all would leave the owned half unprotected.
+//
+// A malformed or expired token is treated as no token rather than as a
+// rejection. The alternative — 401 for a token that would have been ignored
+// anyway — would make a stale session fail requests it has no bearing on.
+func OptionalAuth(lookup SessionLookup) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			token, ok := BearerToken(r)
+			if !ok {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			user, ok, err := lookup(r.Context(), HashToken(token))
+			if err != nil {
+				// An outage, not a rejected credential — and unlike RequireAuth
+				// this endpoint can still serve its public half, so failing the
+				// whole request would be worse than serving it anonymously.
+				// The owned half answers 404 in that case, which is the same
+				// thing it tells any non-owner.
+				log.Printf("auth: optional session lookup failed: %v", err)
+				next.ServeHTTP(w, r)
+				return
+			}
+			if !ok {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			next.ServeHTTP(w, r.WithContext(WithUser(r.Context(), user)))
+		})
+	}
+}
+
 // RequireAdmin returns middleware that admits only authenticated admins. It is
 // the gate for route-write and account-provisioning endpoints.
 //

@@ -2,12 +2,11 @@ package handler
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 
-	"github.com/andrewcgraves/sparks-effect-api/internal/isochrone"
+	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/logger"
-	"github.com/andrewcgraves/sparks-effect-api/internal/stadia"
+	"github.com/andrewcgraves/sparks-effect-api/internal/routing"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
@@ -42,63 +41,88 @@ func validateIsochroneRequest(w http.ResponseWriter, r *http.Request) (userIsoch
 // validateIsochroneParams checks the budget and mode every isochrone request
 // carries, whatever else its body holds — the seeded request names its scenario
 // there, the authored ones take theirs from the path.
+//
+// The mode set is transit.TravelMode's own, so what the API accepts and what
+// the routing_jobs column stores cannot drift apart.
 func validateIsochroneParams(w http.ResponseWriter, budgetMins int, mode string) bool {
 	if budgetMins <= 0 {
 		writeError(w, http.StatusBadRequest, "budget_mins must be greater than 0")
 		return false
 	}
-	switch isochrone.Mode(mode) {
-	case isochrone.ModeWalk, isochrone.ModeBike, isochrone.ModeDrive:
-	default:
+	if !transit.TravelMode(mode).Valid() {
 		writeError(w, http.StatusBadRequest, "invalid mode: must be walk, bike, or drive")
 		return false
 	}
 	return true
 }
 
+// ScenarioIsochroneStore is what an isochrone over a user-authored scenario
+// needs: the scenario as a compile target, plus somewhere to record the routing
+// job it enqueues.
+//
+// It is a composition rather than two more methods on ScenarioTargetStore
+// because the compile trigger and the graph read address the same target and
+// have no routing job to record. Widening that interface would oblige every one
+// of its callers to satisfy a half they never touch.
+type ScenarioIsochroneStore interface {
+	ScenarioTargetStore
+	RoutingStore
+}
+
+// ServiceIsochroneStore is what an isochrone over a single user-authored
+// service needs, composed for the same reason as its scenario counterpart: the
+// service as a compile target, plus somewhere to record the routing job.
+type ServiceIsochroneStore interface {
+	ServiceTargetStore
+	RoutingStore
+}
+
 // UserScenarioIsochrone returns a handler for
-// POST /api/user-scenarios/{slug}/isochrone: an isochrone computed over a
-// user-built scenario's compiled graph.
+// POST /api/user-scenarios/{slug}/isochrone: an isochrone over a user-built
+// scenario's compiled graph, enqueued for the routing worker.
 //
 // Owner-scoped like the rest of user-scenario CRUD (404, not 403, for a
 // non-owner — see authorizeScenario). Answers 409 with StaleGraphErrorCode
-// rather than rendering a graph that no longer reflects the scenario's
-// current membership; see transit.GraphStale for what "stale" means and why.
-// stadiaClient is threaded through to build a Chainer scoped to this one
-// request's compiled graph, since a Chainer is fixed to a single IsochroneData
-// at construction and the graph is only known per request. The seeded
-// /api/isochrone builds its own the same way (SPA-181).
-func UserScenarioIsochrone(store ScenarioTargetStore, stadiaClient stadia.Client, log *logger.Logger) http.HandlerFunc {
+// rather than enqueueing work over a graph that no longer reflects the
+// scenario's current membership; see transit.GraphStale for what "stale" means
+// and why. Since SPA-182 it answers 202 with a routing job rather than a
+// computed result — the seeded /api/isochrone does the same.
+func UserScenarioIsochrone(store ScenarioIsochroneStore, publisher routing.Publisher, log *logger.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		authoredTargetIsochrone(w, r, scenarioTarget{store}, stadiaClient, log)
+		authoredTargetIsochrone(w, r, scenarioTarget{store}, store, publisher, log)
 	}
 }
 
 // UserServiceIsochrone returns a handler for
-// POST /api/services/{slug}/isochrone: an isochrone computed over a single
-// service's compiled graph.
+// POST /api/services/{slug}/isochrone: an isochrone over a single service's
+// compiled graph, enqueued for the routing worker.
 //
 // The twin of UserScenarioIsochrone, differing only in target — one service,
 // compiled alone as the degenerate one-member scenario. Owner-scoped (404, not
 // 403, for a non-owner — see authorizeService), and answers 409 with
-// StaleGraphErrorCode rather than rendering a graph that no longer reflects the
-// service's current definition.
+// StaleGraphErrorCode rather than enqueueing over a graph that no longer
+// reflects the service's current definition.
 //
 // Staleness routes through transit.GraphStale with a one-element membership set
 // rather than a separate rule, so both surfaces inherit the same corrections.
 // In practice that reduces to the timestamp arm: a service is always its own
 // sole member, so it can only go stale by being edited — less often than a
 // scenario, which is also stale on a membership change or any member's edit.
-func UserServiceIsochrone(store ServiceTargetStore, stadiaClient stadia.Client, log *logger.Logger) http.HandlerFunc {
+func UserServiceIsochrone(store ServiceIsochroneStore, publisher routing.Publisher, log *logger.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		authoredTargetIsochrone(w, r, serviceTarget{store}, stadiaClient, log)
+		authoredTargetIsochrone(w, r, serviceTarget{store}, store, publisher, log)
 	}
 }
 
-// authoredTargetIsochrone computes an isochrone over one authored target's
+// authoredTargetIsochrone enqueues an isochrone over one authored target's
 // compiled graph: the shared body of both isochrone handlers.
+//
+// The order matters. Nothing is recorded and nothing is published until the
+// caller has been confirmed as the owner and the graph has been confirmed
+// current — a stale target must never leave a routing job behind for a worker
+// to compute over a graph the owner has already superseded.
 func authoredTargetIsochrone(w http.ResponseWriter, r *http.Request, target authoredTarget,
-	stadiaClient stadia.Client, log *logger.Logger) {
+	routingStore RoutingStore, publisher routing.Publisher, log *logger.Logger) {
 	req, ok := validateIsochroneRequest(w, r)
 	if !ok {
 		return
@@ -126,47 +150,24 @@ func authoredTargetIsochrone(w http.ResponseWriter, r *http.Request, target auth
 		return
 	}
 
-	chainer := isochrone.New(stadiaClient, transit.CompiledGraphData{Graph: job.Result}, log)
-	resp, err := chainer.Chain(r.Context(), isochrone.ChainRequest{
-		Lat:        req.Lat,
-		Lng:        req.Lng,
-		BudgetMins: req.BudgetMins,
-		Mode:       isochrone.Mode(req.Mode),
-		// CompiledGraphData is already scoped to this one graph and ignores the
-		// slug on both its lookups, so the target's slug resolves nothing here.
-		// Two places do still read it, neither fatal but both worth knowing:
-		// the chainer's `skipWait` literal (chainer.go:236), so a target whose
-		// name happens to slug to "ca-hsr" would silently be chained wait-free;
-		// and ChainMetadata.ScenarioSlug, so a single service's response reports
-		// its slug under "scenario_slug". Both belong to the wait model SPA-110
-		// is to settle — recorded, not fixed here.
-		ScenarioSlug: owned.slug(),
-	})
-	if err != nil {
-		log.Debugf("user %s isochrone chain error: %v", noun, err)
-		writeChainError(w, err, noun+" not found")
+	// target.load has already established the caller owns this target, so the
+	// identity is present; the routing job records it so only they (or an
+	// admin) can poll it back.
+	user, ok := auth.UserFrom(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "authentication required")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, resp)
-}
+	log.Debugf("enqueueing %s isochrone: slug=%s lat=%.6f lng=%.6f budget_mins=%d mode=%s",
+		noun, owned.slug(), req.Lat, req.Lng, req.BudgetMins, req.Mode)
 
-// writeChainError maps a chainer failure onto a status code. notFoundMsg names
-// the resource for the one arm that reports a missing target, so each handler
-// stays word-for-word consistent with its own CRUD.
-func writeChainError(w http.ResponseWriter, err error, notFoundMsg string) {
-	switch {
-	case errors.Is(err, isochrone.ErrInvalidMode):
-		writeError(w, http.StatusBadRequest, "invalid mode: must be walk, bike, or drive")
-	case errors.Is(err, isochrone.ErrScenarioNotFound):
-		writeError(w, http.StatusNotFound, notFoundMsg)
-	case errors.Is(err, isochrone.ErrStadiaClientError):
-		writeError(w, http.StatusBadRequest, "routing request exceeded service limits")
-	case errors.Is(err, isochrone.ErrStadiaRateLimit):
-		writeError(w, http.StatusTooManyRequests, "routing service rate limit exceeded")
-	case errors.Is(err, isochrone.ErrStadiaUnavailable):
-		writeError(w, http.StatusBadGateway, "routing service unavailable")
-	default:
-		writeInternalError(w, "computing isochrone", err)
-	}
+	enqueueIsochrone(w, r, routingStore, publisher, transit.RoutingJob{
+		CompileJobID: job.ID,
+		OwnerID:      &user.ID,
+		Lat:          req.Lat,
+		Lng:          req.Lng,
+		BudgetMins:   req.BudgetMins,
+		Mode:         transit.TravelMode(req.Mode),
+	}, job.Result)
 }

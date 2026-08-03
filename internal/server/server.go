@@ -11,7 +11,7 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/logger"
-	"github.com/andrewcgraves/sparks-effect-api/internal/stadia"
+	"github.com/andrewcgraves/sparks-effect-api/internal/routing"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
@@ -35,18 +35,22 @@ type AuthDeps interface {
 	handler.ServiceStore
 	// ScenarioStore backs the user-owned scenario CRUD endpoints.
 	handler.ScenarioStore
+	// RoutingStore backs the isochrone enqueue surface and the routing job poll.
+	handler.RoutingStore
 	// GetSessionUser backs the middleware's auth.SessionLookup.
 	GetSessionUser(ctx context.Context, tokenHash string) (transit.User, bool, error)
 }
 
 // New builds an *http.Server with all routes registered, ready to be
-// started by the caller. deps may be nil when no database is configured.
+// started by the caller.
 //
-// stadiaClient is the raw routing client rather than a ready-made Chainer:
-// every isochrone route — the public seeded one included, since SPA-181 — is
-// computed over one request's compiled graph, and a Chainer is fixed to a
-// single IsochroneData at construction.
-func New(cfg config.Config, store *transit.Store, deps AuthDeps, stadiaClient stadia.Client, lg *logger.Logger) *http.Server {
+// deps may be nil when no database is configured, and publisher may be nil when
+// no broker is. Each missing dependency turns the routes that need it into
+// 503s rather than 404s, so a client can tell "not deployed with that piece"
+// from "no such endpoint". The isochrone routes need both: since SPA-182 they
+// resolve a compiled graph out of Postgres and hand it to the routing worker
+// over the queue, computing nothing themselves.
+func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routing.Publisher, lg *logger.Logger) *http.Server {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", handler.Health)
@@ -66,8 +70,8 @@ func New(cfg config.Config, store *transit.Store, deps AuthDeps, stadiaClient st
 	mux.HandleFunc("GET /api/scenarios/{slug}/travel-times", handler.ScenarioTravelTimes(store))
 
 	registerRouteRoutes(mux, deps)
-	registerCompileRoutes(mux, deps, stadiaClient, lg)
-	registerAuthRoutes(mux, cfg, deps, stadiaClient, lg)
+	registerCompileRoutes(mux, deps, publisher, lg)
+	registerAuthRoutes(mux, cfg, deps, publisher, lg)
 
 	h := cors(mux, cfg.AllowLocalhostCORS)
 
@@ -93,8 +97,8 @@ func registerRouteRoutes(mux *http.ServeMux, deps AuthDeps) {
 		// does not serve /api/routes, it makes the mux answer that path with a
 		// 307 to the trailing-slash form. Without this the list would redirect
 		// rather than report itself unavailable.
-		mux.HandleFunc("/api/routes", serviceUnavailable("route storage is unavailable"))
-		mux.HandleFunc("/api/routes/", serviceUnavailable("route storage is unavailable"))
+		mux.HandleFunc("/api/routes", noDatabase("route storage is unavailable"))
+		mux.HandleFunc("/api/routes/", noDatabase("route storage is unavailable"))
 		return
 	}
 	mux.HandleFunc("GET /api/routes", handler.Routes(deps))
@@ -102,11 +106,11 @@ func registerRouteRoutes(mux *http.ServeMux, deps AuthDeps) {
 	mux.HandleFunc("POST /api/routes/{slug}/snap-stops", handler.SnapStops(deps))
 }
 
-// registerCompileRoutes wires the public read half of the async compile job
-// model: the compiled graph fetched by scenario slug, and the isochrone plotted
-// over that same graph. Triggering a compile and polling the resulting job both
-// require authentication and are registered in registerAuthRoutes instead,
-// alongside the other identity-gated routes.
+// registerCompileRoutes wires the public half of the async job model: the
+// compiled graph fetched by scenario slug, the seeded isochrone enqueued over
+// that same graph, and the poll that answers for it. Triggering a compile and
+// polling a *compile* job both require authentication and are registered in
+// registerAuthRoutes instead, alongside the other identity-gated routes.
 //
 // The seeded isochrone belongs here rather than beside the embedded-store reads
 // above because since SPA-181 it resolves its transit data through the compile
@@ -115,14 +119,35 @@ func registerRouteRoutes(mux *http.ServeMux, deps AuthDeps) {
 // no compile jobs to resolve, so it answers 503 like every other route whose
 // storage is missing, rather than silently falling back to a graph with no
 // identity to offer.
-func registerCompileRoutes(mux *http.ServeMux, deps AuthDeps, stadiaClient stadia.Client, lg *logger.Logger) {
+//
+// The routing job poll is public in the same sense the seeded isochrone is:
+// registered without a gate, but wrapped in auth.OptionalAuth so an owned job
+// can still recognise its owner. See handler.RoutingJobStatus for the rule.
+func registerCompileRoutes(mux *http.ServeMux, deps AuthDeps, publisher routing.Publisher, lg *logger.Logger) {
 	if deps == nil {
-		mux.HandleFunc("GET /api/scenarios/{slug}/graph", serviceUnavailable("compiled graph storage is unavailable"))
-		mux.HandleFunc("POST /api/isochrone", serviceUnavailable("compiled graph storage is unavailable"))
+		mux.HandleFunc("GET /api/scenarios/{slug}/graph", noDatabase("compiled graph storage is unavailable"))
+		mux.HandleFunc("POST /api/isochrone", noDatabase("compiled graph storage is unavailable"))
+		mux.HandleFunc("GET /api/routing-jobs/{id}", noDatabase("routing job storage is unavailable"))
 		return
 	}
 	mux.HandleFunc("GET /api/scenarios/{slug}/graph", handler.ScenarioGraph(deps))
-	mux.HandleFunc("POST /api/isochrone", handler.Isochrone(deps, stadiaClient, lg))
+	mux.HandleFunc("POST /api/isochrone", requirePublisher(publisher, handler.Isochrone(deps, publisher, lg)))
+	mux.Handle("GET /api/routing-jobs/{id}",
+		auth.OptionalAuth(deps.GetSessionUser)(handler.RoutingJobStatus(deps)))
+}
+
+// requirePublisher guards an isochrone endpoint with the broker it depends on.
+//
+// An isochrone is now entirely someone else's work: with no queue to publish
+// to there is no way to do it and no partial answer worth inventing. Answering
+// 503 up front is more honest than accepting the request, recording a routing
+// job, and immediately marking it failed — which is what the handler would do
+// with a publisher that cannot reach anything.
+func requirePublisher(publisher routing.Publisher, h http.HandlerFunc) http.HandlerFunc {
+	if publisher == nil {
+		return serviceUnavailable("the routing queue is unavailable: no broker configured")
+	}
+	return h
 }
 
 // registerAuthRoutes wires the invite-only auth surface.
@@ -141,7 +166,7 @@ func registerCompileRoutes(mux *http.ServeMux, deps AuthDeps, stadiaClient stadi
 // With no database configured there is nothing to authenticate against, so
 // every route answers 503 rather than 404 — a client can tell "not deployed
 // with auth" from "no such endpoint".
-func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, stadiaClient stadia.Client, lg *logger.Logger) {
+func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, publisher routing.Publisher, lg *logger.Logger) {
 	if deps == nil {
 		for _, pattern := range []string{
 			"/api/auth/login", "/api/auth/logout", "/api/auth/me",
@@ -150,7 +175,7 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, st
 			"/api/services", "/api/services/",
 			"/api/user-scenarios", "/api/user-scenarios/",
 		} {
-			mux.HandleFunc(pattern, serviceUnavailable("authentication is unavailable"))
+			mux.HandleFunc(pattern, noDatabase("authentication is unavailable"))
 		}
 		return
 	}
@@ -189,7 +214,8 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, st
 	// owner-scoped identically. The database-less 503 list above needs no entry
 	// for either: "/api/services/" is a subtree pattern and already covers them.
 	mux.Handle("GET /api/services/{slug}/graph", authenticated(handler.UserServiceGraph(deps)))
-	mux.Handle("POST /api/services/{slug}/isochrone", authenticated(handler.UserServiceIsochrone(deps, stadiaClient, lg)))
+	mux.Handle("POST /api/services/{slug}/isochrone",
+		authenticated(requirePublisher(publisher, handler.UserServiceIsochrone(deps, publisher, lg))))
 
 	// User-owned scenarios: owner-scoped CRUD over a curated set of UserService
 	// ids. Named /api/user-scenarios, distinct from the public /api/scenarios
@@ -207,21 +233,33 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, st
 	// The user-authored counterpart to POST /api/isochrone (SPA-83): computes
 	// over the scenario's compiled graph rather than the seeded store, and
 	// answers 409 with a distinct code when that graph is stale (SPA-116).
-	mux.Handle("POST /api/user-scenarios/{slug}/isochrone", authenticated(handler.UserScenarioIsochrone(deps, stadiaClient, lg)))
+	mux.Handle("POST /api/user-scenarios/{slug}/isochrone",
+		authenticated(requirePublisher(publisher, handler.UserScenarioIsochrone(deps, publisher, lg))))
 
 	// Admin-only.
 	mux.Handle("POST /api/admin/users", adminOnly(handler.CreateUser(deps)))
 	mux.Handle("POST /api/admin/routes", adminOnly(handler.CreateRoute(deps)))
 }
 
-// serviceUnavailable answers 503 for a route whose backing store is Postgres
-// when no database is configured, so a client can tell "not deployed with a
-// database" from "no such endpoint".
+// noDatabase answers 503 for a route whose backing store is Postgres when no
+// database is configured — the great majority of them, hence its own wrapper
+// over serviceUnavailable rather than the suffix repeated at each call site.
+func noDatabase(what string) http.HandlerFunc {
+	return serviceUnavailable(what + ": no database configured")
+}
+
+// serviceUnavailable answers 503 for a route one of whose dependencies is not
+// configured — Postgres for most, the queue broker for the isochrones — so a
+// client can tell "not deployed with that piece" from "no such endpoint".
+//
+// msg is the whole message, including which dependency is missing: it used to
+// name the database itself, which stopped being true once a second dependency
+// could be the one missing. Most callers go through noDatabase above.
 func serviceUnavailable(msg string) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
-		body := `{"error":"` + msg + `: no database configured"}` + "\n"
+		body := `{"error":"` + msg + `"}` + "\n"
 		if _, err := w.Write([]byte(body)); err != nil {
 			log.Printf("server: failed to write response: %v", err)
 		}
