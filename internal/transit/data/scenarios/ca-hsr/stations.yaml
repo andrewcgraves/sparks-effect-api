@@ -98,6 +98,9 @@
     coordinates: [-118.119, 34.591]
 
 # Brightline West spur — branches off Phase 1 at Palmdale, above.
+# Victor Valley is an in-line station in the I-15 median at Dale Evans Parkway
+# (exit 161), the site FRA cleared in 2023 — not Apple Valley town centre, which
+# is where this used to sit and is 16 km off the corridor the trains run in.
 - id: "00000000-0000-4005-8001-00000000000b"
   scenario_id: "00000000-0000-4001-8001-000000000001"
   slug: "victor-valley"
@@ -105,7 +108,7 @@
   platform_height: "high"
   location:
     type: Point
-    coordinates: [-117.185, 34.500]
+    coordinates: [-117.218, 34.6443]
 
 - id: "00000000-0000-4005-8001-00000000000c"
   scenario_id: "00000000-0000-4001-8001-000000000001"
