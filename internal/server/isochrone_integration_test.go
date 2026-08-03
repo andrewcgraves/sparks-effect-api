@@ -50,8 +50,35 @@ func TestIntegration_SeededIsochroneServedFromCompiledGraph(t *testing.T) {
 	}
 
 	rec = request(t, h, http.MethodPost, "/api/isochrone", "", seededIsochroneBody)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("after compiling: status %d, want 200; body %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("after compiling: status %d, want 202; body %s", rec.Code, rec.Body.String())
+	}
+
+	// The 202 hands back a routing job, and the whole point of it having no
+	// owner is that the anonymous caller who asked for it can poll it back.
+	var job transit.RoutingJob
+	if err := json.Unmarshal(rec.Body.Bytes(), &job); err != nil {
+		t.Fatalf("decode routing job: %v", err)
+	}
+	if job.OwnerID != nil {
+		t.Errorf("owner_id = %v, want nil for the public isochrone", *job.OwnerID)
+	}
+	pollRec := request(t, h, http.MethodGet, "/api/routing-jobs/"+job.ID, "")
+	if pollRec.Code != http.StatusOK {
+		t.Fatalf("anonymous poll of an ownerless routing job: status %d, want 200; body %s",
+			pollRec.Code, pollRec.Body.String())
+	}
+	var polled transit.RoutingJob
+	if err := json.Unmarshal(pollRec.Body.Bytes(), &polled); err != nil {
+		t.Fatalf("decode polled job: %v", err)
+	}
+	if polled.ID != job.ID || polled.Status != transit.JobStatusQueued {
+		t.Errorf("polled %+v, want the queued job %s", polled, job.ID)
+	}
+	// It names the compile job whose graph it is plotted over — the identity the
+	// worker keys its cache on.
+	if polled.CompileJobID == "" {
+		t.Error("routing job names no compile job; the worker has no graph identity to cache against")
 	}
 
 	// The same graph is public at the read endpoint, with no job id and no auth.

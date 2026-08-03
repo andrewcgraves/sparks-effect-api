@@ -29,12 +29,14 @@ const (
 )
 
 // rewindPhase1GeometryMigration puts the database back to how it looked
-// immediately before 00013 ran. As in rewindBrightlineWestMigration, the
-// version rows go from 13 upwards: goose treats a gap below the highest
-// recorded version as an out-of-order migration and refuses to run.
+// immediately before 00013 ran. It passes the chain on to 00014 first: goose
+// treats a gap below the highest recorded version as an out-of-order migration
+// and refuses to run, so every later migration has to be unwound too — and
+// 00014 creates tables, which must be dropped rather than merely unrecorded.
 func rewindPhase1GeometryMigration(t *testing.T, url string) {
 	t.Helper()
-	exec(t, url, `DELETE FROM goose_db_version WHERE version_id >= 13`)
+	rewindRoutingJobsMigration(t, url)
+	exec(t, url, `DELETE FROM goose_db_version WHERE version_id = 13`)
 }
 
 // insertPreFixCaHsrPhase1 stages ca-hsr as a deployed database held it before

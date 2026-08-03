@@ -128,4 +128,17 @@ type Repository interface {
 	// GetLatestSucceededUserServiceJob is the single-service counterpart, for a
 	// service compiled alone as the degenerate one-member scenario.
 	GetLatestSucceededUserServiceJob(ctx context.Context, userServiceSlug string) (Job, bool, error)
+
+	// RoutingJobs are isochrones handed to the routing worker (SPA-182). Only
+	// the three operations this repository performs appear here: it inserts a
+	// job, polls it, and fails one whose publish the broker never confirmed.
+	// Every other transition — running, succeeded, and the result itself — is
+	// written by the worker in the other repository, so there is no method for
+	// it to drift out of step with.
+	//
+	// CreateRoutingJob takes a pointer because it fills in the database-assigned
+	// timestamps, which the 202 response carries back to the caller.
+	CreateRoutingJob(ctx context.Context, j *RoutingJob) error
+	GetRoutingJobByID(ctx context.Context, id string) (RoutingJob, bool, error)
+	FailRoutingJob(ctx context.Context, id, errMsg string) error
 }

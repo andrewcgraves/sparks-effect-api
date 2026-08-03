@@ -9,8 +9,17 @@ import (
 
 // Config holds the settings needed to run the API server.
 type Config struct {
-	Port         string
-	StadiaAPIKey string
+	Port string
+	// AMQPURL is the RabbitMQ connection string the isochrone endpoints publish
+	// routing jobs to. When empty they answer 503, the same way the
+	// database-backed routes do without DATABASE_URL: the API is still useful
+	// for everything that does not need the routing worker, and local dev
+	// should not require a broker to run.
+	AMQPURL string
+	// RoutingQueue is the queue routing jobs are published to. It must match
+	// what the worker consumes from — one of the few strings shared across the
+	// repository boundary, hence a setting rather than a constant.
+	RoutingQueue string
 	// DatabaseURL is the Postgres connection string (Railway injects DATABASE_URL
 	// via the private-network endpoint). When empty the server falls back to the
 	// read-only embedded YAML store, which keeps local dev usable without a DB.
@@ -40,6 +49,13 @@ type Config struct {
 // enough to limit exposure and long enough not to interrupt a working session.
 const defaultSessionTTL = 24 * time.Hour
 
+// defaultRoutingQueue is the queue name both sides of the routing contract use
+// unless deliberately overridden. Defaulted rather than required because
+// getting it wrong is silent — the API publishes happily to a queue nothing
+// consumes — so the two repositories agreeing by default is worth more than
+// forcing the operator to set it.
+const defaultRoutingQueue = "routing.jobs"
+
 // Load reads configuration from environment variables, applying defaults
 // for anything unset.
 func Load() Config {
@@ -58,7 +74,8 @@ func Load() Config {
 
 	return Config{
 		Port:                   getEnv("PORT", "8080"),
-		StadiaAPIKey:           os.Getenv("STADIA_API_KEY"),
+		AMQPURL:                os.Getenv("AMQP_URL"),
+		RoutingQueue:           getEnv("ROUTING_QUEUE", defaultRoutingQueue),
 		DatabaseURL:            os.Getenv("DATABASE_URL"),
 		DBMaxConns:             maxConns,
 		Debug:                  os.Getenv("LOG_LEVEL") == "debug" || os.Getenv("VERBOSE") == "true",

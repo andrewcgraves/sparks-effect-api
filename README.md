@@ -1,12 +1,18 @@
 # sparks-effect-api
 
-Go REST API for the Sparks Effect project. It serves scenario seed data and
-computes multimodal isochrones by chaining compiled rail travel times with
-Stadia Maps access/egress isochrones.
+Go REST API for the Sparks Effect project. It serves scenario seed data,
+compiles it into transit graphs, and hands multimodal isochrone requests to the
+routing worker over a queue.
 
 There is no GTFS in this stack. Travel times come from a **TransitGraph**
 compiled from the scenario's seed data and persisted as a compile job's result;
 an isochrone is plotted over the graph that job produced.
+
+The API does not compute isochrones. Valhalla runs ClusterIP-only on the home
+cluster with no ingress, so nothing deployed elsewhere can reach it — the queue
+is the only transport, and the routing fan-out executes inside the cluster in a
+separate repository (SPA-182). This repository's job is to resolve a request
+down to one immutable compiled graph and publish it.
 
 ## Pipeline
 
@@ -20,29 +26,60 @@ Compile() → TransitGraph, stored as a succeeded compile job
   • nodes (position + names) so the graph plots on its own
         │
         ▼
-POST /api/isochrone (chainer over the scenario's latest succeeded compile)
-  • Stadia: access matrix + origin/egress isochrones
+POST /api/isochrone  →  202 + routing job
+  • resolves auth, ownership, target slug, and the stale-graph check
+  • publishes { graph, lat, lng, budget_mins, mode } with publisher confirms
+        │
+        ▼
+routing worker (separate repo, inside the cluster)
+  • Valhalla: access matrix + origin/egress isochrones
   • TransitGraph: Dijkstra over union of service edges (seconds)
-  • remaining budget → egress isochrones
+  • writes the result back onto the routing job
+        │
+        ▼
+GET /api/routing-jobs/{id}  →  status, then the result
 ```
 
 Runtime unit of truth is **seconds** (`Edge.Seconds`, `WaitSecs`,
 `TravelTimeBetween`). HTTP fields that are already minute-labeled
-(`budget_mins`, `access_mins`, `remaining_mins`) stay as-is on the wire; the
-chainer converts at the boundary.
+(`budget_mins`, `access_mins`, `remaining_mins`) stay as-is on the wire.
 
-### Stadia limits the chainer respects
+### The queue contract
 
-| Limit | Value | Where it bites |
-| --- | --- | --- |
-| Isochrone time contour | 120 min | Origin and egress contours are clamped; `origin_iso_clamped` reports it |
-| Isochrone locations | 1 | Why `service_limits.isochrone.max_distance` (b-line between location *pairs*) can never fire |
-| Matrix elements | 625 (Standard) | Destinations hard-capped at 600, nearest-first |
-| Matrix b-line distance | 400 km auto / 200 km other | Bounds the access-station haversine pre-filter |
+The message is a contract between two repositories with no compiler checking
+it, so it is pinned by a golden fixture — `internal/routing/testdata/message.golden.json`,
+which this repo asserts it produces and the worker repo asserts it consumes.
 
-Contours are minute-granular, so a contour under one minute serializes to
-`{"time": 0}` and is rejected — egress candidates with under a minute of
-remaining budget are dropped rather than requested.
+```json
+{
+  "schema_version": 1,
+  "routing_job_id": "<uuid>",
+  "compile_job_id": "<uuid>",
+  "graph": { "...compiled TransitGraph..." },
+  "lat": 0.0, "lng": 0.0,
+  "budget_mins": 0,
+  "mode": "walk | bike | drive"
+}
+```
+
+The graph travels inline — 2,894 bytes for CA HSR, roughly 30 KB for a large
+authored scenario — so the worker needs no database of its own. Publisher
+confirms are required: without them the API could insert a routing job, fail to
+publish, and strand it in `queued` while a client polls work no worker will ever
+see. On a failed confirm the job is marked failed immediately and the caller
+gets a 502 carrying the `publish_failed` code.
+
+Travel mode is stored in the domain's own vocabulary — `walk` / `bike` /
+`drive`. "Costing" is Valhalla's word for the same concept and stays at the
+worker's client boundary.
+
+### Polling a routing job
+
+`GET /api/routing-jobs/{id}` returns the job's status and, once succeeded, its
+result. A job with **no owner** came from the public `POST /api/isochrone` and is
+readable by anyone holding its id — a v4 UUID, unguessable. An **owned** job,
+from one of the authored isochrones, answers 404 to anyone but its owner or an
+admin, so a caller cannot probe which job ids exist.
 
 ## Seed data
 
@@ -95,7 +132,7 @@ Clone the repo, set up your local environment, and run:
 
 ```sh
 cp .env.example .env
-# Edit .env and fill in STADIA_API_KEY
+# Optionally set AMQP_URL to enable the isochrone endpoints
 make run
 ```
 
@@ -131,24 +168,23 @@ debugging. When enabled the server logs:
 
 - Each isochrone request's `lat`, `lng`, `budget_mins`, `mode`, and
   `scenario_slug`
-- Every Stadia HTTP call: endpoint name, HTTP status, latency, and — on
-  failure — a snippet of the response body. The API key and `Authorization`
-  header are never logged.
-- Chain progress: station count, matrix reachable count, egress fan-out size,
-  and final GeoJSON feature count.
+- Each routing job as it is published, with the queue it went to.
 - The full error value before it is mapped to a 502 or 500 response.
 
 ```sh
 LOG_LEVEL=debug make run
 ```
 
-Sample request for San Jose downtown, walk 90 min, ca-hsr scenario:
+Sample request for San Jose downtown, walk 90 min, ca-hsr scenario. It answers
+202 with a routing job; poll that job for the result.
 
 ```sh
-curl -s -X POST http://localhost:8080/api/isochrone \
+JOB=$(curl -s -X POST http://localhost:8080/api/isochrone \
   -H 'Content-Type: application/json' \
   -d '{"lat":37.3382,"lng":-121.8863,"budget_mins":90,"mode":"walk","scenario_slug":"ca-hsr"}' \
-  | jq .type
+  | jq -r .id)
+
+curl -s "http://localhost:8080/api/routing-jobs/$JOB" | jq '{status, error}'
 ```
 
 ## Persistence
@@ -164,7 +200,8 @@ native `uuid`/`timestamptz`/`boolean` types throughout.
   the server falls back to the read-only embedded YAML store, so the scenario
   reads work without a database — but the isochrone routes answer `503`, since a
   graph is identified by the compile job that produced it and there are no jobs
-  without a database.
+  without a database. They answer `503` without `AMQP_URL` too: with no queue to
+  publish to there is no isochrone to be had.
 - **Migrations:** plain-SQL [`goose`](https://github.com/pressly/goose)
   migrations in `internal/persistence/postgres/migrations/`, embedded into the
   binary and run automatically on boot.
@@ -239,25 +276,35 @@ tears it down):
 make itest
 ```
 
-Or manage the container yourself:
+Or manage the containers yourself:
 
 ```sh
 make db-up            # start throwaway Postgres (postgres:16)
-make test-integration # run the full suite against it
-make db-down          # remove the container
+make mq-up            # start throwaway RabbitMQ (rabbitmq:4-alpine)
+make test-integration # run the full suite against both
+make mq-down
+make db-down
 ```
 
-Both the Makefile targets and CI use the same `postgres:16` image and settings,
-so local and CI databases match. Use `make db-up DOCKER=podman` to use podman.
+There are two backing services because there are two things a fake cannot
+prove: that the schema is what the worker will find, and that a publish is
+actually confirmed by a broker. Both sets of tests skip themselves when their
+URL is unset, so `make test` stays green with neither running — except in CI,
+where a missing URL is a hard failure so a misconfigured pipeline cannot pass by
+silently skipping.
+
+Both the Makefile targets and CI use the same images and settings, so local and
+CI environments match. Use `make db-up DOCKER=podman` to use podman.
 
 ## Development
 
 | Command                 | Description                                          |
 | ----------------------- | ---------------------------------------------------- |
-| `make test`             | Run the suite (DB integration tests skip without a DB) |
-| `make itest`            | Start Postgres, run the full suite, tear it down     |
-| `make test-integration` | Run the suite against `TEST_DATABASE_URL`            |
+| `make test`             | Run the suite (integration tests skip without their services) |
+| `make itest`            | Start Postgres + RabbitMQ, run the full suite, tear them down |
+| `make test-integration` | Run the suite against `TEST_DATABASE_URL` and `TEST_AMQP_URL` |
 | `make db-up`/`db-down`  | Start / remove the throwaway Postgres container      |
+| `make mq-up`/`mq-down`  | Start / remove the throwaway RabbitMQ container      |
 | `make build`            | Build the binary to `bin/`                           |
 | `make run`              | Build and run the API locally                        |
 | `make lint`             | Run `golangci-lint`                                  |
@@ -286,8 +333,7 @@ internal/auth/               password hashing, session tokens, middleware, owner
 internal/ids/                UUID generation for runtime-created rows
 internal/transit/            domain types, Repository seam, TransitGraph compile, seed
 internal/persistence/postgres/  Postgres repository + goose migrations
-internal/isochrone/          Stadia + transit chainer
-internal/stadia/             Stadia Maps client
+internal/routing/            queue message contract + confirm-mode AMQP publisher
 ```
 
 ## CI

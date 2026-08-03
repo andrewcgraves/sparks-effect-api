@@ -119,11 +119,11 @@ func JobStatus(store CompileStore) http.HandlerFunc {
 // no job id to carry around. It is public, like the other scenario reads.
 func ScenarioGraph(store CompileStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		graph, ok := latestSeededGraph(w, r, store, r.PathValue("slug"))
+		job, ok := latestSeededGraph(w, r, store, r.PathValue("slug"))
 		if !ok {
 			return
 		}
-		writeJSON(w, http.StatusOK, graph)
+		writeJSON(w, http.StatusOK, job.Result)
 	}
 }
 
@@ -135,20 +135,23 @@ type SeededGraphReader interface {
 }
 
 // latestSeededGraph reads a seeded scenario's latest succeeded compile,
-// writing the response and reporting ok=false when there is none.
+// writing the response and reporting ok=false when there is none. The whole job
+// is returned, not just its Result: the graph read wants the bytes, but the
+// isochrone wants the job id, since that is a compiled graph's identity and
+// what a routing job names (see loadSeededGraph).
 //
 // A scenario that has never compiled and one whose compile stored no result are
 // the same "not compiled yet" to a caller — as on the authored side (see
 // loadCompiledGraph), which answers the same way for the same reason.
-func latestSeededGraph(w http.ResponseWriter, r *http.Request, store SeededGraphReader, slug string) (*transit.TransitGraph, bool) {
+func latestSeededGraph(w http.ResponseWriter, r *http.Request, store SeededGraphReader, slug string) (transit.Job, bool) {
 	job, found, err := store.GetLatestSucceededJob(r.Context(), slug, transit.JobKindCompileScenario)
 	if err != nil {
 		writeInternalError(w, "looking up compiled graph", err)
-		return nil, false
+		return transit.Job{}, false
 	}
 	if !found || job.Result == nil {
 		writeError(w, http.StatusNotFound, "no compiled graph for this scenario yet")
-		return nil, false
+		return transit.Job{}, false
 	}
-	return job.Result, true
+	return job, true
 }

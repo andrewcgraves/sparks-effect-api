@@ -7,7 +7,7 @@ import (
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
 	"github.com/andrewcgraves/sparks-effect-api/internal/logger"
-	"github.com/andrewcgraves/sparks-effect-api/internal/stadia"
+	"github.com/andrewcgraves/sparks-effect-api/internal/routing"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
@@ -16,7 +16,7 @@ func TestNew_healthz(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	srv := New(config.Config{Port: "8080"}, store, nil, &stadia.FakeClient{}, logger.Discard())
+	srv := New(config.Config{Port: "8080"}, store, nil, &routing.FakePublisher{}, logger.Discard())
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rec := httptest.NewRecorder()
@@ -32,7 +32,7 @@ func TestCORS_flagOn_localhostOrigin_GET(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: true}, store, nil, &stadia.FakeClient{}, logger.Discard())
+	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: true}, store, nil, &routing.FakePublisher{}, logger.Discard())
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	req.Header.Set("Origin", "http://localhost:5173")
@@ -50,7 +50,7 @@ func TestCORS_flagOn_localhostOrigin_OPTIONS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: true}, store, nil, &stadia.FakeClient{}, logger.Discard())
+	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: true}, store, nil, &routing.FakePublisher{}, logger.Discard())
 
 	req := httptest.NewRequest(http.MethodOptions, "/healthz", nil)
 	req.Header.Set("Origin", "http://127.0.0.1:4173")
@@ -72,7 +72,7 @@ func TestCORS_flagOn_nonLocalhostOrigin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: true}, store, nil, &stadia.FakeClient{}, logger.Discard())
+	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: true}, store, nil, &routing.FakePublisher{}, logger.Discard())
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	req.Header.Set("Origin", "https://example.com")
@@ -90,7 +90,7 @@ func TestCORS_productionOrigin_allowedRegardlessOfFlag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: false}, store, nil, &stadia.FakeClient{}, logger.Discard())
+	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: false}, store, nil, &routing.FakePublisher{}, logger.Discard())
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	req.Header.Set("Origin", "https://sparks-effect-website.vercel.app")
@@ -108,7 +108,7 @@ func TestCORS_flagOff_localhostOrigin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: false}, store, nil, &stadia.FakeClient{}, logger.Discard())
+	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: false}, store, nil, &routing.FakePublisher{}, logger.Discard())
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	req.Header.Set("Origin", "http://localhost:5173")

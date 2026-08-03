@@ -59,15 +59,26 @@ func TestIntegration_UserScenarioIsochrone_FreshGraph(t *testing.T) {
 	compileUserScenarioAndWait(t, h, owner, scenario.Slug)
 
 	rec = request(t, h, http.MethodPost, "/api/user-scenarios/"+scenario.Slug+"/isochrone", owner, isoRequestBody)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("isochrone: status %d, want 200; body %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("isochrone: status %d, want 202; body %s", rec.Code, rec.Body.String())
 	}
-	var body map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+	var job transit.RoutingJob
+	if err := json.Unmarshal(rec.Body.Bytes(), &job); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if body["type"] != "FeatureCollection" {
-		t.Errorf("type: want FeatureCollection, got %v", body["type"])
+	if job.Status != transit.JobStatusQueued {
+		t.Errorf("routing job status = %q, want queued", job.Status)
+	}
+	if job.OwnerID == nil {
+		t.Error("an authored isochrone's routing job has no owner; anyone with the id could poll it")
+	}
+
+	// The owner polls it back; a stranger sees the same 404 as an unknown id.
+	if r := request(t, h, http.MethodGet, "/api/routing-jobs/"+job.ID, owner); r.Code != http.StatusOK {
+		t.Errorf("owner polling their own routing job: status %d, want 200; body %s", r.Code, r.Body.String())
+	}
+	if r := request(t, h, http.MethodGet, "/api/routing-jobs/"+job.ID, stranger); r.Code != http.StatusNotFound {
+		t.Errorf("stranger polling someone else's routing job: status %d, want 404", r.Code)
 	}
 
 	// A stranger cannot reach it — 404, not 403.
@@ -108,8 +119,8 @@ func TestIntegration_UserScenarioIsochrone_DeletedMember_409(t *testing.T) {
 	compileUserScenarioAndWait(t, h, owner, scenario.Slug)
 
 	// Fresh immediately after compile.
-	if r := request(t, h, http.MethodPost, "/api/user-scenarios/"+scenario.Slug+"/isochrone", owner, isoRequestBody); r.Code != http.StatusOK {
-		t.Fatalf("pre-delete isochrone: status %d, want 200; body %s", r.Code, r.Body.String())
+	if r := request(t, h, http.MethodPost, "/api/user-scenarios/"+scenario.Slug+"/isochrone", owner, isoRequestBody); r.Code != http.StatusAccepted {
+		t.Fatalf("pre-delete isochrone: status %d, want 202; body %s", r.Code, r.Body.String())
 	}
 
 	// Delete one member service. The join row cascades away in Postgres; the
@@ -143,8 +154,8 @@ func TestIntegration_UserScenarioIsochrone_DeletedMember_409(t *testing.T) {
 
 	// Recompiling clears the staleness: membership now matches what compiled.
 	compileUserScenarioAndWait(t, h, owner, scenario.Slug)
-	if r := request(t, h, http.MethodPost, "/api/user-scenarios/"+scenario.Slug+"/isochrone", owner, isoRequestBody); r.Code != http.StatusOK {
-		t.Fatalf("post-recompile isochrone: status %d, want 200; body %s", r.Code, r.Body.String())
+	if r := request(t, h, http.MethodPost, "/api/user-scenarios/"+scenario.Slug+"/isochrone", owner, isoRequestBody); r.Code != http.StatusAccepted {
+		t.Fatalf("post-recompile isochrone: status %d, want 202; body %s", r.Code, r.Body.String())
 	}
 }
 

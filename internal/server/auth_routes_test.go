@@ -11,7 +11,7 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
 	"github.com/andrewcgraves/sparks-effect-api/internal/logger"
-	"github.com/andrewcgraves/sparks-effect-api/internal/stadia"
+	"github.com/andrewcgraves/sparks-effect-api/internal/routing"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
@@ -136,6 +136,16 @@ func (s *stubAuthDeps) ListVehicleTypes(context.Context) ([]transit.VehicleType,
 	return nil, nil
 }
 
+// Routing jobs (SPA-182): stubbed so route registration can be exercised.
+// GetRoutingJobByID reports found=false, which makes the poll route answer 404
+// for any id — enough to prove the route is registered and which gate it sits
+// behind, which is all this file tests.
+func (s *stubAuthDeps) CreateRoutingJob(context.Context, *transit.RoutingJob) error { return nil }
+func (s *stubAuthDeps) FailRoutingJob(context.Context, string, string) error        { return nil }
+func (s *stubAuthDeps) GetRoutingJobByID(context.Context, string) (transit.RoutingJob, bool, error) {
+	return transit.RoutingJob{}, false, nil
+}
+
 const (
 	adminToken = "admin-token"
 	userToken  = "user-token"
@@ -148,7 +158,7 @@ func newTestServer(t *testing.T, deps AuthDeps) http.Handler {
 		t.Fatalf("NewStore: %v", err)
 	}
 	cfg := config.Config{Port: "8080", SessionTTL: time.Hour}
-	return New(cfg, store, deps, &stadia.FakeClient{}, logger.Discard()).Handler
+	return New(cfg, store, deps, &routing.FakePublisher{}, logger.Discard()).Handler
 }
 
 func newStubDeps() *stubAuthDeps {

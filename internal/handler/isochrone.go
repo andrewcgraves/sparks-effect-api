@@ -5,18 +5,18 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/andrewcgraves/sparks-effect-api/internal/isochrone"
 	"github.com/andrewcgraves/sparks-effect-api/internal/logger"
-	"github.com/andrewcgraves/sparks-effect-api/internal/stadia"
+	"github.com/andrewcgraves/sparks-effect-api/internal/routing"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
 // SeededGraphStore is the slice of the repository the public seeded isochrone
-// needs: the scenario the caller named, and the compile job whose result is
-// that scenario's graph.
+// needs: the scenario the caller named, the compile job whose result is that
+// scenario's graph, and somewhere to record the routing job it enqueues.
 type SeededGraphStore interface {
 	GetScenarioBySlug(ctx context.Context, slug string) (transit.Scenario, bool, error)
 	SeededGraphReader
+	RoutingStore
 }
 
 type isochroneRequest struct {
@@ -29,18 +29,25 @@ type isochroneRequest struct {
 
 // Isochrone returns an HTTP handler for POST /api/isochrone.
 //
-// It resolves the scenario's transit data from the latest succeeded compile job
-// (SPA-181), the same way the user-authored isochrones resolve theirs — a graph
-// is identified by the compile job that produced it, and a seeded scenario is
-// no longer the exception that reads from the embedded store instead. A
-// scenario that has never compiled answers 404 rather than falling back:
-// booting seeds and compiles together (transit.CompileSeededIfNeeded), so in a
-// deployed environment there is always a graph to find.
+// It no longer computes anything. The isochrone is resolved down to one
+// immutable compiled graph, handed to the routing worker over the queue, and
+// answered 202 with the routing job the caller polls at
+// GET /api/routing-jobs/{id} (SPA-182). Valhalla is reachable only from inside
+// the home cluster, so the fan-out has to run there and this process cannot do
+// it.
 //
-// stadiaClient is threaded through rather than a ready-made Chainer because the
-// graph is only known per request, and a Chainer is fixed to one IsochroneData
-// at construction.
-func Isochrone(store SeededGraphStore, stadiaClient stadia.Client, log *logger.Logger) http.HandlerFunc {
+// The graph comes from the latest succeeded compile job for the scenario, the
+// same way the user-authored isochrones resolve theirs (SPA-181) — a graph is
+// identified by the compile job that produced it, which is what the message
+// names and what the worker's cache keys on. A scenario that has never compiled
+// answers 404 rather than falling back: booting seeds and compiles together
+// (transit.CompileSeededIfNeeded), so in a deployed environment there is always
+// a graph to find.
+//
+// The routing job it mints has no owner, because this endpoint is public and
+// there is no identity to record. See RoutingJobStatus for what that means for
+// who may poll it.
+func Isochrone(store SeededGraphStore, publisher routing.Publisher, log *logger.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req isochroneRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -55,43 +62,39 @@ func Isochrone(store SeededGraphStore, stadiaClient stadia.Client, log *logger.L
 			return
 		}
 
-		graph, ok := loadSeededGraph(w, r, store, req.ScenarioSlug)
+		job, ok := loadSeededGraph(w, r, store, req.ScenarioSlug)
 		if !ok {
 			return
 		}
 
-		chainer := isochrone.New(stadiaClient, transit.CompiledGraphData{Graph: graph}, log)
-		resp, err := chainer.Chain(r.Context(), isochrone.ChainRequest{
+		enqueueIsochrone(w, r, store, publisher, transit.RoutingJob{
+			CompileJobID: job.ID,
 			Lat:          req.Lat,
 			Lng:          req.Lng,
 			BudgetMins:   req.BudgetMins,
-			Mode:         isochrone.Mode(req.Mode),
-			ScenarioSlug: req.ScenarioSlug,
-		})
-		if err != nil {
-			log.Debugf("isochrone chain error: %v", err)
-			writeChainError(w, err, "scenario not found")
-			return
-		}
-
-		writeJSON(w, http.StatusOK, resp)
+			Mode:         transit.TravelMode(req.Mode),
+		}, job.Result)
 	}
 }
 
-// loadSeededGraph resolves a seeded scenario's compiled graph by slug, writing
-// the 404 and reporting ok=false when there is none.
+// loadSeededGraph resolves a seeded scenario's compile job by slug, writing the
+// 404 and reporting ok=false when there is none.
+//
+// It returns the job rather than just its graph because a routing job names the
+// compile job, not the bytes: that id is what makes the request reproducible
+// and what the worker keys its result cache on.
 //
 // It checks the scenario exists first so an unknown slug and a known scenario
 // that has never compiled are told apart: the first is the caller's mistake,
 // the second is a deployment that has not finished coming up, and only the
 // second is worth retrying.
-func loadSeededGraph(w http.ResponseWriter, r *http.Request, store SeededGraphStore, slug string) (*transit.TransitGraph, bool) {
+func loadSeededGraph(w http.ResponseWriter, r *http.Request, store SeededGraphStore, slug string) (transit.Job, bool) {
 	if _, found, err := store.GetScenarioBySlug(r.Context(), slug); err != nil {
 		writeInternalError(w, "looking up scenario", err)
-		return nil, false
+		return transit.Job{}, false
 	} else if !found {
 		writeError(w, http.StatusNotFound, "scenario not found")
-		return nil, false
+		return transit.Job{}, false
 	}
 
 	return latestSeededGraph(w, r, store, slug)

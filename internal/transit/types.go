@@ -1,6 +1,9 @@
 package transit
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // GeoPoint is a GeoJSON Point geometry (WGS84, [longitude, latitude]).
 type GeoPoint struct {
@@ -245,4 +248,70 @@ type Job struct {
 	CompiledServiceIDs []string  `json:"compiled_service_ids,omitempty"`
 	CreatedAt          time.Time `json:"created_at"`
 	UpdatedAt          time.Time `json:"updated_at"`
+}
+
+// TravelMode is how a person covers the access and egress legs of an isochrone:
+// the domain's own vocabulary, and what the routing_jobs row stores.
+//
+// Valhalla calls the same concept "costing" and spells it pedestrian /
+// bicycle / auto. That translation belongs at the routing client's boundary, in
+// the worker; persisting both would be two columns that must agree forever.
+type TravelMode string
+
+const (
+	TravelModeWalk  TravelMode = "walk"
+	TravelModeBike  TravelMode = "bike"
+	TravelModeDrive TravelMode = "drive"
+)
+
+// Valid reports whether m is one of the three modes. It is the single
+// definition of the set, so the request validator, the queue message, and the
+// database cannot drift apart on what a mode is.
+func (m TravelMode) Valid() bool {
+	switch m {
+	case TravelModeWalk, TravelModeBike, TravelModeDrive:
+		return true
+	default:
+		return false
+	}
+}
+
+// RoutingJob is one isochrone the API has handed to the routing worker: a
+// request resolved down to a point, a budget, a mode, and the one immutable
+// compiled graph it is to be plotted over.
+//
+// It is a separate table from Job, not another Job kind, because the two are
+// owned by different processes. The API inserts a RoutingJob and polls it; the
+// worker in the other repository transitions it and writes its Result. A Job,
+// by contrast, is compiled in this process. Sharing a table would mean two
+// writers on rows whose lifecycles have nothing in common.
+//
+// It reuses the JobStatus* vocabulary rather than minting a second one — queued
+// → running → succeeded/failed means the same thing here, and a client polling
+// both surfaces should not have to learn two spellings of it.
+//
+// OwnerID is nil for the public seeded isochrone, which no one authenticates to
+// request. An ownerless job is readable by anyone holding its id, which is safe
+// only because that id is an unguessable UUID; see handler.RoutingJobStatus.
+type RoutingJob struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+	// CompileJobID names the compile job whose result is the graph this
+	// isochrone is plotted over. A compiled graph's identity is the job that
+	// produced it (SPA-181), so this is what makes the request reproducible and
+	// what the worker's result cache keys on.
+	CompileJobID string     `json:"compile_job_id"`
+	OwnerID      *string    `json:"owner_id,omitempty"`
+	Lat          float64    `json:"lat"`
+	Lng          float64    `json:"lng"`
+	BudgetMins   int        `json:"budget_mins"`
+	Mode         TravelMode `json:"mode"`
+	// Result is whatever the worker computed, held as raw JSON rather than a
+	// struct. The API neither produces nor interprets it: giving it a Go type
+	// here would be a second copy of the worker's output contract, in a
+	// repository with no compiler able to check the two still agree.
+	Result    json.RawMessage `json:"result,omitempty"`
+	Error     string          `json:"error,omitempty"`
+	CreatedAt time.Time       `json:"created_at"`
+	UpdatedAt time.Time       `json:"updated_at"`
 }

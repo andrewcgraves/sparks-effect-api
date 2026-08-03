@@ -11,14 +11,16 @@ import (
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/logger"
-	"github.com/andrewcgraves/sparks-effect-api/internal/stadia"
+	"github.com/andrewcgraves/sparks-effect-api/internal/routing"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
 // fakeSeededGraphStore stands in for the repository behind the public
-// isochrone: seeded scenarios by slug, and the compile job that carries each
-// one's graph.
+// isochrone: seeded scenarios by slug, the compile job that carries each one's
+// graph, and — since SPA-182 — the routing jobs it enqueues.
 type fakeSeededGraphStore struct {
+	fakeRoutingStore
+
 	scenarios map[string]transit.Scenario
 	jobs      map[string]transit.Job
 	err       error
@@ -55,19 +57,18 @@ func (f *fakeSeededGraphStore) GetLatestSucceededJob(_ context.Context, scenario
 func compiledStore() *fakeSeededGraphStore {
 	f := newFakeSeededGraphStore()
 	f.scenarios["ca-hsr"] = transit.Scenario{ID: "sc-1", Slug: "ca-hsr", Name: "CA HSR"}
-	graph := freshGraph()
 	f.jobs["ca-hsr"] = transit.Job{
-		ID: "job-1", Kind: transit.JobKindCompileScenario, Status: transit.JobStatusSucceeded,
-		Result: graph,
+		ID: "compile-job-1", Kind: transit.JobKindCompileScenario, Status: transit.JobStatusSucceeded,
+		Result: freshGraph(),
 	}
 	return f
 }
 
-func postIsochrone(store handler.SeededGraphStore, sc stadia.Client, body string) *httptest.ResponseRecorder {
+func postIsochrone(store handler.SeededGraphStore, pub routing.Publisher, body string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(http.MethodPost, "/api/isochrone", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	handler.Isochrone(store, sc, logger.Discard())(rec, req)
+	handler.Isochrone(store, pub, logger.Discard())(rec, req)
 	return rec
 }
 
@@ -82,69 +83,170 @@ func errorField(t *testing.T, rec *httptest.ResponseRecorder) string {
 	return body["error"]
 }
 
-func TestIsochrone_200_validRequest(t *testing.T) {
-	rec := postIsochrone(compiledStore(), fakeStadia(), validIsochroneBody)
+// The endpoint no longer answers with a computed isochrone. It answers 202 with
+// the routing job the caller polls — the whole of SPA-182 from the client's
+// side.
+func TestIsochrone_202_enqueuesARoutingJob(t *testing.T) {
+	store := compiledStore()
+	pub := &routing.FakePublisher{}
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status: want 200, got %d: %s", rec.Code, rec.Body.String())
+	rec := postIsochrone(store, pub, validIsochroneBody)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status: want 202, got %d: %s", rec.Code, rec.Body.String())
 	}
-	var body map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal: %v", err)
+	job := decodeRoutingJob(t, rec)
+	if job.ID == "" {
+		t.Fatal("202 body carries no job id; the caller has nothing to poll")
 	}
-	if body["type"] != "FeatureCollection" {
-		t.Errorf("type: want FeatureCollection, got %v", body["type"])
+	if job.Status != transit.JobStatusQueued {
+		t.Errorf("status = %q, want queued", job.Status)
 	}
-	if _, ok := body["metadata"]; !ok {
-		t.Error("response missing metadata")
+	if job.CompileJobID != "compile-job-1" {
+		t.Errorf("compile_job_id = %q, want the scenario's latest succeeded compile", job.CompileJobID)
+	}
+	// A job the handler answered with but never persisted would be unpollable.
+	if job.CreatedAt != fixedNow {
+		t.Error("the 202 body was not the row the store persisted")
+	}
+	if _, ok := store.only(); !ok {
+		t.Errorf("want exactly one routing job recorded, got %d", store.count())
 	}
 }
 
-// The graph the isochrone plots from is the compile job's result, not the
-// embedded store's — the whole point of SPA-181. The fixture graph's nodes are
-// the only places an egress polygon can be requested for, so seeing exactly
-// those origins proves where the data came from.
-func TestIsochrone_plotsFromTheCompiledGraph(t *testing.T) {
-	sc := fakeStadia()
-	rec := postIsochrone(compiledStore(), sc, validIsochroneBody)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status: want 200, got %d: %s", rec.Code, rec.Body.String())
+// The public endpoint mints an ownerless job, because nobody authenticates to
+// call it. RoutingJobStatus reads that nil as "readable by anyone holding the
+// id", so getting it wrong here would silently lock a caller out of the job
+// they just requested.
+func TestIsochrone_202_jobHasNoOwner(t *testing.T) {
+	store := compiledStore()
+
+	rec := postIsochrone(store, &routing.FakePublisher{}, validIsochroneBody)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status: want 202, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if job := decodeRoutingJob(t, rec); job.OwnerID != nil {
+		t.Errorf("owner_id = %v, want nil for the unauthenticated public isochrone", *job.OwnerID)
+	}
+}
+
+// The published message must name the same job the caller was handed, carry the
+// compiled graph inline, and repeat the request's own parameters — otherwise
+// the worker computes something other than what was asked for.
+func TestIsochrone_202_publishesTheResolvedRequest(t *testing.T) {
+	store := compiledStore()
+	pub := &routing.FakePublisher{}
+
+	rec := postIsochrone(store, pub, validIsochroneBody)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status: want 202, got %d: %s", rec.Code, rec.Body.String())
+	}
+	job := decodeRoutingJob(t, rec)
+
+	msgs := pub.Messages()
+	if len(msgs) != 1 {
+		t.Fatalf("published %d messages, want exactly 1", len(msgs))
+	}
+	msg := msgs[0]
+
+	if msg.SchemaVersion != routing.SchemaVersion {
+		t.Errorf("schema_version = %d, want %d", msg.SchemaVersion, routing.SchemaVersion)
+	}
+	if msg.RoutingJobID != job.ID {
+		t.Errorf("message names job %q but the caller was handed %q", msg.RoutingJobID, job.ID)
+	}
+	if msg.CompileJobID != "compile-job-1" {
+		t.Errorf("compile_job_id = %q, want compile-job-1", msg.CompileJobID)
+	}
+	if msg.Lat != 37.7 || msg.Lng != -122.4 || msg.BudgetMins != 30 || msg.Mode != transit.TravelModeWalk {
+		t.Errorf("message parameters = %+v, want the request's own", msg)
+	}
+	// The graph travels inline: the worker has no database to look it up in.
+	if msg.Graph == nil {
+		t.Fatal("message carries no graph; the worker has no way to resolve one")
+	}
+	if len(msg.Graph.Nodes) != len(freshGraph().Nodes) {
+		t.Errorf("graph has %d nodes, want the compiled graph's %d",
+			len(msg.Graph.Nodes), len(freshGraph().Nodes))
+	}
+}
+
+// A publish the broker never confirmed must not leave a row in `queued` for a
+// client to poll forever. The job is failed on the spot and the caller is told.
+func TestIsochrone_502_unconfirmedPublishFailsTheJob(t *testing.T) {
+	store := compiledStore()
+	pub := &routing.FakePublisher{Err: routing.ErrNotConfirmed}
+
+	rec := postIsochrone(store, pub, validIsochroneBody)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status: want 502, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body["code"] != handler.PublishFailedErrorCode {
+		t.Errorf("code = %q, want %q", body["code"], handler.PublishFailedErrorCode)
 	}
 
-	graphNodes := make(map[stadia.LatLng]bool)
-	for _, n := range freshGraph().Nodes {
-		graphNodes[stadia.LatLng{Lat: n.Lat, Lng: n.Lng}] = true
+	job, ok := store.only()
+	if !ok {
+		t.Fatalf("want exactly one routing job recorded, got %d", store.count())
 	}
-	origin := stadia.LatLng{Lat: 37.7, Lng: -122.4}
-	egress := 0
-	for _, call := range sc.IsochoneCalls {
-		if call.Origin == origin {
-			continue
-		}
-		if !graphNodes[call.Origin] {
-			t.Errorf("isochrone requested at %+v, which is not a node of the compiled graph", call.Origin)
-		}
-		egress++
+	if job.Status != transit.JobStatusFailed {
+		t.Errorf("routing job status = %q, want failed — a queued row here is one no worker will ever answer", job.Status)
 	}
-	if egress == 0 {
-		t.Error("no egress isochrone was requested; the graph's nodes were never reached")
+	if job.Error == "" {
+		t.Error("the failed job records no reason")
+	}
+}
+
+// The publish failing is still a 502 even if recording the failure also fails.
+// The caller's information is the same either way; nothing is left pretending
+// to have succeeded.
+func TestIsochrone_502_whenTheFailureCannotBeRecordedEither(t *testing.T) {
+	store := compiledStore()
+	store.failErr = fmt.Errorf("database is on fire")
+	pub := &routing.FakePublisher{Err: routing.ErrNotConfirmed}
+
+	rec := postIsochrone(store, pub, validIsochroneBody)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status: want 502, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// Nothing is published until the row exists: a message naming a routing job the
+// worker cannot find has nothing to transition.
+func TestIsochrone_500_nothingIsPublishedIfTheJobCannotBeRecorded(t *testing.T) {
+	store := compiledStore()
+	store.createErr = fmt.Errorf("database is on fire")
+	pub := &routing.FakePublisher{}
+
+	rec := postIsochrone(store, pub, validIsochroneBody)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status: want 500, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if n := len(pub.Messages()); n != 0 {
+		t.Errorf("published %d messages for a job that was never recorded", n)
 	}
 }
 
 func TestIsochrone_400_invalidMode(t *testing.T) {
-	rec := postIsochrone(compiledStore(), fakeStadia(),
+	rec := postIsochrone(compiledStore(), &routing.FakePublisher{},
 		`{"lat":37.7,"lng":-122.4,"budget_mins":30,"mode":"fly","scenario_slug":"ca-hsr"}`)
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status: want 400, got %d", rec.Code)
 	}
-	if errorField(t, rec) == "" {
-		t.Error("expected non-empty error field")
+	if got := errorField(t, rec); got != "invalid mode: must be walk, bike, or drive" {
+		t.Errorf("error: got %q", got)
 	}
 }
 
 func TestIsochrone_400_zeroBudget(t *testing.T) {
-	rec := postIsochrone(compiledStore(), fakeStadia(),
+	rec := postIsochrone(compiledStore(), &routing.FakePublisher{},
 		`{"lat":37.7,"lng":-122.4,"budget_mins":0,"mode":"walk","scenario_slug":"ca-hsr"}`)
 
 	if rec.Code != http.StatusBadRequest {
@@ -156,7 +258,7 @@ func TestIsochrone_400_zeroBudget(t *testing.T) {
 }
 
 func TestIsochrone_400_malformedJSON(t *testing.T) {
-	rec := postIsochrone(compiledStore(), fakeStadia(), `{not valid json}`)
+	rec := postIsochrone(compiledStore(), &routing.FakePublisher{}, `{not valid json}`)
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status: want 400, got %d", rec.Code)
@@ -166,7 +268,7 @@ func TestIsochrone_400_malformedJSON(t *testing.T) {
 // A bad body is a 400 even for a scenario that does not exist: the body is
 // wrong regardless of what was asked for.
 func TestIsochrone_400_beforeScenarioLookup(t *testing.T) {
-	rec := postIsochrone(newFakeSeededGraphStore(), fakeStadia(),
+	rec := postIsochrone(newFakeSeededGraphStore(), &routing.FakePublisher{},
 		`{"lat":37.7,"lng":-122.4,"budget_mins":0,"mode":"walk","scenario_slug":"nope"}`)
 
 	if rec.Code != http.StatusBadRequest {
@@ -174,8 +276,42 @@ func TestIsochrone_400_beforeScenarioLookup(t *testing.T) {
 	}
 }
 
+// Nothing is enqueued for a request that never resolves to a graph — every 4xx
+// arm must leave the queue and the routing_jobs table untouched.
+func TestIsochrone_rejectedRequestsEnqueueNothing(t *testing.T) {
+	uncompiled := newFakeSeededGraphStore()
+	uncompiled.scenarios["ca-hsr"] = transit.Scenario{ID: "sc-1", Slug: "ca-hsr"}
+
+	cases := []struct {
+		name  string
+		store *fakeSeededGraphStore
+		body  string
+	}{
+		{"invalid mode", compiledStore(), `{"lat":37.7,"lng":-122.4,"budget_mins":30,"mode":"fly","scenario_slug":"ca-hsr"}`},
+		{"zero budget", compiledStore(), `{"lat":37.7,"lng":-122.4,"budget_mins":0,"mode":"walk","scenario_slug":"ca-hsr"}`},
+		{"malformed body", compiledStore(), `{not valid json}`},
+		{"unknown scenario", compiledStore(), `{"lat":37.7,"lng":-122.4,"budget_mins":30,"mode":"walk","scenario_slug":"nope"}`},
+		{"never compiled", uncompiled, validIsochroneBody},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			pub := &routing.FakePublisher{}
+			rec := postIsochrone(tc.store, pub, tc.body)
+			if rec.Code < 400 || rec.Code >= 500 {
+				t.Fatalf("status = %d, want a 4xx", rec.Code)
+			}
+			if n := len(pub.Messages()); n != 0 {
+				t.Errorf("published %d messages for a rejected request", n)
+			}
+			if n := tc.store.count(); n != 0 {
+				t.Errorf("recorded %d routing jobs for a rejected request", n)
+			}
+		})
+	}
+}
+
 func TestIsochrone_404_scenarioNotFound(t *testing.T) {
-	rec := postIsochrone(compiledStore(), fakeStadia(),
+	rec := postIsochrone(compiledStore(), &routing.FakePublisher{},
 		`{"lat":37.7,"lng":-122.4,"budget_mins":30,"mode":"walk","scenario_slug":"nope"}`)
 
 	if rec.Code != http.StatusNotFound {
@@ -192,7 +328,7 @@ func TestIsochrone_404_noCompiledGraph(t *testing.T) {
 	store := newFakeSeededGraphStore()
 	store.scenarios["ca-hsr"] = transit.Scenario{ID: "sc-1", Slug: "ca-hsr"}
 
-	rec := postIsochrone(store, fakeStadia(), validIsochroneBody)
+	rec := postIsochrone(store, &routing.FakePublisher{}, validIsochroneBody)
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status: want 404, got %d", rec.Code)
@@ -210,7 +346,7 @@ func TestIsochrone_404_succeededJobWithNoResult(t *testing.T) {
 	job.Result = nil
 	store.jobs["ca-hsr"] = job
 
-	rec := postIsochrone(store, fakeStadia(), validIsochroneBody)
+	rec := postIsochrone(store, &routing.FakePublisher{}, validIsochroneBody)
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status: want 404, got %d", rec.Code)
@@ -221,79 +357,32 @@ func TestIsochrone_500_storeFailure(t *testing.T) {
 	store := compiledStore()
 	store.err = fmt.Errorf("database is on fire")
 
-	rec := postIsochrone(store, fakeStadia(), validIsochroneBody)
+	rec := postIsochrone(store, &routing.FakePublisher{}, validIsochroneBody)
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status: want 500, got %d", rec.Code)
 	}
 }
 
-func TestIsochrone_502_stadiaError(t *testing.T) {
-	sc := fakeStadia()
-	sc.IsochroneErr = fmt.Errorf("%w: connection refused", stadia.ErrStadiaUpstream)
-
-	rec := postIsochrone(compiledStore(), sc, validIsochroneBody)
-
-	if rec.Code != http.StatusBadGateway {
-		t.Fatalf("status: want 502, got %d", rec.Code)
-	}
-	if got := errorField(t, rec); got != "routing service unavailable" {
-		t.Errorf("error: want 'routing service unavailable', got %q", got)
-	}
-}
-
-func TestIsochrone_400_stadiaClientError(t *testing.T) {
-	sc := fakeStadia()
-	sc.IsochroneErr = fmt.Errorf("%w: path distance exceeds limit", stadia.ErrStadiaBadRequest)
-
-	rec := postIsochrone(compiledStore(), sc, validIsochroneBody)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status: want 400, got %d", rec.Code)
-	}
-	if got := errorField(t, rec); got != "routing request exceeded service limits" {
-		t.Errorf("error: want 'routing request exceeded service limits', got %q", got)
-	}
-}
-
-func TestIsochrone_429_stadiaRateLimit(t *testing.T) {
-	sc := fakeStadia()
-	sc.IsochroneErr = fmt.Errorf("%w: credit exhausted", stadia.ErrStadiaRateLimit)
-
-	rec := postIsochrone(compiledStore(), sc, validIsochroneBody)
-
-	if rec.Code != http.StatusTooManyRequests {
-		t.Fatalf("status: want 429, got %d", rec.Code)
-	}
-	if got := errorField(t, rec); got != "routing service rate limit exceeded" {
-		t.Errorf("error: want 'routing service rate limit exceeded', got %q", got)
-	}
-}
-
 func TestIsochrone_contentType(t *testing.T) {
-	clientError := fakeStadia()
-	clientError.IsochroneErr = stadia.ErrStadiaBadRequest
-	rateLimited := fakeStadia()
-	rateLimited.IsochroneErr = stadia.ErrStadiaRateLimit
-	unavailable := fakeStadia()
-	unavailable.IsochroneErr = stadia.ErrStadiaUpstream
+	uncompiled := newFakeSeededGraphStore()
+	uncompiled.scenarios["ca-hsr"] = transit.Scenario{ID: "sc-1", Slug: "ca-hsr"}
 
 	cases := []struct {
-		name   string
-		body   string
-		store  handler.SeededGraphStore
-		stadia stadia.Client
+		name  string
+		body  string
+		store handler.SeededGraphStore
+		pub   routing.Publisher
 	}{
-		{"200", validIsochroneBody, compiledStore(), fakeStadia()},
-		{"400-budget", `{"lat":37.7,"lng":-122.4,"budget_mins":0,"mode":"walk","scenario_slug":"ca-hsr"}`, compiledStore(), fakeStadia()},
-		{"400-client-error", validIsochroneBody, compiledStore(), clientError},
-		{"404", `{"lat":37.7,"lng":-122.4,"budget_mins":30,"mode":"walk","scenario_slug":"nope"}`, compiledStore(), fakeStadia()},
-		{"429", validIsochroneBody, compiledStore(), rateLimited},
-		{"502", validIsochroneBody, compiledStore(), unavailable},
+		{"202", validIsochroneBody, compiledStore(), &routing.FakePublisher{}},
+		{"400-budget", `{"lat":37.7,"lng":-122.4,"budget_mins":0,"mode":"walk","scenario_slug":"ca-hsr"}`, compiledStore(), &routing.FakePublisher{}},
+		{"404-scenario", `{"lat":37.7,"lng":-122.4,"budget_mins":30,"mode":"walk","scenario_slug":"nope"}`, compiledStore(), &routing.FakePublisher{}},
+		{"404-uncompiled", validIsochroneBody, uncompiled, &routing.FakePublisher{}},
+		{"502-publish", validIsochroneBody, compiledStore(), &routing.FakePublisher{Err: routing.ErrNotConfirmed}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			rec := postIsochrone(tc.store, tc.stadia, tc.body)
+			rec := postIsochrone(tc.store, tc.pub, tc.body)
 			if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
 				t.Errorf("Content-Type: want application/json, got %q", ct)
 			}

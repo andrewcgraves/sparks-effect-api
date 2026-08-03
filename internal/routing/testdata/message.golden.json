@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "routing_job_id": "6f9619ff-8b86-d011-b42d-00c04fc964ff",
+  "compile_job_id": "0f3b7c2a-4d1e-4a5b-9c8d-2e6f1a0b3c4d",
+  "graph": {
+    "services": [
+      {
+        "service_id": "svc-express",
+        "edges": [
+          {
+            "from_slug": "north",
+            "to_slug": "south",
+            "seconds": 1800
+          }
+        ],
+        "wait_secs": 300
+      }
+    ],
+    "merge": {},
+    "nodes": [
+      {
+        "slug": "north",
+        "lat": 37.7749,
+        "lng": -122.4194,
+        "names": [
+          "North"
+        ]
+      },
+      {
+        "slug": "south",
+        "lat": 34.0522,
+        "lng": -118.2437,
+        "names": [
+          "South"
+        ]
+      }
+    ]
+  },
+  "lat": 37.79,
+  "lng": -122.397,
+  "budget_mins": 45,
+  "mode": "walk"
+}

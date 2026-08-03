@@ -830,6 +830,61 @@ func scanJobInto(row pgx.Row, j *transit.Job) error {
 		&j.OwnerID, &j.Error, &j.Result, &j.CompiledServiceIDs, &j.CreatedAt, &j.UpdatedAt)
 }
 
+// --- Routing jobs ---
+//
+// Only three of these exist because only three are this repository's to do. A
+// routing job is inserted here, polled here, and — in the one case the API can
+// diagnose itself, a publish the broker never confirmed — failed here. Every
+// other transition belongs to the worker in the other repository, which owns
+// the running, succeeded, and result-bearing writes.
+
+const routingJobColumns = `id, status, compile_job_id, owner_id, lat, lng,
+	budget_mins, mode, result, error, created_at, updated_at`
+
+// CreateRoutingJob inserts a queued routing job, filling in the timestamps the
+// database assigned so the caller can answer 202 with a complete row rather
+// than one carrying zero times.
+func (r *Repo) CreateRoutingJob(ctx context.Context, j *transit.RoutingJob) error {
+	err := r.pool.QueryRow(ctx,
+		`INSERT INTO routing_jobs (id, status, compile_job_id, owner_id, lat, lng, budget_mins, mode)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		 RETURNING created_at, updated_at`,
+		j.ID, j.Status, j.CompileJobID, j.OwnerID, j.Lat, j.Lng, j.BudgetMins, string(j.Mode),
+	).Scan(&j.CreatedAt, &j.UpdatedAt)
+	return wrap("CreateRoutingJob", err)
+}
+
+func (r *Repo) GetRoutingJobByID(ctx context.Context, id string) (transit.RoutingJob, bool, error) {
+	var j transit.RoutingJob
+	err := r.pool.QueryRow(ctx, `SELECT `+routingJobColumns+` FROM routing_jobs WHERE id = $1`, id).
+		Scan(&j.ID, &j.Status, &j.CompileJobID, &j.OwnerID, &j.Lat, &j.Lng,
+			&j.BudgetMins, &j.Mode, &j.Result, &j.Error, &j.CreatedAt, &j.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return transit.RoutingJob{}, false, nil
+	}
+	if err != nil {
+		return transit.RoutingJob{}, false, wrap("GetRoutingJobByID", err)
+	}
+	return j, true, nil
+}
+
+// FailRoutingJob marks a routing job failed. The API calls it for exactly one
+// condition: a publish the broker did not confirm, where the row exists but no
+// worker will ever see the message. Leaving it queued would strand a client
+// polling something that is never coming.
+func (r *Repo) FailRoutingJob(ctx context.Context, id, errMsg string) error {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE routing_jobs SET status = $2, error = $3, updated_at = now() WHERE id = $1`,
+		id, transit.JobStatusFailed, errMsg)
+	if err != nil {
+		return wrap("FailRoutingJob", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("postgres: FailRoutingJob: routing job %q not found", id)
+	}
+	return nil
+}
+
 func wrap(op string, err error) error {
 	if err == nil {
 		return nil
