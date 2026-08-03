@@ -26,6 +26,11 @@ const (
 // rewindBrightlineWestMigration puts the database back to how it looked
 // immediately before 00012 ran, so a test can stage pre-SPA-153 data and let
 // goose re-apply the real migration file rather than a copy of its SQL.
+//
+// The version rows are dropped from 12 upwards rather than at 12 alone: goose
+// refuses to run a migration older than the highest one already recorded unless
+// WithAllowMissing is set, so leaving a later version behind would turn 12 into
+// an "out-of-order" migration and fail the run outright.
 func rewindBrightlineWestMigration(t *testing.T, url string) {
 	t.Helper()
 	exec(t, url,
@@ -34,7 +39,7 @@ func rewindBrightlineWestMigration(t *testing.T, url string) {
 		`DELETE FROM segments WHERE route_id = '`+bwRouteID+`'`,
 		`DELETE FROM routes WHERE id = '`+bwRouteID+`'`,
 		`DELETE FROM stations WHERE id IN ('`+bwVictorID+`', '`+bwVegasID+`')`,
-		`DELETE FROM goose_db_version WHERE version_id = 12`)
+		`DELETE FROM goose_db_version WHERE version_id >= 12`)
 }
 
 // insertPreSpa153CaHsr stages ca-hsr as a deployed database held it before this
@@ -136,7 +141,7 @@ func TestBrightlineWestMigrationDoesNotDuplicateAnExistingSpur(t *testing.T) {
 
 	// Forget that it ran while keeping every row it wrote, so the second pass
 	// meets exactly the state a YAML-seeded database would present.
-	exec(t, url, `DELETE FROM goose_db_version WHERE version_id = 12`)
+	exec(t, url, `DELETE FROM goose_db_version WHERE version_id >= 12`)
 	if err := postgres.Migrate(context.Background(), url); err != nil {
 		t.Fatalf("migration re-run over rows it already wrote: %v", err)
 	}
