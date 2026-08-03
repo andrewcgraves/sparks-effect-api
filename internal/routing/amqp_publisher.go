@@ -101,14 +101,18 @@ func (p *AMQPPublisher) Publish(ctx context.Context, msg Message) error {
 		p.reset()
 		return fmt.Errorf("routing: awaiting publish confirm: %w", err)
 	}
-	if !acked {
-		return fmt.Errorf("%w: nacked", ErrNotConfirmed)
-	}
 
+	// The return is drained before the ack is judged, and on every path out.
+	// Leaving one buffered would hand it to the *next* publish, which would then
+	// fail a routing job the broker had actually delivered.
 	select {
 	case ret := <-p.returns:
 		return fmt.Errorf("%w: returned as unroutable (%d %s)", ErrNotConfirmed, ret.ReplyCode, ret.ReplyText)
 	default:
+	}
+
+	if !acked {
+		return fmt.Errorf("%w: nacked", ErrNotConfirmed)
 	}
 
 	p.log.Debugf("routing: published job %s to %q", msg.RoutingJobID, p.queue)

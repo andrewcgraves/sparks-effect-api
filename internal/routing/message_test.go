@@ -11,32 +11,45 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// goldenMessage is the message the fixture describes. It is small and
-// hand-written rather than a real compiled scenario: the fixture's job is to
-// pin the *shape* of the contract, and a 3,000-byte CA HSR graph pasted into
-// testdata would obscure that behind data no reader can check by eye.
+// goldenMessage is the message the fixture describes, built the way production
+// builds one — through routing.MessageFor, from a routing job and its graph.
+// That matters: a hand-written literal would pin the fixture to itself and
+// still pass if MessageFor stopped populating a field. The handler package
+// asserts the same fixture against a message that went all the way through an
+// isochrone request (see TestIsochrone_publishesTheGoldenFixtureMessage).
+//
+// The inputs are small and hand-written rather than a real compiled scenario:
+// the fixture's job is to pin the *shape* of the contract, and a 3,000-byte CA
+// HSR graph pasted into testdata would obscure that behind data no reader can
+// check by eye.
 func goldenMessage() routing.Message {
-	return routing.Message{
-		SchemaVersion: routing.SchemaVersion,
-		RoutingJobID:  "6f9619ff-8b86-d011-b42d-00c04fc964ff",
-		CompileJobID:  "0f3b7c2a-4d1e-4a5b-9c8d-2e6f1a0b3c4d",
-		Graph: &transit.TransitGraph{
-			Services: []transit.ServiceGraph{{
-				ServiceID: "svc-express",
-				Edges: []transit.Edge{
-					{FromSlug: "north", ToSlug: "south", Seconds: 1800},
-				},
-				WaitSecs: 300,
-			}},
-			Nodes: []transit.GraphNode{
-				{Slug: "north", Lat: 37.7749, Lng: -122.4194, Names: []string{"North"}},
-				{Slug: "south", Lat: 34.0522, Lng: -118.2437, Names: []string{"South"}},
+	return routing.MessageFor(goldenJob(), goldenGraph())
+}
+
+func goldenJob() transit.RoutingJob {
+	return transit.RoutingJob{
+		ID:           "6f9619ff-8b86-d011-b42d-00c04fc964ff",
+		CompileJobID: "0f3b7c2a-4d1e-4a5b-9c8d-2e6f1a0b3c4d",
+		Lat:          37.79,
+		Lng:          -122.397,
+		BudgetMins:   45,
+		Mode:         transit.TravelModeWalk,
+	}
+}
+
+func goldenGraph() *transit.TransitGraph {
+	return &transit.TransitGraph{
+		Services: []transit.ServiceGraph{{
+			ServiceID: "svc-express",
+			Edges: []transit.Edge{
+				{FromSlug: "north", ToSlug: "south", Seconds: 1800},
 			},
+			WaitSecs: 300,
+		}},
+		Nodes: []transit.GraphNode{
+			{Slug: "north", Lat: 37.7749, Lng: -122.4194, Names: []string{"North"}},
+			{Slug: "south", Lat: 34.0522, Lng: -118.2437, Names: []string{"South"}},
 		},
-		Lat:        37.79,
-		Lng:        -122.397,
-		BudgetMins: 45,
-		Mode:       transit.TravelModeWalk,
 	}
 }
 

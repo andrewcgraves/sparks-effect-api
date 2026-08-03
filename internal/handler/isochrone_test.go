@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -387,5 +390,62 @@ func TestIsochrone_contentType(t *testing.T) {
 				t.Errorf("Content-Type: want application/json, got %q", ct)
 			}
 		})
+	}
+}
+
+// The acceptance criterion behind the golden fixture is that it is what *the
+// API produces*, not merely what a struct literal in the routing package
+// serialises to. So this drives a real isochrone request, with the fixture's own
+// compile job id, graph, and request parameters behind it, and asserts the
+// message that came out the other end is the fixture byte for byte.
+//
+// It reaches across into the routing package's testdata deliberately: there is
+// one fixture, shared with the worker repository, and a copy here would be a
+// second thing to keep in step with the first.
+func TestIsochrone_publishesTheGoldenFixtureMessage(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "routing", "testdata", "message.golden.json"))
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	var want routing.Message
+	if err := json.Unmarshal(raw, &want); err != nil {
+		t.Fatalf("unmarshal fixture: %v", err)
+	}
+
+	// Stand the store up as the fixture describes: the compile job it names,
+	// carrying the graph it carries.
+	store := newFakeSeededGraphStore()
+	store.scenarios["ca-hsr"] = transit.Scenario{ID: "sc-1", Slug: "ca-hsr", Name: "CA HSR"}
+	store.jobs["ca-hsr"] = transit.Job{
+		ID: want.CompileJobID, Kind: transit.JobKindCompileScenario,
+		Status: transit.JobStatusSucceeded, Result: want.Graph,
+	}
+	pub := &routing.FakePublisher{}
+
+	body := fmt.Sprintf(`{"lat":%v,"lng":%v,"budget_mins":%d,"mode":%q,"scenario_slug":"ca-hsr"}`,
+		want.Lat, want.Lng, want.BudgetMins, want.Mode)
+	rec := postIsochrone(store, pub, body)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status: want 202, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	msgs := pub.Messages()
+	if len(msgs) != 1 {
+		t.Fatalf("published %d messages, want 1", len(msgs))
+	}
+	got := msgs[0]
+
+	// The routing job id is minted per request, so it cannot equal the
+	// fixture's. What must hold is that it is the id the caller was handed —
+	// checked here, then normalised so the rest compares field for field.
+	if got.RoutingJobID != decodeRoutingJob(t, rec).ID {
+		t.Errorf("published message names job %q, but the caller was handed a different one", got.RoutingJobID)
+	}
+	got.RoutingJobID = want.RoutingJobID
+
+	if !reflect.DeepEqual(got, want) {
+		gotJSON, _ := json.MarshalIndent(got, "", "  ")
+		t.Errorf("the message the API published is not the golden fixture.\n--- produced ---\n%s\n--- fixture ---\n%s",
+			gotJSON, raw)
 	}
 }

@@ -62,7 +62,7 @@ func Isochrone(store SeededGraphStore, publisher routing.Publisher, log *logger.
 			return
 		}
 
-		job, ok := loadSeededGraph(w, r, store, req.ScenarioSlug)
+		job, ok := loadSeededCompile(w, r, store, req.ScenarioSlug)
 		if !ok {
 			return
 		}
@@ -77,7 +77,7 @@ func Isochrone(store SeededGraphStore, publisher routing.Publisher, log *logger.
 	}
 }
 
-// loadSeededGraph resolves a seeded scenario's compile job by slug, writing the
+// loadSeededCompile resolves a seeded scenario's compile job by slug, writing the
 // 404 and reporting ok=false when there is none.
 //
 // It returns the job rather than just its graph because a routing job names the
@@ -88,7 +88,7 @@ func Isochrone(store SeededGraphStore, publisher routing.Publisher, log *logger.
 // that has never compiled are told apart: the first is the caller's mistake,
 // the second is a deployment that has not finished coming up, and only the
 // second is worth retrying.
-func loadSeededGraph(w http.ResponseWriter, r *http.Request, store SeededGraphStore, slug string) (transit.Job, bool) {
+func loadSeededCompile(w http.ResponseWriter, r *http.Request, store SeededGraphStore, slug string) (transit.Job, bool) {
 	if _, found, err := store.GetScenarioBySlug(r.Context(), slug); err != nil {
 		writeInternalError(w, "looking up scenario", err)
 		return transit.Job{}, false
@@ -97,5 +97,5 @@ func loadSeededGraph(w http.ResponseWriter, r *http.Request, store SeededGraphSt
 		return transit.Job{}, false
 	}
 
-	return latestSeededGraph(w, r, store, slug)
+	return latestSeededCompile(w, r, store, slug)
 }

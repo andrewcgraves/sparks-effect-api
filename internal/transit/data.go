@@ -1,25 +1,27 @@
 package transit
 
 // Node is one addressable point in an isochrone-ready graph: the slug an Edge
-// or TravelTimeBetween call names, plus the position the chainer needs.
+// or TravelTimeBetween call names, plus the position an isochrone is plotted
+// from.
 type Node struct {
 	Slug string
 	Lat  float64
 	Lng  float64
 }
 
-// IsochroneData is the read-only seam the isochrone chainer requires, narrowed
-// to exactly what it reads (SPA-83 decision 3). Nodes collapses scenario
-// resolution and station lookup into the one thing that two-step ever
-// accomplished; TravelTimeBetween is unchanged.
+// IsochroneData is the read-only view of a scenario an isochrone is computed
+// from, narrowed to exactly what that needs (SPA-83 decision 3): Nodes
+// collapses scenario resolution and station lookup into the one thing that
+// two-step ever accomplished, and TravelTimeBetween answers the graph search.
 //
-// Every isochrone the API serves now reads through CompiledGraphData: since
-// SPA-181 the seeded scenario resolves its graph from a compile job like the
-// authored ones do, rather than from the embedded store. *Store still satisfies
-// this interface, but as the reference the two agree on rather than as a live
-// request path — it is what the equivalence test pins the compiled graph
-// against, so a change to either side that moved the public answer would fail
-// there first.
+// Since SPA-182 nothing in this repository computes an isochrone — the worker
+// does, over the graph the queue message carries — so this seam has no live
+// request path behind it any more. It is kept as the equivalence harness the
+// two data sources are pinned against: *Store reads the embedded seed data and
+// CompiledGraphData reads a compile job's result, and SPA-181's acceptance
+// test asserts they answer identically for every station pair. That comparison
+// is what guarantees a compiled graph still describes the scenario it was
+// compiled from, and it needs both implementations to keep existing.
 type IsochroneData interface {
 	Nodes(scenarioSlug string) ([]Node, bool)
 	TravelTimeBetween(scenarioSlug, fromSlug, toSlug string) (seconds, waitSecs int, serviceID string, ok bool)

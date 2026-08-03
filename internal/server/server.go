@@ -97,8 +97,8 @@ func registerRouteRoutes(mux *http.ServeMux, deps AuthDeps) {
 		// does not serve /api/routes, it makes the mux answer that path with a
 		// 307 to the trailing-slash form. Without this the list would redirect
 		// rather than report itself unavailable.
-		mux.HandleFunc("/api/routes", serviceUnavailable("route storage is unavailable: no database configured"))
-		mux.HandleFunc("/api/routes/", serviceUnavailable("route storage is unavailable: no database configured"))
+		mux.HandleFunc("/api/routes", noDatabase("route storage is unavailable"))
+		mux.HandleFunc("/api/routes/", noDatabase("route storage is unavailable"))
 		return
 	}
 	mux.HandleFunc("GET /api/routes", handler.Routes(deps))
@@ -125,25 +125,25 @@ func registerRouteRoutes(mux *http.ServeMux, deps AuthDeps) {
 // can still recognise its owner. See handler.RoutingJobStatus for the rule.
 func registerCompileRoutes(mux *http.ServeMux, deps AuthDeps, publisher routing.Publisher, lg *logger.Logger) {
 	if deps == nil {
-		mux.HandleFunc("GET /api/scenarios/{slug}/graph", serviceUnavailable("compiled graph storage is unavailable: no database configured"))
-		mux.HandleFunc("POST /api/isochrone", serviceUnavailable("compiled graph storage is unavailable: no database configured"))
-		mux.HandleFunc("GET /api/routing-jobs/{id}", serviceUnavailable("routing job storage is unavailable: no database configured"))
+		mux.HandleFunc("GET /api/scenarios/{slug}/graph", noDatabase("compiled graph storage is unavailable"))
+		mux.HandleFunc("POST /api/isochrone", noDatabase("compiled graph storage is unavailable"))
+		mux.HandleFunc("GET /api/routing-jobs/{id}", noDatabase("routing job storage is unavailable"))
 		return
 	}
 	mux.HandleFunc("GET /api/scenarios/{slug}/graph", handler.ScenarioGraph(deps))
-	mux.HandleFunc("POST /api/isochrone", isochroneRoute(handler.Isochrone(deps, publisher, lg), publisher))
+	mux.HandleFunc("POST /api/isochrone", requirePublisher(publisher, handler.Isochrone(deps, publisher, lg)))
 	mux.Handle("GET /api/routing-jobs/{id}",
 		auth.OptionalAuth(deps.GetSessionUser)(handler.RoutingJobStatus(deps)))
 }
 
-// isochroneRoute guards an isochrone endpoint with the broker it depends on.
+// requirePublisher guards an isochrone endpoint with the broker it depends on.
 //
 // An isochrone is now entirely someone else's work: with no queue to publish
 // to there is no way to do it and no partial answer worth inventing. Answering
 // 503 up front is more honest than accepting the request, recording a routing
 // job, and immediately marking it failed — which is what the handler would do
 // with a publisher that cannot reach anything.
-func isochroneRoute(h http.HandlerFunc, publisher routing.Publisher) http.HandlerFunc {
+func requirePublisher(publisher routing.Publisher, h http.HandlerFunc) http.HandlerFunc {
 	if publisher == nil {
 		return serviceUnavailable("the routing queue is unavailable: no broker configured")
 	}
@@ -175,7 +175,7 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 			"/api/services", "/api/services/",
 			"/api/user-scenarios", "/api/user-scenarios/",
 		} {
-			mux.HandleFunc(pattern, serviceUnavailable("authentication is unavailable: no database configured"))
+			mux.HandleFunc(pattern, noDatabase("authentication is unavailable"))
 		}
 		return
 	}
@@ -215,7 +215,7 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 	// for either: "/api/services/" is a subtree pattern and already covers them.
 	mux.Handle("GET /api/services/{slug}/graph", authenticated(handler.UserServiceGraph(deps)))
 	mux.Handle("POST /api/services/{slug}/isochrone",
-		authenticated(isochroneRoute(handler.UserServiceIsochrone(deps, publisher, lg), publisher)))
+		authenticated(requirePublisher(publisher, handler.UserServiceIsochrone(deps, publisher, lg))))
 
 	// User-owned scenarios: owner-scoped CRUD over a curated set of UserService
 	// ids. Named /api/user-scenarios, distinct from the public /api/scenarios
@@ -234,20 +234,27 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 	// over the scenario's compiled graph rather than the seeded store, and
 	// answers 409 with a distinct code when that graph is stale (SPA-116).
 	mux.Handle("POST /api/user-scenarios/{slug}/isochrone",
-		authenticated(isochroneRoute(handler.UserScenarioIsochrone(deps, publisher, lg), publisher)))
+		authenticated(requirePublisher(publisher, handler.UserScenarioIsochrone(deps, publisher, lg))))
 
 	// Admin-only.
 	mux.Handle("POST /api/admin/users", adminOnly(handler.CreateUser(deps)))
 	mux.Handle("POST /api/admin/routes", adminOnly(handler.CreateRoute(deps)))
 }
 
+// noDatabase answers 503 for a route whose backing store is Postgres when no
+// database is configured — the great majority of them, hence its own wrapper
+// over serviceUnavailable rather than the suffix repeated at each call site.
+func noDatabase(what string) http.HandlerFunc {
+	return serviceUnavailable(what + ": no database configured")
+}
+
 // serviceUnavailable answers 503 for a route one of whose dependencies is not
 // configured — Postgres for most, the queue broker for the isochrones — so a
 // client can tell "not deployed with that piece" from "no such endpoint".
 //
-// msg is the whole message, including which dependency is missing. It used to
-// append "no database configured" itself, which stopped being true once a
-// second dependency could be the one missing.
+// msg is the whole message, including which dependency is missing: it used to
+// name the database itself, which stopped being true once a second dependency
+// could be the one missing. Most callers go through noDatabase above.
 func serviceUnavailable(msg string) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

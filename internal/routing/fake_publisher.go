@@ -11,9 +11,14 @@ import (
 type FakePublisher struct {
 	mu sync.Mutex
 
+	// Err is returned instead of publishing, for the failure paths.
 	Err error
 
-	Published []Message
+	// published is read only through Messages, which copies it under the lock.
+	// Exporting it would give tests a second, unsynchronised reader — and the
+	// suite runs under -race against handlers that publish from request
+	// goroutines.
+	published []Message
 }
 
 func (f *FakePublisher) Publish(_ context.Context, msg Message) error {
@@ -22,7 +27,7 @@ func (f *FakePublisher) Publish(_ context.Context, msg Message) error {
 	if f.Err != nil {
 		return f.Err
 	}
-	f.Published = append(f.Published, msg)
+	f.published = append(f.published, msg)
 	return nil
 }
 
@@ -30,5 +35,5 @@ func (f *FakePublisher) Publish(_ context.Context, msg Message) error {
 func (f *FakePublisher) Messages() []Message {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return append([]Message(nil), f.Published...)
+	return append([]Message(nil), f.published...)
 }

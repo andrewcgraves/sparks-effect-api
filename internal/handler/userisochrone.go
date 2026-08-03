@@ -56,20 +56,22 @@ func validateIsochroneParams(w http.ResponseWriter, budgetMins int, mode string)
 	return true
 }
 
-// ScenarioIsochroneStore and ServiceIsochroneStore are what an isochrone over
-// an authored target needs: the target itself, plus somewhere to record the
-// routing job it enqueues.
+// ScenarioIsochroneStore is what an isochrone over a user-authored scenario
+// needs: the scenario as a compile target, plus somewhere to record the routing
+// job it enqueues.
 //
-// They are compositions rather than extra methods on the target stores because
-// the compile trigger and the graph read address the same targets and have no
-// routing job to record. Widening those interfaces would oblige every one of
-// their callers to satisfy a half they never touch.
+// It is a composition rather than two more methods on ScenarioTargetStore
+// because the compile trigger and the graph read address the same target and
+// have no routing job to record. Widening that interface would oblige every one
+// of its callers to satisfy a half they never touch.
 type ScenarioIsochroneStore interface {
 	ScenarioTargetStore
 	RoutingStore
 }
 
-// ServiceIsochroneStore is ScenarioIsochroneStore's single-service twin.
+// ServiceIsochroneStore is what an isochrone over a single user-authored
+// service needs, composed for the same reason as its scenario counterpart: the
+// service as a compile target, plus somewhere to record the routing job.
 type ServiceIsochroneStore interface {
 	ServiceTargetStore
 	RoutingStore

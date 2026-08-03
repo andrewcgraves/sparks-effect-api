@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/ids"
@@ -56,18 +57,7 @@ func enqueueIsochrone(w http.ResponseWriter, r *http.Request, store RoutingStore
 		return
 	}
 
-	msg := routing.Message{
-		SchemaVersion: routing.SchemaVersion,
-		RoutingJobID:  job.ID,
-		CompileJobID:  job.CompileJobID,
-		Graph:         graph,
-		Lat:           job.Lat,
-		Lng:           job.Lng,
-		BudgetMins:    job.BudgetMins,
-		Mode:          job.Mode,
-	}
-
-	if err := publisher.Publish(r.Context(), msg); err != nil {
+	if err := publisher.Publish(r.Context(), routing.MessageFor(job, graph)); err != nil {
 		failUnpublishedJob(store, job.ID, err)
 		writeErrorCode(w, http.StatusBadGateway, PublishFailedErrorCode,
 			"could not enqueue the isochrone; the routing job was marked failed")
@@ -81,19 +71,28 @@ func enqueueIsochrone(w http.ResponseWriter, r *http.Request, store RoutingStore
 // does not sit in `queued` forever being polled by a client no worker will ever
 // answer.
 //
-// It deliberately takes no request context, using a background one instead: the
+// It deliberately takes no request context, using one of its own instead: the
 // request's is cancelled the moment the client disconnects, and a client that
 // has given up waiting is precisely when leaving the row wrongly queued would
-// go unnoticed. A failure to record the failure is logged rather than returned —
-// the caller is already being told the enqueue failed, which is the part it can
-// act on.
+// go unnoticed. It is still bounded, so a wedged database cannot pin the
+// request goroutine open indefinitely. A failure to record the failure is
+// logged rather than returned — the caller is already being told the enqueue
+// failed, which is the part it can act on.
 func failUnpublishedJob(store RoutingStore, id string, cause error) {
 	log.Printf("handler: routing job %s was not published: %v", id, cause)
-	if err := store.FailRoutingJob(context.Background(), id,
+
+	ctx, cancel := context.WithTimeout(context.Background(), failJobTimeout)
+	defer cancel()
+	if err := store.FailRoutingJob(ctx, id,
 		"the isochrone was never enqueued: "+cause.Error()); err != nil {
 		log.Printf("handler: could not mark routing job %s failed: %v", id, err)
 	}
 }
+
+// failJobTimeout bounds the one write that outlives its request. Long enough
+// that a busy database still records the failure, short enough that an
+// unreachable one does not hold the handler open.
+const failJobTimeout = 5 * time.Second
 
 // RoutingJobStatus returns a handler for GET /api/routing-jobs/{id}: the
 // queued -> running -> succeeded/failed poll for an isochrone, and the result

@@ -56,6 +56,29 @@ type Message struct {
 	Mode         transit.TravelMode    `json:"mode"`
 }
 
+// MessageFor builds the message for a routing job over the graph it names.
+//
+// It lives here, beside the contract, rather than in the handler that calls it:
+// the job and the message carry the same six request fields, and copying them
+// by hand at the call site is where a field silently stops being sent. Anything
+// that mints a routing job gets the message for it the one way.
+//
+// graph is passed separately because a RoutingJob records only the compile job
+// that identifies the graph, never the graph itself — the bytes are resolved
+// once, at the point the job is created, and travel no further.
+func MessageFor(job transit.RoutingJob, graph *transit.TransitGraph) Message {
+	return Message{
+		SchemaVersion: SchemaVersion,
+		RoutingJobID:  job.ID,
+		CompileJobID:  job.CompileJobID,
+		Graph:         graph,
+		Lat:           job.Lat,
+		Lng:           job.Lng,
+		BudgetMins:    job.BudgetMins,
+		Mode:          job.Mode,
+	}
+}
+
 // Publisher hands a Message to the queue and reports whether the broker
 // accepted responsibility for it.
 //

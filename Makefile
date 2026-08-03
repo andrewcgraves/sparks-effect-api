@@ -67,10 +67,13 @@ test-integration: deps
 
 # itest brings up a throwaway Postgres and RabbitMQ, runs the integration suite,
 # and tears them down again — the one-command local equivalent of the CI job.
+#
+# Bring-up and the test run share one recipe line so teardown is reached even
+# when bring-up fails: as separate lines, a failing `mq-up` would abort the
+# target and leave the Postgres container running.
 itest:
-	$(MAKE) db-up
-	$(MAKE) mq-up
-	$(MAKE) test-integration; status=$$?; $(MAKE) db-down; $(MAKE) mq-down; exit $$status
+	$(MAKE) db-up && $(MAKE) mq-up && $(MAKE) test-integration; \
+	status=$$?; $(MAKE) db-down; $(MAKE) mq-down; exit $$status
 
 # db-up starts (or reuses) a throwaway Postgres and waits until it accepts
 # connections. Idempotent: a running container is left in place.
