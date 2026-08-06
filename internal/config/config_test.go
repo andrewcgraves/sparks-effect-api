@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"log/slog"
+	"testing"
+)
 
 func TestLoad_defaults(t *testing.T) {
 	t.Setenv("PORT", "")
@@ -56,5 +59,34 @@ func TestLoad_allowLocalhostCORS_enabledByEnv(t *testing.T) {
 	cfg := Load()
 	if !cfg.AllowLocalhostCORS {
 		t.Error("AllowLocalhostCORS: want true when ALLOW_LOCALHOST_CORS=true, got false")
+	}
+}
+
+func TestLoad_logLevel_defaultsToInfo(t *testing.T) {
+	t.Setenv("LOG_LEVEL", "")
+	t.Setenv("VERBOSE", "")
+
+	if cfg := Load(); cfg.LogLevel != slog.LevelInfo {
+		t.Errorf("LogLevel: want %v, got %v", slog.LevelInfo, cfg.LogLevel)
+	}
+}
+
+func TestLoad_logLevel_fromEnv(t *testing.T) {
+	t.Setenv("LOG_LEVEL", "debug")
+	t.Setenv("VERBOSE", "")
+
+	if cfg := Load(); cfg.LogLevel != slog.LevelDebug {
+		t.Errorf("LogLevel: want %v, got %v", slog.LevelDebug, cfg.LogLevel)
+	}
+}
+
+// VERBOSE=true predates LOG_LEVEL and stays supported so existing deploy
+// configs keep working unchanged.
+func TestLoad_logLevel_verboseIsABackCompatAliasForDebug(t *testing.T) {
+	t.Setenv("LOG_LEVEL", "")
+	t.Setenv("VERBOSE", "true")
+
+	if cfg := Load(); cfg.LogLevel != slog.LevelDebug {
+		t.Errorf("LogLevel: want %v when VERBOSE=true, got %v", slog.LevelDebug, cfg.LogLevel)
 	}
 }

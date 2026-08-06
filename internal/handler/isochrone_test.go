@@ -15,6 +15,7 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/logger"
 	"github.com/andrewcgraves/sparks-effect-api/internal/routing"
+	"github.com/andrewcgraves/sparks-effect-api/internal/traceid"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
@@ -424,7 +425,15 @@ func TestIsochrone_publishesTheGoldenFixtureMessage(t *testing.T) {
 
 	body := fmt.Sprintf(`{"lat":%v,"lng":%v,"budget_mins":%d,"mode":%q,"scenario_slug":"ca-hsr"}`,
 		want.Lat, want.Lng, want.BudgetMins, want.Mode)
-	rec := postIsochrone(store, pub, body)
+
+	// The fixture's trace id stands in for whatever traceid.Middleware would
+	// have attached to a real request; injected directly here since this test
+	// calls the handler without going through that middleware.
+	req := httptest.NewRequest(http.MethodPost, "/api/isochrone", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(traceid.WithContext(req.Context(), want.TraceID))
+	rec := httptest.NewRecorder()
+	handler.Isochrone(store, pub, logger.Discard())(rec, req)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status: want 202, got %d: %s", rec.Code, rec.Body.String())
 	}

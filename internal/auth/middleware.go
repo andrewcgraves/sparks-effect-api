@@ -3,7 +3,7 @@ package auth
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -52,7 +52,7 @@ func RequireAuth(lookup SessionLookup) func(http.Handler) http.Handler {
 				// A lookup failure is an outage, not a rejected credential.
 				// Answering 401 here would tell a legitimate user their
 				// session was invalid and send them to re-login pointlessly.
-				log.Printf("auth: session lookup failed: %v", err)
+				slog.ErrorContext(r.Context(), "auth: session lookup failed", "error", err)
 				writeErr(w, http.StatusInternalServerError, "internal error")
 				return
 			}
@@ -97,7 +97,7 @@ func OptionalAuth(lookup SessionLookup) func(http.Handler) http.Handler {
 				// whole request would be worse than serving it anonymously.
 				// The owned half answers 404 in that case, which is the same
 				// thing it tells any non-owner.
-				log.Printf("auth: optional session lookup failed: %v", err)
+				slog.ErrorContext(r.Context(), "auth: optional session lookup failed", "error", err)
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -157,6 +157,6 @@ func writeErr(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(map[string]string{"error": msg}); err != nil {
-		log.Printf("auth: failed to write response: %v", err)
+		slog.Error("auth: failed to write response", "error", err)
 	}
 }

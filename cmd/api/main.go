@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -27,17 +27,20 @@ func main() {
 	_ = godotenv.Load()
 	cfg := config.Load()
 
-	lg := internlog.Default(cfg.Debug)
-	if cfg.Debug {
-		lg.Printf("debug logging enabled")
-	}
+	// Installed as the process-wide default too, so code with no logger
+	// threaded to it still emits the same leveled JSON through slog's
+	// package-level functions (see internal/logger.Init).
+	internlog.Init(cfg.LogLevel)
+	lg := slog.Default()
+	lg.Debug("debug logging enabled")
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	store, repo, cleanup, err := loadStore(ctx, cfg, lg)
 	if err != nil {
-		log.Fatalf("failed to load transit data: %v", err)
+		lg.Error("failed to load transit data", "error", err)
+		os.Exit(1)
 	}
 	defer cleanup()
 
@@ -47,7 +50,8 @@ func main() {
 	if repo != nil {
 		deps = repo
 		if err := bootstrapAdmin(ctx, cfg, repo, lg); err != nil {
-			log.Fatalf("failed to provision bootstrap admin: %v", err)
+			lg.Error("failed to provision bootstrap admin", "error", err)
+			os.Exit(1)
 		}
 		// Lapsed sessions can no longer authenticate (GetSessionUser filters on
 		// expiry), so this is housekeeping, not a security control — it just
@@ -56,9 +60,9 @@ func main() {
 		// process ever ran for months at a time.
 		if n, err := repo.DeleteExpiredSessions(ctx); err != nil {
 			// Not fatal: the API is perfectly usable with stale rows present.
-			log.Printf("could not prune expired sessions: %v", err)
+			lg.Error("could not prune expired sessions", "error", err)
 		} else if n > 0 {
-			lg.Printf("pruned %d expired session(s)", n)
+			lg.Info("pruned expired sessions", "count", n)
 		}
 	}
 
@@ -70,28 +74,30 @@ func main() {
 		amqpPublisher := routing.NewAMQPPublisher(cfg.AMQPURL, cfg.RoutingQueue, lg)
 		defer amqpPublisher.Close()
 		publisher = amqpPublisher
-		lg.Printf("routing jobs will be published to %q", cfg.RoutingQueue)
+		lg.Info("routing jobs will be published", "queue", cfg.RoutingQueue)
 	} else {
-		lg.Printf("AMQP_URL not set; the isochrone endpoints will answer 503")
+		lg.Info("AMQP_URL not set; the isochrone endpoints will answer 503")
 	}
 
 	srv := server.New(cfg, store, deps, publisher, lg)
 
 	go func() {
-		log.Printf("listening on %s", srv.Addr)
+		lg.Info("listening", "addr", srv.Addr)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("server error: %v", err)
+			lg.Error("server error", "error", err)
+			os.Exit(1)
 		}
 	}()
 
 	<-ctx.Done()
-	log.Println("shutting down")
+	lg.Info("shutting down")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Fatalf("graceful shutdown failed: %v", err)
+		lg.Error("graceful shutdown failed", "error", err)
+		os.Exit(1)
 	}
 }
 
@@ -102,11 +108,11 @@ func main() {
 // returned repo is nil — in which case there are no compile jobs and the
 // isochrone routes answer 503 (see server.registerCompileRoutes).
 // The returned cleanup closes any DB pool.
-func loadStore(ctx context.Context, cfg config.Config, lg *internlog.Logger) (*transit.Store, *postgres.Repo, func(), error) {
+func loadStore(ctx context.Context, cfg config.Config, lg *slog.Logger) (*transit.Store, *postgres.Repo, func(), error) {
 	noop := func() {}
 
 	if cfg.DatabaseURL == "" {
-		lg.Printf("DATABASE_URL not set; using read-only embedded store (authentication disabled)")
+		lg.Info("DATABASE_URL not set; using read-only embedded store (authentication disabled)")
 		store, err := transit.NewStore()
 		return store, nil, noop, err
 	}
@@ -126,7 +132,7 @@ func loadStore(ctx context.Context, cfg config.Config, lg *internlog.Logger) (*t
 		return nil, nil, noop, err
 	}
 	if seeded {
-		lg.Printf("seeded embedded scenario data into empty database")
+		lg.Info("seeded embedded scenario data into empty database")
 	}
 
 	// Compile what was seeded, so a freshly deployed environment can answer the
@@ -139,7 +145,7 @@ func loadStore(ctx context.Context, cfg config.Config, lg *internlog.Logger) (*t
 		return nil, nil, noop, err
 	}
 	if compiled > 0 {
-		lg.Printf("compiled %d seeded scenario(s)", compiled)
+		lg.Info("compiled seeded scenarios", "count", compiled)
 	}
 
 	store, err := transit.LoadStore(ctx, repo)
@@ -157,7 +163,7 @@ func loadStore(ctx context.Context, cfg config.Config, lg *internlog.Logger) (*t
 // no-op unless both variables are set, and never overwrites an existing
 // account — so leaving the variables in place across deploys cannot silently
 // reset a password, and rotating one means deleting the account first.
-func bootstrapAdmin(ctx context.Context, cfg config.Config, repo *postgres.Repo, lg *internlog.Logger) error {
+func bootstrapAdmin(ctx context.Context, cfg config.Config, repo *postgres.Repo, lg *slog.Logger) error {
 	email := strings.ToLower(strings.TrimSpace(cfg.BootstrapAdminEmail))
 	if email == "" || cfg.BootstrapAdminPassword == "" {
 		return nil
@@ -166,7 +172,7 @@ func bootstrapAdmin(ctx context.Context, cfg config.Config, repo *postgres.Repo,
 	if _, exists, err := repo.GetUserByEmail(ctx, email); err != nil {
 		return err
 	} else if exists {
-		lg.Printf("bootstrap admin %s already exists; leaving it unchanged", email)
+		lg.Info("bootstrap admin already exists; leaving it unchanged", "email", email)
 		return nil
 	}
 
@@ -185,6 +191,6 @@ func bootstrapAdmin(ctx context.Context, cfg config.Config, repo *postgres.Repo,
 		return err
 	}
 	// The password is never logged, only the address it was applied to.
-	log.Printf("provisioned bootstrap admin account %s", email)
+	lg.Info("provisioned bootstrap admin account", "email", email)
 	return nil
 }

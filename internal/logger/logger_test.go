@@ -2,45 +2,71 @@ package logger_test
 
 import (
 	"bytes"
+	"encoding/json"
+	"log/slog"
 	"strings"
 	"testing"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/logger"
 )
 
-func TestDebugf_noopWhenOff(t *testing.T) {
+func TestNew_writesJSON(t *testing.T) {
 	var buf bytes.Buffer
-	lg := logger.New(&buf, false)
-	lg.Debugf("should not appear %s", "here")
-	if buf.Len() != 0 {
-		t.Errorf("Debugf wrote output when debug=false: %q", buf.String())
+	lg := logger.New(&buf, slog.LevelInfo)
+	lg.Info("hello", "who", "world")
+
+	var line map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &line); err != nil {
+		t.Fatalf("log output is not JSON: %v\n%s", err, buf.String())
+	}
+	if line["msg"] != "hello" {
+		t.Errorf("msg = %v, want %q", line["msg"], "hello")
+	}
+	if line["who"] != "world" {
+		t.Errorf("who = %v, want %q", line["who"], "world")
 	}
 }
 
-func TestDebugf_writesWhenOn(t *testing.T) {
+func TestNew_gatesBelowLevel(t *testing.T) {
 	var buf bytes.Buffer
-	lg := logger.New(&buf, true)
-	lg.Debugf("hello %s", "world")
-	out := buf.String()
-	if !strings.Contains(out, "hello world") {
-		t.Errorf("Debugf output missing expected content: %q", out)
+	lg := logger.New(&buf, slog.LevelInfo)
+	lg.Debug("should not appear")
+	if buf.Len() != 0 {
+		t.Errorf("Debug wrote output below the configured level: %q", buf.String())
 	}
-	if !strings.Contains(out, "[DEBUG]") {
-		t.Errorf("Debugf output missing [DEBUG] prefix: %q", out)
+}
+
+func TestNew_debugLevelWritesDebug(t *testing.T) {
+	var buf bytes.Buffer
+	lg := logger.New(&buf, slog.LevelDebug)
+	lg.Debug("hello")
+	if !strings.Contains(buf.String(), "hello") {
+		t.Errorf("Debug output missing expected content: %q", buf.String())
 	}
 }
 
 func TestDiscard_noOutput(t *testing.T) {
 	lg := logger.Discard()
-	lg.Debugf("no output")
-	lg.Printf("also no output")
+	lg.Debug("no output")
+	lg.Info("also no output")
+	lg.Error("still no output")
 }
 
-func TestPrintf_alwaysWrites(t *testing.T) {
-	var buf bytes.Buffer
-	lg := logger.New(&buf, false)
-	lg.Printf("always %s", "visible")
-	if !strings.Contains(buf.String(), "always visible") {
-		t.Errorf("Printf did not write when debug=false: %q", buf.String())
+func TestParseLevel(t *testing.T) {
+	cases := map[string]slog.Level{
+		"debug":   slog.LevelDebug,
+		"DEBUG":   slog.LevelDebug,
+		" debug ": slog.LevelDebug,
+		"info":    slog.LevelInfo,
+		"":        slog.LevelInfo,
+		"bogus":   slog.LevelInfo,
+		"warn":    slog.LevelWarn,
+		"warning": slog.LevelWarn,
+		"error":   slog.LevelError,
+	}
+	for input, want := range cases {
+		if got := logger.ParseLevel(input); got != want {
+			t.Errorf("ParseLevel(%q) = %v, want %v", input, got, want)
+		}
 	}
 }

@@ -22,8 +22,13 @@ import (
 // the fixture's job is to pin the *shape* of the contract, and a 3,000-byte CA
 // HSR graph pasted into testdata would obscure that behind data no reader can
 // check by eye.
+// goldenTraceID is the fixture's trace id: a fixed value so the fixture is
+// reproducible, standing in for whatever internal/traceid attaches to a real
+// request.
+const goldenTraceID = "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+
 func goldenMessage() routing.Message {
-	return routing.MessageFor(goldenJob(), goldenGraph())
+	return routing.MessageFor(goldenJob(), goldenGraph(), goldenTraceID)
 }
 
 func goldenJob() transit.RoutingJob {
@@ -128,13 +133,13 @@ func TestMessage_schemaVersionIsOne(t *testing.T) {
 	// whose zero value would otherwise tempt an `omitempty`.
 	for _, key := range []string{
 		"schema_version", "routing_job_id", "compile_job_id",
-		"graph", "lat", "lng", "budget_mins", "mode",
+		"graph", "lat", "lng", "budget_mins", "mode", "trace_id",
 	} {
 		if _, ok := decoded[key]; !ok {
 			t.Errorf("message is missing %q", key)
 		}
 	}
-	if len(decoded) != 8 {
-		t.Errorf("message has %d keys, want exactly the 8 the contract names: %v", len(decoded), decoded)
+	if len(decoded) != 9 {
+		t.Errorf("message has %d keys, want exactly the 9 the contract names: %v", len(decoded), decoded)
 	}
 }

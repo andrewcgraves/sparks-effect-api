@@ -1,42 +1,58 @@
+// Package logger configures the API's structured logging.
+//
+// Every log line is a single JSON object — timestamp, level, message, and
+// whatever structured fields the call site attaches — rather than free text,
+// so a shipper like Grafana Alloy can forward and query them without
+// scraping. The level is configurable at boot (see config.Config.LogLevel)
+// rather than fixed, so a deployment can turn on debug output without a
+// rebuild.
 package logger
 
 import (
 	"io"
-	"log"
+	"log/slog"
 	"os"
+	"strings"
 )
 
-// Logger gates debug output behind a flag. Use Discard for no-op instances.
-type Logger struct {
-	l     *log.Logger
-	debug bool
-}
-
-// New creates a Logger writing to out. When debug is false, Debugf is a no-op.
-func New(out io.Writer, debug bool) *Logger {
-	return &Logger{l: log.New(out, "", log.LstdFlags), debug: debug}
-}
-
-// Default creates a Logger writing to stderr using flags from the stdlib log
-// package global. When debug is false, Debugf is a no-op.
-func Default(debug bool) *Logger {
-	return New(os.Stderr, debug)
-}
-
-// Discard returns a Logger that discards all output regardless of debug mode.
-func Discard() *Logger {
-	return &Logger{l: log.New(io.Discard, "", 0), debug: false}
-}
-
-// Debugf logs only when the logger was created with debug=true.
-// The [DEBUG] prefix is prepended automatically.
-func (lg *Logger) Debugf(format string, args ...any) {
-	if lg.debug {
-		lg.l.Printf("[DEBUG] "+format, args...)
+// ParseLevel maps a LOG_LEVEL value to a slog.Level. Recognised values are
+// "debug", "info", "warn" (or "warning"), and "error", case-insensitively;
+// anything else — including an unset flag — falls back to Info, the
+// quietest level that still surfaces everything worth seeing in production.
+func ParseLevel(s string) slog.Level {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
 	}
 }
 
-// Printf always logs, regardless of debug mode.
-func (lg *Logger) Printf(format string, args ...any) {
-	lg.l.Printf(format, args...)
+// New returns a JSON logger writing to out, gated at level.
+func New(out io.Writer, level slog.Level) *slog.Logger {
+	return slog.New(slog.NewJSONHandler(out, &slog.HandlerOptions{Level: level}))
+}
+
+// Default returns a JSON logger writing to stderr, gated at level — what the
+// process logs with once running.
+func Default(level slog.Level) *slog.Logger {
+	return New(os.Stderr, level)
+}
+
+// Discard returns a logger that writes nothing, for tests and callers with no
+// interest in log output.
+func Discard() *slog.Logger {
+	return slog.New(slog.NewJSONHandler(io.Discard, nil))
+}
+
+// Init installs a JSON logger at level as the process-wide default, so code
+// with no logger threaded to it — deep helpers, stdlib-shaped call sites —
+// still logs at the same level and in the same JSON shape as everything else,
+// through slog's package-level functions (slog.Info, slog.Error, ...).
+func Init(level slog.Level) {
+	slog.SetDefault(Default(level))
 }

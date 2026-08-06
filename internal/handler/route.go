@@ -3,7 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -66,7 +66,7 @@ func CreateRoute(store RouteStore) http.HandlerFunc {
 		// routes.slug is still the authority under a concurrent create; this
 		// only spares the common case an opaque database error.
 		if _, exists, err := store.GetRouteBySlug(r.Context(), slug); err != nil {
-			log.Printf("handler: checking existing route failed: %v", err)
+			slog.ErrorContext(r.Context(), "handler: checking existing route failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		} else if exists {
@@ -84,7 +84,7 @@ func CreateRoute(store RouteStore) http.HandlerFunc {
 
 		id, err := ids.NewUUID()
 		if err != nil {
-			log.Printf("handler: generating route id failed: %v", err)
+			slog.ErrorContext(r.Context(), "handler: generating route id failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
@@ -107,7 +107,7 @@ func CreateRoute(store RouteStore) http.HandlerFunc {
 			Segments:      toRouteSegments(in.Properties.Segments),
 		}
 		if err := store.CreateRoute(r.Context(), rt); err != nil {
-			log.Printf("handler: creating route failed: %v", err)
+			slog.ErrorContext(r.Context(), "handler: creating route failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
@@ -126,7 +126,7 @@ func RouteBySlug(store RouteStore) http.HandlerFunc {
 		slug := r.PathValue("slug")
 		rt, ok, err := store.GetRouteBySlug(r.Context(), slug)
 		if err != nil {
-			log.Printf("handler: looking up route failed: %v", err)
+			slog.ErrorContext(r.Context(), "handler: looking up route failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
@@ -151,7 +151,7 @@ func Routes(store RouteStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		routes, err := store.ListRouteSummaries(r.Context())
 		if err != nil {
-			log.Printf("handler: listing routes failed: %v", err)
+			slog.ErrorContext(r.Context(), "handler: listing routes failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
@@ -171,7 +171,7 @@ func resolveScenarioOrFail(w http.ResponseWriter, r *http.Request, store RouteSt
 	}
 	sc, found, err := store.GetScenarioBySlug(r.Context(), slug)
 	if err != nil {
-		log.Printf("handler: looking up scenario failed: %v", err)
+		slog.ErrorContext(r.Context(), "handler: looking up scenario failed", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return nil, false
 	}

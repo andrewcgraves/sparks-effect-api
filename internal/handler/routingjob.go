@@ -2,13 +2,14 @@ package handler
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/ids"
 	"github.com/andrewcgraves/sparks-effect-api/internal/routing"
+	"github.com/andrewcgraves/sparks-effect-api/internal/traceid"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
@@ -57,13 +58,18 @@ func enqueueIsochrone(w http.ResponseWriter, r *http.Request, store RoutingStore
 		return
 	}
 
-	if err := publisher.Publish(r.Context(), routing.MessageFor(job, graph)); err != nil {
+	// The trace id is whatever traceid.Middleware attached to this request —
+	// caller-supplied or minted for it — so the worker can log this job's
+	// computation under the same trace as the request that created it.
+	trace, _ := traceid.FromContext(r.Context())
+	if err := publisher.Publish(r.Context(), routing.MessageFor(job, graph, trace)); err != nil {
 		failUnpublishedJob(store, job.ID, err)
 		writeErrorCode(w, http.StatusBadGateway, PublishFailedErrorCode,
 			"could not enqueue the isochrone; the routing job was marked failed")
 		return
 	}
 
+	slog.Debug("routing job enqueued", "routing_job_id", job.ID, "trace_id", trace)
 	writeJSON(w, http.StatusAccepted, job)
 }
 
@@ -79,13 +85,13 @@ func enqueueIsochrone(w http.ResponseWriter, r *http.Request, store RoutingStore
 // logged rather than returned — the caller is already being told the enqueue
 // failed, which is the part it can act on.
 func failUnpublishedJob(store RoutingStore, id string, cause error) {
-	log.Printf("handler: routing job %s was not published: %v", id, cause)
+	slog.Error("routing job was not published", "routing_job_id", id, "error", cause)
 
 	ctx, cancel := context.WithTimeout(context.Background(), failJobTimeout)
 	defer cancel()
 	if err := store.FailRoutingJob(ctx, id,
 		"the isochrone was never enqueued: "+cause.Error()); err != nil {
-		log.Printf("handler: could not mark routing job %s failed: %v", id, err)
+		slog.Error("could not mark routing job failed", "routing_job_id", id, "error", err)
 	}
 }
 

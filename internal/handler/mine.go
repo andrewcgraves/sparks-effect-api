@@ -2,7 +2,7 @@ package handler
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"net/http"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
@@ -29,7 +29,7 @@ func MyScenarios(store OwnerStore) http.HandlerFunc {
 		}
 		scenarios, err := store.ListScenariosByOwner(r.Context(), user.ID)
 		if err != nil {
-			log.Printf("handler: listing owned scenarios failed: %v", err)
+			slog.ErrorContext(r.Context(), "handler: listing owned scenarios failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
@@ -52,7 +52,7 @@ func MyServices(store OwnerStore) http.HandlerFunc {
 		}
 		services, err := store.ListServicesByOwner(r.Context(), user.ID)
 		if err != nil {
-			log.Printf("handler: listing owned services failed: %v", err)
+			slog.ErrorContext(r.Context(), "handler: listing owned services failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}

@@ -5,11 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 
 	amqp "github.com/rabbitmq/amqp091-go"
-
-	"github.com/andrewcgraves/sparks-effect-api/internal/logger"
 )
 
 // ErrNotConfirmed reports a publish the broker declined to take responsibility
@@ -34,7 +33,7 @@ var ErrNotConfirmed = errors.New("routing: publish was not confirmed by the brok
 type AMQPPublisher struct {
 	url   string
 	queue string
-	log   *logger.Logger
+	log   *slog.Logger
 
 	// mu serialises publishes. A single amqp channel is not safe for concurrent
 	// use, and deferred confirms are matched to publishes by delivery-tag order,
@@ -49,7 +48,7 @@ type AMQPPublisher struct {
 
 // NewAMQPPublisher builds a publisher for the given broker URL and queue. It
 // does not connect; the first Publish does.
-func NewAMQPPublisher(url, queue string, log *logger.Logger) *AMQPPublisher {
+func NewAMQPPublisher(url, queue string, log *slog.Logger) *AMQPPublisher {
 	return &AMQPPublisher{url: url, queue: queue, log: log}
 }
 
@@ -115,7 +114,8 @@ func (p *AMQPPublisher) Publish(ctx context.Context, msg Message) error {
 		return fmt.Errorf("%w: nacked", ErrNotConfirmed)
 	}
 
-	p.log.Debugf("routing: published job %s to %q", msg.RoutingJobID, p.queue)
+	p.log.Debug("routing: published job", "routing_job_id", msg.RoutingJobID,
+		"trace_id", msg.TraceID, "queue", p.queue)
 	return nil
 }
 

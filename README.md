@@ -161,19 +161,41 @@ ALLOW_LOCALHOST_CORS=true make run
 
 Or add `ALLOW_LOCALHOST_CORS=true` to `.env`. The flag is **off by default** and must never be set in production — it only allows `localhost` and `127.0.0.1` origins, never a wildcard.
 
-## Verbose / debug logging
+## Logging
 
-Set `LOG_LEVEL=debug` (or `VERBOSE=true`) to enable detailed logging for local
-debugging. When enabled the server logs:
+Every log line is a single JSON object — timestamp, level, message, and
+whatever structured fields the call site attaches — written to stderr, so it
+can be forwarded to Grafana through Alloy without scraping free text.
+
+`LOG_LEVEL` sets the minimum level logged: `debug`, `info`, `warn`, or `error`
+(case-insensitive). Unset or unrecognised defaults to `info`. `VERBOSE=true`
+is a back-compat alias for `LOG_LEVEL=debug`.
+
+At debug level the server additionally logs:
 
 - Each isochrone request's `lat`, `lng`, `budget_mins`, `mode`, and
   `scenario_slug`
-- Each routing job as it is published, with the queue it went to.
-- The full error value before it is mapped to a 502 or 500 response.
+- Each routing job as it is published, with the queue it went to and its
+  trace id.
+- When a seeded scenario compile is skipped on boot because it is already
+  compiled.
+
+Every request also gets one `info`-level access log line with its method,
+path, status, duration, and trace id, and every internal error is logged with
+the full error value before it is mapped to a 502 or 500 response.
 
 ```sh
 LOG_LEVEL=debug make run
 ```
+
+### Trace ids
+
+Every request carries a trace id, exposed via the `X-Trace-Id` header: if the
+caller (the website) sends one, the API uses it; if not, the API mints one and
+echoes it back in the response header. The id is attached to that request's
+own log lines and forwarded to the routing worker as `trace_id` on the queue
+message for any isochrone the request enqueues, so one request's logs can be
+followed across both services in Grafana.
 
 Sample request for San Jose downtown, walk 90 min, ca-hsr scenario. It answers
 202 with a routing job; poll that job for the result.

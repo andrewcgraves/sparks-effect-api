@@ -3,7 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -52,7 +52,7 @@ func Login(store AuthStore, ttl time.Duration) http.HandlerFunc {
 		// created as "User@Example.com" can be logged into as typed.
 		user, hash, found, err := store.GetUserCredentialsByEmail(r.Context(), normalizeEmail(req.Email))
 		if err != nil {
-			log.Printf("handler: login credential lookup failed: %v", err)
+			slog.ErrorContext(r.Context(), "handler: login credential lookup failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
@@ -71,7 +71,7 @@ func Login(store AuthStore, ttl time.Duration) http.HandlerFunc {
 
 		token, tokenHash, err := auth.NewToken()
 		if err != nil {
-			log.Printf("handler: minting session token failed: %v", err)
+			slog.ErrorContext(r.Context(), "handler: minting session token failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
@@ -82,7 +82,7 @@ func Login(store AuthStore, ttl time.Duration) http.HandlerFunc {
 			UserID:    user.ID,
 			ExpiresAt: expiresAt,
 		}); err != nil {
-			log.Printf("handler: creating session failed: %v", err)
+			slog.ErrorContext(r.Context(), "handler: creating session failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
@@ -103,7 +103,7 @@ func Logout(store AuthStore) http.HandlerFunc {
 			return
 		}
 		if err := store.DeleteSession(r.Context(), auth.HashToken(token)); err != nil {
-			log.Printf("handler: deleting session failed: %v", err)
+			slog.ErrorContext(r.Context(), "handler: deleting session failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
