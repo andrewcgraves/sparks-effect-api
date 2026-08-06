@@ -2,12 +2,14 @@ package logger_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"log/slog"
 	"strings"
 	"testing"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/logger"
+	"github.com/andrewcgraves/sparks-effect-api/internal/traceid"
 )
 
 func TestNew_writesJSON(t *testing.T) {
@@ -42,6 +44,35 @@ func TestNew_debugLevelWritesDebug(t *testing.T) {
 	lg.Debug("hello")
 	if !strings.Contains(buf.String(), "hello") {
 		t.Errorf("Debug output missing expected content: %q", buf.String())
+	}
+}
+
+func TestNew_attachesTraceIDFromContext(t *testing.T) {
+	var buf bytes.Buffer
+	lg := logger.New(&buf, slog.LevelInfo)
+	ctx := traceid.WithContext(context.Background(), "trace-abc-123")
+	lg.InfoContext(ctx, "hello")
+
+	var line map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &line); err != nil {
+		t.Fatalf("log output is not JSON: %v\n%s", err, buf.String())
+	}
+	if line["trace_id"] != "trace-abc-123" {
+		t.Errorf("trace_id = %v, want %q", line["trace_id"], "trace-abc-123")
+	}
+}
+
+func TestNew_omitsTraceIDWhenContextCarriesNone(t *testing.T) {
+	var buf bytes.Buffer
+	lg := logger.New(&buf, slog.LevelInfo)
+	lg.InfoContext(context.Background(), "hello")
+
+	var line map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &line); err != nil {
+		t.Fatalf("log output is not JSON: %v\n%s", err, buf.String())
+	}
+	if _, ok := line["trace_id"]; ok {
+		t.Errorf("trace_id = %v, want no such field", line["trace_id"])
 	}
 }
 

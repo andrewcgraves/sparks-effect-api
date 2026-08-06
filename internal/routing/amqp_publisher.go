@@ -17,6 +17,25 @@ import (
 // nothing came back — so it gets a named error rather than a generic one.
 var ErrNotConfirmed = errors.New("routing: publish was not confirmed by the broker")
 
+// amqpTraceIDHeader is the AMQP delivery header the routing worker reads a
+// job's trace id from (see traceIDHeader in that repository's internal/worker
+// package — the name must match exactly, there is no compiler across the
+// boundary to catch a drift). It rides as a header, alongside the message's
+// own trace_id field in the body, because a header survives the worker's own
+// requeue and dead-letter republish untouched, exactly like x-routing-attempts,
+// while the body is merely carried along for a consumer that reads it directly.
+const amqpTraceIDHeader = "x-trace-id"
+
+// traceHeaders builds the AMQP headers table carrying traceID, or nil if
+// there is none — mirroring the worker's traceIDFromDelivery, which treats an
+// absent header as "no trace id" rather than an error.
+func traceHeaders(traceID string) amqp.Table {
+	if traceID == "" {
+		return nil
+	}
+	return amqp.Table{amqpTraceIDHeader: traceID}
+}
+
 // AMQPPublisher publishes routing jobs to a RabbitMQ queue, in confirm mode.
 //
 // Confirms are the whole point of this type. Without them a publish is
@@ -86,6 +105,7 @@ func (p *AMQPPublisher) Publish(ctx context.Context, msg Message) error {
 			ContentType:  "application/json",
 			DeliveryMode: amqp.Persistent,
 			MessageId:    msg.RoutingJobID,
+			Headers:      traceHeaders(msg.TraceID),
 			Body:         body,
 		})
 	if err != nil {
