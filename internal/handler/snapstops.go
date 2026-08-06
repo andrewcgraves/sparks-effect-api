@@ -112,7 +112,7 @@ func SnapStops(store RouteStore) http.HandlerFunc {
 		slug := r.PathValue("slug")
 		rt, found, err := store.GetRouteBySlug(r.Context(), slug)
 		if err != nil {
-			writeInternalError(w, "looking up route", err)
+			writeInternalError(r.Context(), w, "looking up route", err)
 			return
 		}
 		if !found {
@@ -124,7 +124,7 @@ func SnapStops(store RouteStore) http.HandlerFunc {
 		// here is bad data rather than a bad request — hence 500, not 400.
 		line, err := transit.ToPhysicsLine(rt.Geometry)
 		if err != nil {
-			writeInternalError(w, "route "+slug+" has unusable geometry", err)
+			writeInternalError(r.Context(), w, "route "+slug+" has unusable geometry", err)
 			return
 		}
 
@@ -135,7 +135,7 @@ func SnapStops(store RouteStore) http.HandlerFunc {
 
 		snapped, err := physics.SnapStops(line, stops)
 		if err != nil {
-			writeInternalError(w, "snapping stops to route "+slug, err)
+			writeInternalError(r.Context(), w, "snapping stops to route "+slug, err)
 			return
 		}
 

@@ -141,7 +141,7 @@ func authoredTargetIsochrone(w http.ResponseWriter, r *http.Request, target auth
 
 	memberIDs, members, err := owned.members(r.Context())
 	if err != nil {
-		writeInternalError(w, "loading member services", err)
+		writeInternalError(r.Context(), w, "loading member services", err)
 		return
 	}
 	if transit.GraphStale(job, memberIDs, updatedAtByID(members)) {

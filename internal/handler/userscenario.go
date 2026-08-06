@@ -71,7 +71,7 @@ func CreateUserScenario(store ScenarioStore) http.HandlerFunc {
 
 		id, err := ids.NewUUID()
 		if err != nil {
-			writeInternalError(w, "minting scenario id", err)
+			writeInternalError(r.Context(), w, "minting scenario id", err)
 			return
 		}
 
@@ -84,13 +84,13 @@ func CreateUserScenario(store ScenarioStore) http.HandlerFunc {
 
 		slug, err := mintScenarioSlug(r.Context(), store, sc.Name)
 		if err != nil {
-			writeInternalError(w, "minting slug", err)
+			writeInternalError(r.Context(), w, "minting slug", err)
 			return
 		}
 		sc.Slug = slug
 
 		if err := store.CreateUserScenario(r.Context(), sc); err != nil {
-			writeInternalError(w, "creating scenario", err)
+			writeInternalError(r.Context(), w, "creating scenario", err)
 			return
 		}
 
@@ -132,7 +132,7 @@ func MyUserScenarios(store ScenarioStore) http.HandlerFunc {
 
 		scenarios, err := store.ListUserScenariosByOwner(r.Context(), user.ID)
 		if err != nil {
-			writeInternalError(w, "listing scenarios", err)
+			writeInternalError(r.Context(), w, "listing scenarios", err)
 			return
 		}
 		if scenarios == nil {
@@ -166,7 +166,7 @@ func UpdateUserScenario(store ScenarioStore) http.HandlerFunc {
 			return
 		}
 		if err := store.UpdateUserScenario(r.Context(), sc); err != nil {
-			writeInternalError(w, "updating scenario", err)
+			writeInternalError(r.Context(), w, "updating scenario", err)
 			return
 		}
 
@@ -188,7 +188,7 @@ func DeleteUserScenario(store ScenarioStore) http.HandlerFunc {
 			return
 		}
 		if err := store.DeleteUserScenario(r.Context(), sc.ID); err != nil {
-			writeInternalError(w, "deleting scenario", err)
+			writeInternalError(r.Context(), w, "deleting scenario", err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -207,7 +207,7 @@ type scenarioBySlugStore interface {
 func loadScenario(w http.ResponseWriter, r *http.Request, store scenarioBySlugStore) (transit.UserScenario, bool) {
 	sc, found, err := store.GetUserScenarioBySlug(r.Context(), r.PathValue("slug"))
 	if err != nil {
-		writeInternalError(w, "loading scenario", err)
+		writeInternalError(r.Context(), w, "loading scenario", err)
 		return transit.UserScenario{}, false
 	}
 	if !found {
@@ -266,7 +266,7 @@ func validateScenario(w http.ResponseWriter, r *http.Request, store ScenarioStor
 	}
 	owned, err := store.UserServiceIDsOwnedBy(r.Context(), sc.OwnerID, sc.ServiceIDs)
 	if err != nil {
-		writeInternalError(w, "checking service ownership", err)
+		writeInternalError(r.Context(), w, "checking service ownership", err)
 		return false
 	}
 	for _, id := range sc.ServiceIDs {

@@ -47,14 +47,14 @@ func enqueueIsochrone(w http.ResponseWriter, r *http.Request, store RoutingStore
 	publisher routing.Publisher, job transit.RoutingJob, graph *transit.TransitGraph) {
 	id, err := ids.NewUUID()
 	if err != nil {
-		writeInternalError(w, "generating routing job id", err)
+		writeInternalError(r.Context(), w, "generating routing job id", err)
 		return
 	}
 	job.ID = id
 	job.Status = transit.JobStatusQueued
 
 	if err := store.CreateRoutingJob(r.Context(), &job); err != nil {
-		writeInternalError(w, "creating routing job", err)
+		writeInternalError(r.Context(), w, "creating routing job", err)
 		return
 	}
 
@@ -121,7 +121,7 @@ func RoutingJobStatus(store RoutingStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		job, found, err := store.GetRoutingJobByID(r.Context(), r.PathValue("id"))
 		if err != nil {
-			writeInternalError(w, "looking up routing job", err)
+			writeInternalError(r.Context(), w, "looking up routing job", err)
 			return
 		}
 		if !found || !mayReadRoutingJob(r, job) {

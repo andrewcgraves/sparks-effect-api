@@ -11,6 +11,7 @@ import (
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/ids"
+	"github.com/andrewcgraves/sparks-effect-api/internal/traceid"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
@@ -93,7 +94,7 @@ func CreateService(store ServiceStore) http.HandlerFunc {
 
 		id, err := ids.NewUUID()
 		if err != nil {
-			writeInternalError(w, "minting service id", err)
+			writeInternalError(r.Context(), w, "minting service id", err)
 			return
 		}
 
@@ -103,7 +104,7 @@ func CreateService(store ServiceStore) http.HandlerFunc {
 		// services whose names collide would mint colliding stop identities.
 		slug, err := mintSlug(r.Context(), store, req.Name)
 		if err != nil {
-			writeInternalError(w, "minting slug", err)
+			writeInternalError(r.Context(), w, "minting slug", err)
 			return
 		}
 
@@ -115,7 +116,7 @@ func CreateService(store ServiceStore) http.HandlerFunc {
 		}
 
 		if err := store.CreateUserService(r.Context(), svc); err != nil {
-			writeInternalError(w, "creating service", err)
+			writeInternalError(r.Context(), w, "creating service", err)
 			return
 		}
 
@@ -161,7 +162,7 @@ func MyUserServices(store ServiceStore) http.HandlerFunc {
 
 		services, err := store.ListUserServicesByOwner(r.Context(), user.ID)
 		if err != nil {
-			writeInternalError(w, "listing services", err)
+			writeInternalError(r.Context(), w, "listing services", err)
 			return
 		}
 		if services == nil {
@@ -194,7 +195,7 @@ func UpdateService(store ServiceStore) http.HandlerFunc {
 			return
 		}
 		if err := store.UpdateUserService(r.Context(), svc); err != nil {
-			writeInternalError(w, "updating service", err)
+			writeInternalError(r.Context(), w, "updating service", err)
 			return
 		}
 
@@ -216,7 +217,7 @@ func DeleteService(store ServiceStore) http.HandlerFunc {
 			return
 		}
 		if err := store.DeleteUserService(r.Context(), svc.ID); err != nil {
-			writeInternalError(w, "deleting service", err)
+			writeInternalError(r.Context(), w, "deleting service", err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -235,7 +236,7 @@ type serviceBySlugStore interface {
 func loadService(w http.ResponseWriter, r *http.Request, store serviceBySlugStore) (transit.UserService, bool) {
 	svc, found, err := store.GetUserServiceBySlug(r.Context(), r.PathValue("slug"))
 	if err != nil {
-		writeInternalError(w, "loading service", err)
+		writeInternalError(r.Context(), w, "loading service", err)
 		return transit.UserService{}, false
 	}
 	if !found {
@@ -337,7 +338,7 @@ func validateAndSnapService(w http.ResponseWriter, r *http.Request, store Servic
 	}
 	rt, found, err := store.GetRouteBySlug(r.Context(), routeSlug)
 	if err != nil {
-		writeInternalError(w, "looking up route", err)
+		writeInternalError(r.Context(), w, "looking up route", err)
 		return false
 	}
 	if !found {
@@ -356,7 +357,7 @@ func validateAndSnapService(w http.ResponseWriter, r *http.Request, store Servic
 		// Unusable stored geometry is the server's fault, not the caller's:
 		// they submitted a valid service against a route we cannot project on.
 		if errors.Is(err, transit.ErrRouteGeometry) {
-			writeInternalError(w, "snapping stops", err)
+			writeInternalError(r.Context(), w, "snapping stops", err)
 			return false
 		}
 		var fault *transit.StopPlacementFault
@@ -402,7 +403,12 @@ func mintSlug(ctx context.Context, store ServiceStore, name string) (string, err
 
 // writeInternalError logs the underlying cause and returns an opaque 500, so
 // database details never reach the client.
-func writeInternalError(w http.ResponseWriter, op string, err error) {
-	slog.Error("handler: internal error", "op", op, "error", err)
+//
+// It takes ctx (every call site is inside an HTTP handler, so r.Context() is
+// always in scope) so the log line carries the request's trace id — the one
+// most worth correlating when a request fails with a 500.
+func writeInternalError(ctx context.Context, w http.ResponseWriter, op string, err error) {
+	trace, _ := traceid.FromContext(ctx)
+	slog.ErrorContext(ctx, "handler: internal error", "op", op, "error", err, "trace_id", trace)
 	writeError(w, http.StatusInternalServerError, "internal error")
 }
