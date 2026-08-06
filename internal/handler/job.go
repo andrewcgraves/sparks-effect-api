@@ -47,7 +47,7 @@ func CompileScenario(store CompileStore) http.HandlerFunc {
 		slug := r.PathValue("slug")
 		sc, found, err := store.GetScenarioBySlug(r.Context(), slug)
 		if err != nil {
-			writeInternalError(w, "looking up scenario", err)
+			writeInternalError(r.Context(), w, "looking up scenario", err)
 			return
 		}
 		if !found {
@@ -101,7 +101,7 @@ func JobStatus(store CompileStore) http.HandlerFunc {
 		id := r.PathValue("id")
 		job, found, err := store.GetJobByID(r.Context(), id)
 		if err != nil {
-			writeInternalError(w, "looking up job", err)
+			writeInternalError(r.Context(), w, "looking up job", err)
 			return
 		}
 		if !found || (!user.IsAdmin && (job.OwnerID == nil || *job.OwnerID != user.ID)) {
@@ -146,7 +146,7 @@ type SeededGraphReader interface {
 func latestSeededCompile(w http.ResponseWriter, r *http.Request, store SeededGraphReader, slug string) (transit.Job, bool) {
 	job, found, err := store.GetLatestSucceededJob(r.Context(), slug, transit.JobKindCompileScenario)
 	if err != nil {
-		writeInternalError(w, "looking up compiled graph", err)
+		writeInternalError(r.Context(), w, "looking up compiled graph", err)
 		return transit.Job{}, false
 	}
 	if !found || job.Result == nil {

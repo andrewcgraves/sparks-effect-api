@@ -169,7 +169,7 @@ func (t ownedScenario) members(ctx context.Context) ([]string, []transit.UserSer
 func loadCompiledGraph(w http.ResponseWriter, r *http.Request, target ownedTarget) (transit.Job, bool) {
 	job, found, err := target.latestGraph(r.Context())
 	if err != nil {
-		writeInternalError(w, "looking up compiled graph", err)
+		writeInternalError(r.Context(), w, "looking up compiled graph", err)
 		return transit.Job{}, false
 	}
 	if !found || job.Result == nil {

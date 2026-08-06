@@ -112,12 +112,12 @@ func authoredTargetGraph(w http.ResponseWriter, r *http.Request, store routeStor
 
 	_, members, err := owned.members(r.Context())
 	if err != nil {
-		writeInternalError(w, "loading member services", err)
+		writeInternalError(r.Context(), w, "loading member services", err)
 		return
 	}
 	routes, err := routesByIDs(r.Context(), store, serviceRouteIDs(members))
 	if err != nil {
-		writeInternalError(w, "loading routes", err)
+		writeInternalError(r.Context(), w, "loading routes", err)
 		return
 	}
 
@@ -183,14 +183,14 @@ func routesByIDs(ctx context.Context, store routeStore, ids []string) ([]transit
 func createCompileJob(w http.ResponseWriter, r *http.Request, store CompileStore, job transit.Job) (transit.Job, bool) {
 	id, err := ids.NewUUID()
 	if err != nil {
-		writeInternalError(w, "generating job id", err)
+		writeInternalError(r.Context(), w, "generating job id", err)
 		return transit.Job{}, false
 	}
 	job.ID = id
 	job.Status = transit.JobStatusQueued
 
 	if err := store.CreateJob(r.Context(), job); err != nil {
-		writeInternalError(w, "creating job", err)
+		writeInternalError(r.Context(), w, "creating job", err)
 		return transit.Job{}, false
 	}
 	return job, true

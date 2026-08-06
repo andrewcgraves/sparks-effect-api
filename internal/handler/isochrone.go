@@ -90,7 +90,7 @@ func Isochrone(store SeededGraphStore, publisher routing.Publisher, log *slog.Lo
 // second is worth retrying.
 func loadSeededCompile(w http.ResponseWriter, r *http.Request, store SeededGraphStore, slug string) (transit.Job, bool) {
 	if _, found, err := store.GetScenarioBySlug(r.Context(), slug); err != nil {
-		writeInternalError(w, "looking up scenario", err)
+		writeInternalError(r.Context(), w, "looking up scenario", err)
 		return transit.Job{}, false
 	} else if !found {
 		writeError(w, http.StatusNotFound, "scenario not found")
