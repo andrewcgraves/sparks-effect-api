@@ -3,6 +3,7 @@ package transit
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/ids"
 )
@@ -108,6 +109,7 @@ func CompileSeededIfNeeded(ctx context.Context, store SeededCompileStore) (int, 
 			return compiled, fmt.Errorf("transit: checking compiled graph for %q: %w", sc.Slug, err)
 		}
 		if found {
+			slog.Debug("transit: scenario already compiled, skipping", "scenario_slug", sc.Slug)
 			continue
 		}
 		if err := compileAndRecord(ctx, store, sc); err != nil {

@@ -2,7 +2,7 @@ package server
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -10,8 +10,8 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
-	"github.com/andrewcgraves/sparks-effect-api/internal/logger"
 	"github.com/andrewcgraves/sparks-effect-api/internal/routing"
+	"github.com/andrewcgraves/sparks-effect-api/internal/traceid"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
@@ -50,7 +50,7 @@ type AuthDeps interface {
 // from "no such endpoint". The isochrone routes need both: since SPA-182 they
 // resolve a compiled graph out of Postgres and hand it to the routing worker
 // over the queue, computing nothing themselves.
-func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routing.Publisher, lg *logger.Logger) *http.Server {
+func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routing.Publisher, lg *slog.Logger) *http.Server {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", handler.Health)
@@ -76,8 +76,11 @@ func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routi
 	h := cors(mux, cfg.AllowLocalhostCORS)
 
 	return &http.Server{
-		Addr:              ":" + cfg.Port,
-		Handler:           logRequests(h),
+		Addr: ":" + cfg.Port,
+		// traceid.Middleware runs outermost: logRequests reads the trace id it
+		// attaches, and every handler downstream that enqueues routing work
+		// forwards the same id to the worker (see handler.enqueueIsochrone).
+		Handler:           traceid.Middleware(logRequests(lg, h)),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 }
@@ -123,7 +126,7 @@ func registerRouteRoutes(mux *http.ServeMux, deps AuthDeps) {
 // The routing job poll is public in the same sense the seeded isochrone is:
 // registered without a gate, but wrapped in auth.OptionalAuth so an owned job
 // can still recognise its owner. See handler.RoutingJobStatus for the rule.
-func registerCompileRoutes(mux *http.ServeMux, deps AuthDeps, publisher routing.Publisher, lg *logger.Logger) {
+func registerCompileRoutes(mux *http.ServeMux, deps AuthDeps, publisher routing.Publisher, lg *slog.Logger) {
 	if deps == nil {
 		mux.HandleFunc("GET /api/scenarios/{slug}/graph", noDatabase("compiled graph storage is unavailable"))
 		mux.HandleFunc("POST /api/isochrone", noDatabase("compiled graph storage is unavailable"))
@@ -166,7 +169,7 @@ func requirePublisher(publisher routing.Publisher, h http.HandlerFunc) http.Hand
 // With no database configured there is nothing to authenticate against, so
 // every route answers 503 rather than 404 — a client can tell "not deployed
 // with auth" from "no such endpoint".
-func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, publisher routing.Publisher, lg *logger.Logger) {
+func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, publisher routing.Publisher, lg *slog.Logger) {
 	if deps == nil {
 		for _, pattern := range []string{
 			"/api/auth/login", "/api/auth/logout", "/api/auth/me",
@@ -256,21 +259,48 @@ func noDatabase(what string) http.HandlerFunc {
 // name the database itself, which stopped being true once a second dependency
 // could be the one missing. Most callers go through noDatabase above.
 func serviceUnavailable(msg string) http.HandlerFunc {
-	return func(w http.ResponseWriter, _ *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
 		body := `{"error":"` + msg + `"}` + "\n"
 		if _, err := w.Write([]byte(body)); err != nil {
-			log.Printf("server: failed to write response: %v", err)
+			slog.ErrorContext(r.Context(), "server: failed to write response", "error", err)
 		}
 	}
 }
 
-func logRequests(next http.Handler) http.Handler {
+// statusRecorder captures the status code a handler answers with, so
+// logRequests can log it: http.ResponseWriter has no getter of its own, and
+// an access log that cannot say whether a request succeeded is not worth
+// having.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (s *statusRecorder) WriteHeader(status int) {
+	s.status = status
+	s.ResponseWriter.WriteHeader(status)
+}
+
+// logRequests logs one structured line per request — method, path, status,
+// duration, and the request's trace id — after it completes. It must sit
+// inside traceid.Middleware so the trace id is already on the context by the
+// time it reads it.
+func logRequests(lg *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		start := time.Now()
-		next.ServeHTTP(w, r)
-		log.Printf("%s %s %s", r.Method, r.URL.Path, time.Since(start))
+		next.ServeHTTP(rec, r)
+
+		trace, _ := traceid.FromContext(r.Context())
+		lg.Info("request",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", rec.status,
+			"duration_ms", time.Since(start).Milliseconds(),
+			"trace_id", trace,
+		)
 	})
 }
 

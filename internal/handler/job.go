@@ -2,7 +2,7 @@ package handler
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"net/http"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
@@ -81,7 +81,7 @@ func CompileScenario(store CompileStore) http.HandlerFunc {
 func enqueueCompile(store CompileStore, job transit.Job) {
 	go func() {
 		if err := worker.Compile(context.Background(), store, job); err != nil {
-			log.Printf("worker: compile job %s: %v", job.ID, err)
+			slog.Error("worker: compile job failed", "job_id", job.ID, "error", err)
 		}
 	}()
 }

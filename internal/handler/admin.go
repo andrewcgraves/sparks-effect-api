@@ -3,7 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -50,7 +50,7 @@ func CreateUser(store UserStore) http.HandlerFunc {
 		// users.email is still the authority under a concurrent create; this
 		// only spares the common case an opaque database error.
 		if _, exists, err := store.GetUserByEmail(r.Context(), email); err != nil {
-			log.Printf("handler: checking existing user failed: %v", err)
+			slog.ErrorContext(r.Context(), "handler: checking existing user failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		} else if exists {
@@ -60,14 +60,14 @@ func CreateUser(store UserStore) http.HandlerFunc {
 
 		hash, err := auth.HashPassword(req.Password)
 		if err != nil {
-			log.Printf("handler: hashing password failed: %v", err)
+			slog.ErrorContext(r.Context(), "handler: hashing password failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
 
 		id, err := ids.NewUUID()
 		if err != nil {
-			log.Printf("handler: generating user id failed: %v", err)
+			slog.ErrorContext(r.Context(), "handler: generating user id failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
@@ -79,7 +79,7 @@ func CreateUser(store UserStore) http.HandlerFunc {
 			IsAdmin: req.IsAdmin,
 		}
 		if err := store.CreateUser(r.Context(), user, hash); err != nil {
-			log.Printf("handler: creating user failed: %v", err)
+			slog.ErrorContext(r.Context(), "handler: creating user failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}

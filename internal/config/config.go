@@ -2,9 +2,12 @@
 package config
 
 import (
+	"log/slog"
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/andrewcgraves/sparks-effect-api/internal/logger"
 )
 
 // Config holds the settings needed to run the API server.
@@ -27,9 +30,11 @@ type Config struct {
 	// DBMaxConns caps the pgx connection pool size when > 0. Set DATABASE_MAX_CONNS
 	// to override; 0 leaves pgx's default (derived from CPU count) in place.
 	DBMaxConns int
-	// Debug enables verbose request/response logging. Set LOG_LEVEL=debug or
-	// VERBOSE=true to enable. Never logs secret values.
-	Debug bool
+	// LogLevel gates what the API logs, as one of "debug", "info", "warn", or
+	// "error" (case-insensitive), set via LOG_LEVEL. VERBOSE=true is a back-
+	// compat alias for LOG_LEVEL=debug. Unset or unrecognised falls back to
+	// Info. Never logs secret values regardless of level.
+	LogLevel slog.Level
 	// AllowLocalhostCORS enables CORS headers for localhost origins.
 	// Set ALLOW_LOCALHOST_CORS=true for local SPA testing only. Off by default.
 	AllowLocalhostCORS bool
@@ -72,13 +77,18 @@ func Load() Config {
 		}
 	}
 
+	logLevel := logger.ParseLevel(os.Getenv("LOG_LEVEL"))
+	if os.Getenv("VERBOSE") == "true" {
+		logLevel = slog.LevelDebug
+	}
+
 	return Config{
 		Port:                   getEnv("PORT", "8080"),
 		AMQPURL:                os.Getenv("AMQP_URL"),
 		RoutingQueue:           getEnv("ROUTING_QUEUE", defaultRoutingQueue),
 		DatabaseURL:            os.Getenv("DATABASE_URL"),
 		DBMaxConns:             maxConns,
-		Debug:                  os.Getenv("LOG_LEVEL") == "debug" || os.Getenv("VERBOSE") == "true",
+		LogLevel:               logLevel,
 		AllowLocalhostCORS:     os.Getenv("ALLOW_LOCALHOST_CORS") == "true",
 		SessionTTL:             sessionTTL,
 		BootstrapAdminEmail:    os.Getenv("BOOTSTRAP_ADMIN_EMAIL"),

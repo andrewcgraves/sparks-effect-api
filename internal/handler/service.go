@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -403,6 +403,6 @@ func mintSlug(ctx context.Context, store ServiceStore, name string) (string, err
 // writeInternalError logs the underlying cause and returns an opaque 500, so
 // database details never reach the client.
 func writeInternalError(w http.ResponseWriter, op string, err error) {
-	log.Printf("handler: %s: %v", op, err)
+	slog.Error("handler: internal error", "op", op, "error", err)
 	writeError(w, http.StatusInternalServerError, "internal error")
 }

@@ -2,10 +2,10 @@ package handler
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
-	"github.com/andrewcgraves/sparks-effect-api/internal/logger"
 	"github.com/andrewcgraves/sparks-effect-api/internal/routing"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
@@ -87,7 +87,7 @@ type ServiceIsochroneStore interface {
 // scenario's current membership; see transit.GraphStale for what "stale" means
 // and why. Since SPA-182 it answers 202 with a routing job rather than a
 // computed result — the seeded /api/isochrone does the same.
-func UserScenarioIsochrone(store ScenarioIsochroneStore, publisher routing.Publisher, log *logger.Logger) http.HandlerFunc {
+func UserScenarioIsochrone(store ScenarioIsochroneStore, publisher routing.Publisher, log *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		authoredTargetIsochrone(w, r, scenarioTarget{store}, store, publisher, log)
 	}
@@ -108,7 +108,7 @@ func UserScenarioIsochrone(store ScenarioIsochroneStore, publisher routing.Publi
 // In practice that reduces to the timestamp arm: a service is always its own
 // sole member, so it can only go stale by being edited — less often than a
 // scenario, which is also stale on a membership change or any member's edit.
-func UserServiceIsochrone(store ServiceIsochroneStore, publisher routing.Publisher, log *logger.Logger) http.HandlerFunc {
+func UserServiceIsochrone(store ServiceIsochroneStore, publisher routing.Publisher, log *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		authoredTargetIsochrone(w, r, serviceTarget{store}, store, publisher, log)
 	}
@@ -122,7 +122,7 @@ func UserServiceIsochrone(store ServiceIsochroneStore, publisher routing.Publish
 // current — a stale target must never leave a routing job behind for a worker
 // to compute over a graph the owner has already superseded.
 func authoredTargetIsochrone(w http.ResponseWriter, r *http.Request, target authoredTarget,
-	routingStore RoutingStore, publisher routing.Publisher, log *logger.Logger) {
+	routingStore RoutingStore, publisher routing.Publisher, log *slog.Logger) {
 	req, ok := validateIsochroneRequest(w, r)
 	if !ok {
 		return
@@ -159,8 +159,8 @@ func authoredTargetIsochrone(w http.ResponseWriter, r *http.Request, target auth
 		return
 	}
 
-	log.Debugf("enqueueing %s isochrone: slug=%s lat=%.6f lng=%.6f budget_mins=%d mode=%s",
-		noun, owned.slug(), req.Lat, req.Lng, req.BudgetMins, req.Mode)
+	log.Debug("enqueueing isochrone", "target", noun, "slug", owned.slug(),
+		"lat", req.Lat, "lng", req.Lng, "budget_mins", req.BudgetMins, "mode", req.Mode)
 
 	enqueueIsochrone(w, r, routingStore, publisher, transit.RoutingJob{
 		CompileJobID: job.ID,

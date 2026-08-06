@@ -54,9 +54,18 @@ type Message struct {
 	Lng          float64               `json:"lng"`
 	BudgetMins   int                   `json:"budget_mins"`
 	Mode         transit.TravelMode    `json:"mode"`
+	// TraceID is the trace the request that created this job carries (see
+	// internal/traceid) — a caller-supplied id, or one the API minted when it
+	// received none. The worker logs it alongside its own output, so one
+	// isochrone's logs can be followed across both services rather than
+	// stopping at the queue. Added as a plain field a worker built before it
+	// existed can simply ignore, so it does not require a SchemaVersion bump.
+	TraceID string `json:"trace_id"`
 }
 
-// MessageFor builds the message for a routing job over the graph it names.
+// MessageFor builds the message for a routing job over the graph it names,
+// carrying traceID (see internal/traceid) so the worker can log under the
+// same trace as the request that created the job.
 //
 // It lives here, beside the contract, rather than in the handler that calls it:
 // the job and the message carry the same six request fields, and copying them
@@ -66,7 +75,7 @@ type Message struct {
 // graph is passed separately because a RoutingJob records only the compile job
 // that identifies the graph, never the graph itself — the bytes are resolved
 // once, at the point the job is created, and travel no further.
-func MessageFor(job transit.RoutingJob, graph *transit.TransitGraph) Message {
+func MessageFor(job transit.RoutingJob, graph *transit.TransitGraph, traceID string) Message {
 	return Message{
 		SchemaVersion: SchemaVersion,
 		RoutingJobID:  job.ID,
@@ -76,6 +85,7 @@ func MessageFor(job transit.RoutingJob, graph *transit.TransitGraph) Message {
 		Lng:           job.Lng,
 		BudgetMins:    job.BudgetMins,
 		Mode:          job.Mode,
+		TraceID:       traceID,
 	}
 }
 

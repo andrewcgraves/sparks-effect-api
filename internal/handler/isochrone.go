@@ -3,9 +3,9 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 
-	"github.com/andrewcgraves/sparks-effect-api/internal/logger"
 	"github.com/andrewcgraves/sparks-effect-api/internal/routing"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
@@ -47,7 +47,7 @@ type isochroneRequest struct {
 // The routing job it mints has no owner, because this endpoint is public and
 // there is no identity to record. See RoutingJobStatus for what that means for
 // who may poll it.
-func Isochrone(store SeededGraphStore, publisher routing.Publisher, log *logger.Logger) http.HandlerFunc {
+func Isochrone(store SeededGraphStore, publisher routing.Publisher, log *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req isochroneRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -55,8 +55,8 @@ func Isochrone(store SeededGraphStore, publisher routing.Publisher, log *logger.
 			return
 		}
 
-		log.Debugf("isochrone request: lat=%.6f lng=%.6f budget_mins=%d mode=%s scenario=%s",
-			req.Lat, req.Lng, req.BudgetMins, req.Mode, req.ScenarioSlug)
+		log.Debug("isochrone request", "lat", req.Lat, "lng", req.Lng,
+			"budget_mins", req.BudgetMins, "mode", req.Mode, "scenario_slug", req.ScenarioSlug)
 
 		if !validateIsochroneParams(w, req.BudgetMins, req.Mode) {
 			return
