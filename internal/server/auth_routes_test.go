@@ -145,6 +145,12 @@ func (s *stubAuthDeps) FailRoutingJob(context.Context, string, string) error    
 func (s *stubAuthDeps) GetRoutingJobByID(context.Context, string) (transit.RoutingJob, bool, error) {
 	return transit.RoutingJob{}, false, nil
 }
+func (s *stubAuthDeps) InsertAnalyticsEvents(context.Context, []transit.AnalyticsEventRecord) error {
+	return nil
+}
+func (s *stubAuthDeps) AnalyticsSummary(context.Context, time.Time, time.Time) (transit.AnalyticsSummary, error) {
+	return transit.AnalyticsSummary{}, nil
+}
 
 const (
 	adminToken = "admin-token"
@@ -242,6 +248,46 @@ func TestAdminRoutesRejectNonAdmins(t *testing.T) {
 				t.Errorf("admin was blocked from an admin route: status %d", rec.Code)
 			}
 		})
+	}
+}
+
+// The admin analytics read sits behind the same gate as the rest of the
+// admin block (SPA-218), so it belongs in the same table as the other two
+// rather than a bespoke test.
+func TestAdminAnalyticsSummaryRejectsNonAdmins(t *testing.T) {
+	h := newTestServer(t, newStubDeps())
+
+	rec := request(t, h, http.MethodGet, "/api/admin/analytics/summary", userToken)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 for a non-admin", rec.Code)
+	}
+
+	rec = request(t, h, http.MethodGet, "/api/admin/analytics/summary", adminToken)
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 for an admin; body %s", rec.Code, rec.Body.String())
+	}
+
+	rec = request(t, h, http.MethodGet, "/api/admin/analytics/summary", "")
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401 for an anonymous caller", rec.Code)
+	}
+}
+
+// The ingestion endpoint is public by design (SPA-218) — there is no visitor
+// identity to authenticate — so it must stay reachable with no token at all,
+// unlike everything in TestProtectedRoutesRejectAnonymousCallers.
+func TestAnalyticsIngestEndpointStaysOpenWithoutAToken(t *testing.T) {
+	h := newTestServer(t, newStubDeps())
+
+	req := httptest.NewRequest(http.MethodPost, "/api/analytics/events",
+		strings.NewReader(`{"events":[{"type":"page_view","path":"/"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (a real browser)")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Errorf("status = %d, want 204 for an anonymous ingestion request; body %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -410,6 +456,8 @@ func TestAuthRoutesReportUnavailableWithoutADatabase(t *testing.T) {
 		// Asserted rather than assumed, since the failure mode is a silent 404.
 		{http.MethodGet, "/api/services/some-slug/graph"},
 		{http.MethodPost, "/api/services/some-slug/isochrone"},
+		{http.MethodPost, "/api/analytics/events"},
+		{http.MethodGet, "/api/admin/analytics/summary"},
 	} {
 		t.Run(p.method+" "+p.path, func(t *testing.T) {
 			rec := request(t, h, p.method, p.path, adminToken)

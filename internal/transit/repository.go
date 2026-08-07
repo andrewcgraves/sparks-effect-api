@@ -1,6 +1,9 @@
 package transit
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // Repository is the storage-agnostic seam for reading and writing transit domain
 // data. It exists for testability, not engine-swapping: the concrete
@@ -141,4 +144,13 @@ type Repository interface {
 	CreateRoutingJob(ctx context.Context, j *RoutingJob) error
 	GetRoutingJobByID(ctx context.Context, id string) (RoutingJob, bool, error)
 	FailRoutingJob(ctx context.Context, id, errMsg string) error
+
+	// AnalyticsEvents backs the public ingestion endpoint and the admin
+	// aggregate reads (SPA-218). InsertAnalyticsEvents is a no-op success on an
+	// empty slice, since a batch left with nothing recognised after filtering
+	// is not an error.
+	InsertAnalyticsEvents(ctx context.Context, events []AnalyticsEventRecord) error
+	// AnalyticsSummary aggregates events in [since, until) into per-type
+	// totals, a daily time series, and the most-viewed pages.
+	AnalyticsSummary(ctx context.Context, since, until time.Time) (AnalyticsSummary, error)
 }

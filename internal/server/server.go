@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/time/rate"
+
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
@@ -37,6 +39,10 @@ type AuthDeps interface {
 	handler.ScenarioStore
 	// RoutingStore backs the isochrone enqueue surface and the routing job poll.
 	handler.RoutingStore
+	// AnalyticsEventStore backs the public event ingestion endpoint.
+	handler.AnalyticsEventStore
+	// AnalyticsReadStore backs the admin aggregate analytics reads.
+	handler.AnalyticsReadStore
 	// GetSessionUser backs the middleware's auth.SessionLookup.
 	GetSessionUser(ctx context.Context, tokenHash string) (transit.User, bool, error)
 }
@@ -71,6 +77,7 @@ func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routi
 
 	registerRouteRoutes(mux, deps)
 	registerCompileRoutes(mux, deps, publisher, lg)
+	registerAnalyticsRoutes(mux, deps)
 	registerAuthRoutes(mux, cfg, deps, publisher, lg)
 
 	h := cors(mux, cfg.AllowLocalhostCORS)
@@ -151,6 +158,38 @@ func requirePublisher(publisher routing.Publisher, h http.HandlerFunc) http.Hand
 		return serviceUnavailable("the routing queue is unavailable: no broker configured")
 	}
 	return h
+}
+
+// analyticsIngestRateLimit and analyticsIngestRateBurst bound how often one
+// IP may POST a batch. The website's sink flushes on a short interval or a
+// small queue length (see sparks-effect-website's src/analytics), so a real
+// browser tab never comes close to this; it exists for the case curl or a
+// script hits the endpoint directly (SPA-197/SPA-198).
+const (
+	analyticsIngestRateLimit = rate.Limit(1.0 / 3.0) // ~20 requests/minute
+	analyticsIngestRateBurst = 10
+	// analyticsIngestIdleTTL is comfortably past the time a bucket at
+	// analyticsIngestRateLimit takes to refill from empty, so eviction never
+	// discards a bucket that was still throttling anything.
+	analyticsIngestIdleTTL = 10 * time.Minute
+)
+
+// registerAnalyticsRoutes wires the public event ingestion endpoint (SPA-218).
+// It is public like /api/isochrone — anonymous by necessity, since there is
+// no visitor identity to authenticate — but unlike the isochrone endpoints it
+// carries its own rate limit rather than relying on a shared one, since it is
+// the one endpoint on this server built to be hit by every page load.
+//
+// Postgres-backed like every other resource here: with no database configured
+// it answers 503 rather than silently discarding events nothing will ever
+// read back.
+func registerAnalyticsRoutes(mux *http.ServeMux, deps AuthDeps) {
+	if deps == nil {
+		mux.HandleFunc("POST /api/analytics/events", noDatabase("analytics storage is unavailable"))
+		return
+	}
+	limiter := newIPRateLimiter(analyticsIngestRateLimit, analyticsIngestRateBurst, analyticsIngestIdleTTL)
+	mux.HandleFunc("POST /api/analytics/events", rateLimit(limiter, handler.IngestAnalyticsEvents(deps)))
 }
 
 // registerAuthRoutes wires the invite-only auth surface.
@@ -242,6 +281,10 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 	// Admin-only.
 	mux.Handle("POST /api/admin/users", adminOnly(handler.CreateUser(deps)))
 	mux.Handle("POST /api/admin/routes", adminOnly(handler.CreateRoute(deps)))
+	// Aggregate reads over the events POST /api/analytics/events collects
+	// (SPA-218). Admin-only like the rest of this block, and already covered
+	// by the /api/admin/ prefix entry in the database-less 503 list above.
+	mux.Handle("GET /api/admin/analytics/summary", adminOnly(handler.AnalyticsSummary(deps)))
 }
 
 // noDatabase answers 503 for a route whose backing store is Postgres when no
@@ -310,22 +353,56 @@ var allowedOrigins = map[string]bool{
 	"https://sparks-effect-website.vercel.app": true,
 }
 
+// cors enforces the origin allow-list for browser requests and sets the
+// headers a browser needs to read the response.
+//
+// A disallowed *but present* Origin is rejected outright (SPA-198) rather
+// than merely left off the response headers, which is what this used to do:
+// omitting the headers stops a browser reading the response, but by then the
+// handler has already run and paid for the work. Rejecting up front means a
+// page on another origin cannot spend this server's compute through a
+// visitor's browser even once — it can only fail fast.
+//
+// An absent Origin passes through unchanged, exactly as before: that is
+// every non-browser caller (curl, a health check, server-to-server calls),
+// none of which send it, and none of which this check was ever able to
+// stop — SPA-198 found the same attacker can simply omit the header to
+// bypass an origin check entirely, so rejecting a missing Origin would cost
+// legitimate non-browser use without denying anything to the caller it is
+// aimed at.
 func cors(next http.Handler, allowLocalhost bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		if allowedOrigins[origin] || (allowLocalhost && isLocalhostOrigin(origin)) {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Trace-Id")
-			w.Header().Add("Vary", "Origin")
+		if origin == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
 
-			if r.Method == http.MethodOptions {
-				w.WriteHeader(http.StatusNoContent)
-				return
-			}
+		allowed := allowedOrigins[origin] || (allowLocalhost && isLocalhostOrigin(origin))
+		if !allowed {
+			forbiddenOrigin(w)
+			return
+		}
+
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Trace-Id")
+		w.Header().Add("Vary", "Origin")
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// forbiddenOrigin answers 403 for a browser request whose Origin is not on
+// the allow-list.
+func forbiddenOrigin(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusForbidden)
+	_, _ = w.Write([]byte(`{"error":"origin not allowed"}` + "\n"))
 }
 
 func isLocalhostOrigin(origin string) bool {

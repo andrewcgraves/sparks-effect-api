@@ -141,3 +141,67 @@ func TestCORS_flagOff_localhostOrigin(t *testing.T) {
 		t.Errorf("Access-Control-Allow-Origin: want empty when flag off, got %q", got)
 	}
 }
+
+// TestCORS_disallowedOrigin_rejected covers the SPA-198 fix: a browser
+// request from an origin that is not on the allow-list must be refused
+// outright, not merely served without CORS headers (which is what this
+// server used to do).
+func TestCORS_disallowedOrigin_rejected(t *testing.T) {
+	store, err := transit.NewStore()
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	srv := New(config.Config{Port: "8080"}, store, nil, &routing.FakePublisher{}, logger.Discard())
+
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req.Header.Set("Origin", "https://evil.example.com")
+	rec := httptest.NewRecorder()
+	srv.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("status: want 403 for a disallowed origin, got %d; body %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestCORS_noOriginHeader_passesThrough covers every non-browser caller
+// (curl, health checks, server-to-server calls): none of them send an
+// Origin header, and the fix must not start rejecting them — SPA-198 found
+// that an Origin check cannot stop a deliberate attacker anyway, since
+// omitting the header defeats it trivially, so there is nothing gained by
+// also breaking legitimate callers that never sent one.
+func TestCORS_noOriginHeader_passesThrough(t *testing.T) {
+	store, err := transit.NewStore()
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	srv := New(config.Config{Port: "8080"}, store, nil, &routing.FakePublisher{}, logger.Discard())
+
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("status: want 200 with no Origin header, got %d", rec.Code)
+	}
+}
+
+// TestCORS_disallowedOrigin_preflightRejected covers the OPTIONS preflight
+// path specifically, since it used to fall through to next.ServeHTTP just
+// like any other method.
+func TestCORS_disallowedOrigin_preflightRejected(t *testing.T) {
+	store, err := transit.NewStore()
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	srv := New(config.Config{Port: "8080"}, store, nil, &routing.FakePublisher{}, logger.Discard())
+
+	req := httptest.NewRequest(http.MethodOptions, "/api/analytics/events", nil)
+	req.Header.Set("Origin", "https://evil.example.com")
+	req.Header.Set("Access-Control-Request-Method", "POST")
+	rec := httptest.NewRecorder()
+	srv.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("status: want 403, got %d", rec.Code)
+	}
+}
