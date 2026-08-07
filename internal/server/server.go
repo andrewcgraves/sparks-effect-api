@@ -316,7 +316,7 @@ func cors(next http.Handler, allowLocalhost bool) http.Handler {
 		if allowedOrigins[origin] || (allowLocalhost && isLocalhostOrigin(origin)) {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Trace-Id")
 			w.Header().Add("Vary", "Origin")
 
 			if r.Method == http.MethodOptions {
