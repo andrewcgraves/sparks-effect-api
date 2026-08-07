@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
@@ -100,6 +101,26 @@ func TestCORS_productionOrigin_allowedRegardlessOfFlag(t *testing.T) {
 	got := rec.Header().Get("Access-Control-Allow-Origin")
 	if got != "https://sparks-effect-website.vercel.app" {
 		t.Errorf("Access-Control-Allow-Origin: want %q, got %q", "https://sparks-effect-website.vercel.app", got)
+	}
+}
+
+func TestCORS_allowsXTraceIdHeader(t *testing.T) {
+	store, err := transit.NewStore()
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: true}, store, nil, &routing.FakePublisher{}, logger.Discard())
+
+	req := httptest.NewRequest(http.MethodOptions, "/healthz", nil)
+	req.Header.Set("Origin", "http://localhost:5173")
+	req.Header.Set("Access-Control-Request-Method", "GET")
+	req.Header.Set("Access-Control-Request-Headers", "X-Trace-Id")
+	rec := httptest.NewRecorder()
+	srv.Handler.ServeHTTP(rec, req)
+
+	got := rec.Header().Get("Access-Control-Allow-Headers")
+	if !strings.Contains(got, "X-Trace-Id") {
+		t.Errorf("Access-Control-Allow-Headers: want to contain %q, got %q", "X-Trace-Id", got)
 	}
 }
 
