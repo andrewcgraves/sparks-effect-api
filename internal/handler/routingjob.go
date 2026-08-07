@@ -20,6 +20,26 @@ import (
 // while polling the job it never received an id for is not.
 const PublishFailedErrorCode = "publish_failed"
 
+// OriginOutOfRangeErrorCode is the machine-readable code for an isochrone whose
+// origin is too far from every station in the graph for the requested mode and
+// budget to reach any of them. The client's move is to move the pin or raise the
+// budget, not to retry, which is why it is a code rather than a bare 422
+// (SPA-200).
+const OriginOutOfRangeErrorCode = "origin_out_of_range"
+
+// originOutOfRangeDetail is the payload accompanying that code: how far the
+// nearest station actually was, and how far the request could have reached.
+//
+// Both are sent because neither alone lets a client say anything useful. "Too
+// far" is what the code already says; "the nearest station is 40 km away and
+// this budget covers 5 km" is what a person can act on. The slug is there so a
+// client that holds the graph can name or highlight that station.
+type originOutOfRangeDetail struct {
+	NearestStationSlug string  `json:"nearest_station_slug"`
+	NearestStationKm   float64 `json:"nearest_station_km"`
+	MaxReachKm         float64 `json:"max_reach_km"`
+}
+
 // RoutingStore is the slice of the repository the routing job surface needs:
 // recording an isochrone handed to the worker, polling it, and failing one the
 // broker never confirmed.
@@ -45,6 +65,10 @@ type RoutingStore interface {
 // which is detectable and handled below.
 func enqueueIsochrone(w http.ResponseWriter, r *http.Request, store RoutingStore,
 	publisher routing.Publisher, job transit.RoutingJob, graph *transit.TransitGraph) {
+	if !originInRange(w, job, graph) {
+		return
+	}
+
 	id, err := ids.NewUUID()
 	if err != nil {
 		writeInternalError(r.Context(), w, "generating routing job id", err)
@@ -71,6 +95,48 @@ func enqueueIsochrone(w http.ResponseWriter, r *http.Request, store RoutingStore
 
 	slog.Debug("routing job enqueued", "routing_job_id", job.ID, "trace_id", trace)
 	writeJSON(w, http.StatusAccepted, job)
+}
+
+// originInRange refuses an isochrone whose origin no station could be reached
+// from, writing the 422 and reporting false when it does (SPA-200).
+//
+// It runs first, before the id is minted and before anything is written or
+// published, because refusing after any of that would defeat the point: the
+// costs this exists to avoid are the routing job row, a queue message carrying
+// the whole compiled graph inline, and a worker slot the routing server plots
+// one chain at a time from. A far-away origin already produces a lone origin
+// polygon and an empty station list, so nothing that used to be a plot becomes
+// an error here — what used to be a blank map becomes an explanation.
+//
+// It sits in this shared tail rather than in the three handlers so the seeded
+// isochrone and both authored ones are covered by one check. They differ in how
+// they resolve a graph and who may ask for one; by here they have all resolved
+// to the same three things this needs — a point, a budget and a mode — and the
+// graph that answers the question.
+//
+// A graph the check cannot read is enqueued unchanged. See
+// transit.CheckOriginReach for why that is the only safe reading of "I cannot
+// see any stations".
+func originInRange(w http.ResponseWriter, job transit.RoutingJob, graph *transit.TransitGraph) bool {
+	reach, ok := transit.CheckOriginReach(graph, job.Lat, job.Lng, job.Mode, job.BudgetMins)
+	if !ok || reach.InRange {
+		return true
+	}
+
+	slog.Debug("isochrone origin out of range",
+		"lat", job.Lat, "lng", job.Lng, "mode", job.Mode, "budget_mins", job.BudgetMins,
+		"nearest_station_slug", reach.NearestSlug,
+		"nearest_station_km", reach.NearestKm,
+		"max_reach_km", reach.MaxReachKm)
+
+	writeErrorDetail(w, http.StatusUnprocessableEntity, OriginOutOfRangeErrorCode,
+		"the origin is too far from any station to reach one within this travel time",
+		originOutOfRangeDetail{
+			NearestStationSlug: reach.NearestSlug,
+			NearestStationKm:   reach.NearestKm,
+			MaxReachKm:         reach.MaxReachKm,
+		})
+	return false
 }
 
 // failUnpublishedJob marks a job whose message never reached the broker, so it
