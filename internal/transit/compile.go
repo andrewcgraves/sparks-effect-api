@@ -5,10 +5,19 @@ import (
 	"sort"
 )
 
+// Edge is one directed hop along a service.
+//
+// Seconds is the whole cost of taking it: the vehicle in motion plus the dwell
+// it serves on arrival at ToSlug. DwellS reports that dwell separately, so a
+// consumer that wants to say how long the vehicle stands at the destination can
+// recover it instead of watching it disappear into the total. It is additive and
+// omitted when zero — a graph compiled before this field existed decodes with
+// DwellS zero, which is indistinguishable on the wire from a hop with no dwell.
 type Edge struct {
 	FromSlug string `json:"from_slug"`
 	ToSlug   string `json:"to_slug"`
 	Seconds  int    `json:"seconds"`
+	DwellS   int    `json:"dwell_s,omitempty"`
 }
 
 type ServiceGraph struct {
@@ -133,11 +142,11 @@ func Compile(
 			if pathErr != nil {
 				return nil, fmt.Errorf("compile: service %q: %w", svc.ID, pathErr)
 			}
-			fwd := runSecs + pathDwellSecs(path, stationsBySlug, stopByStationID, vt)
-			rev := runSecs + pathDwellSecs(reversePath(path), stationsBySlug, stopByStationID, vt)
+			fwdDwell := pathDwellSecs(path, stationsBySlug, stopByStationID, vt)
+			revDwell := pathDwellSecs(reversePath(path), stationsBySlug, stopByStationID, vt)
 			sg.Edges = append(sg.Edges,
-				Edge{FromSlug: fromSlug, ToSlug: toSlug, Seconds: fwd},
-				Edge{FromSlug: toSlug, ToSlug: fromSlug, Seconds: rev},
+				Edge{FromSlug: fromSlug, ToSlug: toSlug, Seconds: runSecs + fwdDwell, DwellS: fwdDwell},
+				Edge{FromSlug: toSlug, ToSlug: fromSlug, Seconds: runSecs + revDwell, DwellS: revDwell},
 			)
 		}
 		graph.Services = append(graph.Services, sg)
