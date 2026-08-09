@@ -22,16 +22,19 @@ const (
 	routingJobID        = "00000000-0000-400b-8002-000000000001"
 )
 
-// rewindRoutingJobsMigration unwinds 00014 and is the current tail of the
-// rewind chain that starts in snapmigration_test.go.
+// rewindRoutingJobsMigration unwinds 00014.
 //
-// Every earlier rewind ends up here. goose refuses to re-apply a migration
-// older than the highest version already recorded, so a test that puts the
-// database back before 00007 must also unrecord everything after it — and
-// unrecording a migration without undoing what it did leaves the next Migrate
-// trying to CREATE TABLE over tables that already exist.
+// Every earlier rewind reaches this by way of
+// rewindLasVegasCoordinateMigration, which unwinds 00015 — the current tail
+// of the chain that starts in snapmigration_test.go — first. goose refuses to
+// re-apply a migration older than the highest version already recorded, so a
+// test that puts the database back before 00007 must also unrecord
+// everything after it — and unrecording a migration without undoing what it
+// did leaves the next Migrate trying to CREATE TABLE over tables that already
+// exist.
 func rewindRoutingJobsMigration(t *testing.T, url string) {
 	t.Helper()
+	rewindLasVegasCoordinateMigration(t, url)
 	exec(t, url,
 		`DROP TABLE IF EXISTS isochrone_cache`,
 		`DROP TABLE IF EXISTS routing_jobs`,

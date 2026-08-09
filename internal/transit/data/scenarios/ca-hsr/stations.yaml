@@ -137,7 +137,9 @@
     type: Point
     coordinates: [-117.878, 33.803]
 
-# Brightline West spur terminus.
+# Brightline West spur terminus. Enterprise, NV — the FRA-cleared south Strip
+# site between Blue Diamond Rd and Warm Springs Rd — not the Las Vegas
+# city-centroid geocode this used to carry, which was 13.8 km off (SPA-222).
 - id: "00000000-0000-4005-8001-00000000000f"
   scenario_id: "00000000-0000-4001-8001-000000000001"
   slug: "las-vegas"
@@ -145,4 +147,4 @@
   platform_height: "high"
   location:
     type: Point
-    coordinates: [-115.136, 36.174]
+    coordinates: [-115.1778, 36.0545]
