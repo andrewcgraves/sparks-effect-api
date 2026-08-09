@@ -195,8 +195,67 @@ func RoutingJobStatus(store RoutingStore) http.HandlerFunc {
 			return
 		}
 
+		job = failIfStale(r.Context(), store, job)
+
 		writeJSON(w, http.StatusOK, job)
 	}
+}
+
+// RoutingJobStaleAfter bounds how long a routing job may sit queued or running
+// before this endpoint gives up on the worker ever answering it and fails the
+// job itself (SPA-230).
+//
+// It exists for the one outage enqueueIsochrone's own publish-failure path
+// cannot see: the broker accepted the message, so the publish never errors,
+// but no worker is running to consume it — the isochrone service is down. Left
+// alone, that job sits `queued` forever and the frontend's own poll deadline
+// (ISOCHRONE_DEADLINE_MS, 120s) is the only thing that ever tells the caller,
+// which is the client giving up rather than an answer from the API.
+//
+// Set below that 120s deadline so a client polling this endpoint sees the
+// failure, and the reason for it, before its own timeout fires instead. A
+// live worker does not need this long: MaxConcurrency and the consumer's
+// bounded redelivery resolve a merely struggling one well under this bound —
+// what is still queued or running at the deadline has no worker behind it at
+// all.
+const RoutingJobStaleAfter = 90 * time.Second
+
+// staleRoutingJobMessage is what a caller sees when RoutingJobStaleAfter
+// fires. Distinct from PublishFailedErrorCode's wording, since a caller has no
+// other way to tell "the broker bounced this" apart from "nobody is
+// listening" — and it is written for the end user, since this is the text
+// that reaches the isochrone form's error banner unchanged.
+const staleRoutingJobMessage = "The isochrone service isn't responding right now. Please try again in a few minutes."
+
+// failIfStale marks job failed, in the store and in the value returned, once
+// it has sat queued or running longer than RoutingJobStaleAfter. Any other
+// status is returned unchanged.
+//
+// It runs on every poll rather than on a schedule: nothing in this process
+// currently runs periodic background work, and a job only needs to be caught
+// the next time someone is actually waiting on it. A failure to record the
+// write is logged and the job returned as still queued/running — the next
+// poll gets another chance, and no caller is told something that was not
+// persisted.
+func failIfStale(ctx context.Context, store RoutingStore, job transit.RoutingJob) transit.RoutingJob {
+	if job.Status != transit.JobStatusQueued && job.Status != transit.JobStatusRunning {
+		return job
+	}
+	if time.Since(job.CreatedAt) <= RoutingJobStaleAfter {
+		return job
+	}
+
+	if err := store.FailRoutingJob(ctx, job.ID, staleRoutingJobMessage); err != nil {
+		slog.ErrorContext(ctx, "routing: could not mark stale routing job failed",
+			"routing_job_id", job.ID, "error", err)
+		return job
+	}
+
+	slog.WarnContext(ctx, "routing: job stale; marked failed",
+		"routing_job_id", job.ID, "age", time.Since(job.CreatedAt))
+	job.Status = transit.JobStatusFailed
+	job.Error = staleRoutingJobMessage
+	return job
 }
 
 // mayReadRoutingJob applies the ownership rule above. Split out so the rule is
