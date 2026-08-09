@@ -103,6 +103,55 @@ func TestCompileServicePhysics_twoStopStraightLine(t *testing.T) {
 	}
 }
 
+// The physics compiler reports each edge's destination dwell alongside the
+// total it is already folded into, so a consumer can recover it.
+func TestCompileServicePhysics_edgesReportDwellAlongsideTotal(t *testing.T) {
+	route := Route{
+		ID:   "rt-1",
+		Slug: "rt-1",
+		Geometry: GeoLineString{
+			Type:        "LineString",
+			Coordinates: [][]float64{{0, 0}, {1, 0}},
+		},
+	}
+	stations := []Station{
+		{ID: "st-a", Slug: "a", Location: GeoPoint{Coordinates: []float64{0, 0}}, PlatformHeight: "low"},
+		{ID: "st-b", Slug: "b", Location: GeoPoint{Coordinates: []float64{1, 0}}, PlatformHeight: "high"},
+	}
+	svc := Service{
+		ID:     "svc-1",
+		Active: true,
+		Stops: []ServiceStop{
+			{StationID: "st-a", Sequence: 1},
+			{StationID: "st-b", Sequence: 2},
+		},
+	}
+
+	got, err := compileSeeded(t, route, stations, svc, physicsTestVehicle())
+	if err != nil {
+		t.Fatalf("CompileServicePhysics() error = %v, want nil", err)
+	}
+
+	const motionSecs = 11129
+	wantDwell := map[[2]string]int{
+		{"a", "b"}: 30, // destination b dwells DwellLevelS
+		{"b", "a"}: 60, // destination a dwells DwellStepS
+	}
+	for _, e := range got.Edges {
+		want, ok := wantDwell[[2]string{e.FromSlug, e.ToSlug}]
+		if !ok {
+			continue
+		}
+		if e.DwellS != want {
+			t.Errorf("edge %s -> %s: DwellS = %d, want %d", e.FromSlug, e.ToSlug, e.DwellS, want)
+		}
+		if e.Seconds != motionSecs+want {
+			t.Errorf("edge %s -> %s: Seconds = %d, want dwell still included (%d)",
+				e.FromSlug, e.ToSlug, e.Seconds, motionSecs+want)
+		}
+	}
+}
+
 // TestCompileServicePhysics_feedsDijkstra proves the Edges CompileServicePhysics
 // produces are consumable by the existing TransitGraph/Dijkstra machinery —
 // the acceptance criterion that physics-compiled services "feed the

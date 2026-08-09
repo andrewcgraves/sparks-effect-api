@@ -117,6 +117,48 @@ func TestCompile_edgeSecondsIncludeRunAndDwell(t *testing.T) {
 	}
 }
 
+// Dwell is reported alongside the edge total rather than only folded into it,
+// so a consumer can say how long the vehicle stands at the destination. The
+// total is unchanged and still includes it.
+func TestCompile_edgesReportDwellAlongsideTotal(t *testing.T) {
+	sc := Scenario{ID: "sc-1", Slug: "test"}
+	override := 30
+	stations := platformStations("high", "low", "high")
+	segments := TravelTimes{Segments: []SegmentTime{
+		{FromSlug: "a", ToSlug: "b", RunSeconds: 60},
+		{FromSlug: "b", ToSlug: "c", RunSeconds: 60},
+	}}
+	services := []Service{{
+		ID:            "svc-1",
+		Active:        true,
+		VehicleTypeID: "vt-1",
+		Stops: []ServiceStop{
+			{StationID: "st-a", Sequence: 1},
+			{StationID: "st-b", Sequence: 2},
+			{StationID: "st-c", Sequence: 3, DwellS: &override},
+		},
+	}}
+
+	g, err := Compile(sc, nil, stations, services, []VehicleType{testVehicle()}, segments)
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	byKey := map[string]Edge{}
+	for _, e := range g.Services[0].Edges {
+		byKey[e.FromSlug+"→"+e.ToSlug] = e
+	}
+	// a→b arrives at b, which dwells the step time (platform heights differ).
+	if got := byKey["a→b"]; got.DwellS != 180 || got.Seconds != 60+180 {
+		t.Errorf("a→b: want DwellS 180 and Seconds %d, got DwellS %d and Seconds %d",
+			60+180, got.DwellS, got.Seconds)
+	}
+	// b→c arrives at c, whose stop overrides dwell to 30.
+	if got := byKey["b→c"]; got.DwellS != 30 || got.Seconds != 60+30 {
+		t.Errorf("b→c: want DwellS 30 and Seconds %d, got DwellS %d and Seconds %d",
+			60+30, got.DwellS, got.Seconds)
+	}
+}
+
 func TestCompile_expressSkipsIntermediateDwell(t *testing.T) {
 	sc := Scenario{ID: "sc-1", Slug: "test"}
 	stations := platformStations("high", "high", "high")

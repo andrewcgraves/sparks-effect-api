@@ -85,8 +85,8 @@ func CompileServicePhysics(svc CompilableService) (ServiceGraph, error) {
 		from, to := stopBySlug[span.FromStopID], stopBySlug[span.ToStopID]
 
 		sg.Edges = append(sg.Edges,
-			Edge{FromSlug: from.Slug, ToSlug: to.Slug, Seconds: runSecs + to.DwellS},
-			Edge{FromSlug: to.Slug, ToSlug: from.Slug, Seconds: runSecs + from.DwellS},
+			Edge{FromSlug: from.Slug, ToSlug: to.Slug, Seconds: runSecs + to.DwellS, DwellS: to.DwellS},
+			Edge{FromSlug: to.Slug, ToSlug: from.Slug, Seconds: runSecs + from.DwellS, DwellS: from.DwellS},
 		)
 	}
 	return sg, nil
