@@ -1,7 +1,9 @@
 package transit
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 
@@ -77,9 +79,9 @@ func CompileSeededScenario(ctx context.Context, src SeededCompileSource, sc Scen
 	return *graph, nil
 }
 
-// CompileSeededIfNeeded compiles every seeded scenario that has no succeeded
-// compile job yet, persisting each result as one, and reports how many it
-// compiled.
+// CompileSeededIfNeeded compiles every seeded scenario whose stored graph does
+// not match what its current rows compile to, persisting each result as a
+// succeeded job, and reports how many it compiled.
 //
 // Seeding populates scenarios, routes, stations and services but no graph, and
 // since SPA-181 the public isochrone resolves its transit data through the
@@ -88,10 +90,41 @@ func CompileSeededScenario(ctx context.Context, src SeededCompileSource, sc Scen
 // compile by hand. Running it on every boot is safe because compiling is pure
 // data work: no routing service, no queue, nothing external to be unavailable.
 //
-// It is idempotent by the same rule SeedIfEmpty uses — a scenario that already
-// has a succeeded graph is skipped — so a restart against a populated database
-// does no work. That also covers a database seeded before this existed: it has
-// scenarios but no job, and gains one on the next boot.
+// # Why the check is a comparison and not "does a job exist"
+//
+// It used to skip any scenario that already had a succeeded graph, which made a
+// deployed database's graph permanent: a compiled graph carries the station
+// coordinates the isochrone is centred on (seededNodes), and nothing recompiled
+// a seeded scenario once one existed. SPA-222 corrected the las-vegas
+// coordinate in both the seed and — via migration 00015 — the deployed
+// stations table, and the isochrone kept plotting Las Vegas at the old
+// city-centroid geocode 13.8 km away, because the graph it reads was compiled
+// before the correction. The map pin moved (it is served from the embedded
+// store) and the polygon did not, so the bloom appeared detached from its
+// station.
+//
+// That is a hazard for every seed correction, not just that one — a moved
+// station, a recalibrated run time, a new service — and none of them announce
+// themselves. Comparing what the rows compile to now against what is stored
+// closes the class: whatever changed, the next boot notices and recompiles.
+//
+// # Why this is still idempotent
+//
+// A recompile of unchanged data is byte-identical (both underlying reads are
+// deterministically ordered), so an unchanged scenario compares equal and
+// writes nothing. A restart against a populated, current database therefore
+// still does no work — it merely spends one in-memory compile per scenario
+// proving so.
+//
+// A scenario that has changed gains a *new* succeeded job rather than having
+// its old one rewritten or deleted. Readers take the most recent
+// (latestSucceededJobBySlug), so the new graph takes over with no window in
+// which the scenario has none; routing_jobs and isochrone_cache both reference
+// jobs ON DELETE CASCADE, so deleting the stale job instead would drop
+// in-flight routing jobs that clients are still polling. The new job id also
+// falls outside every isochrone_cache key cut against the old graph, so the
+// worker re-cuts the moved station's polygons without anything having to purge
+// that cache.
 //
 // The job it writes is unowned (see Job.OwnerID). Seeding runs before any
 // account exists, and needing admin credentials to get a public graph is the
@@ -104,15 +137,31 @@ func CompileSeededIfNeeded(ctx context.Context, store SeededCompileStore) (int, 
 
 	compiled := 0
 	for _, sc := range scenarios {
-		_, found, err := store.GetLatestSucceededJob(ctx, sc.Slug, JobKindCompileScenario)
+		job, found, err := store.GetLatestSucceededJob(ctx, sc.Slug, JobKindCompileScenario)
 		if err != nil {
 			return compiled, fmt.Errorf("transit: checking compiled graph for %q: %w", sc.Slug, err)
 		}
-		if found {
-			slog.Debug("transit: scenario already compiled, skipping", "scenario_slug", sc.Slug)
-			continue
+
+		graph, err := CompileSeededScenario(ctx, store, sc)
+		if err != nil {
+			return compiled, err
 		}
-		if err := compileAndRecord(ctx, store, sc); err != nil {
+
+		if found && job.Result != nil {
+			same, err := sameCompiledGraph(*job.Result, graph)
+			if err != nil {
+				return compiled, fmt.Errorf("transit: comparing compiled graph for %q: %w", sc.Slug, err)
+			}
+			if same {
+				slog.Debug("transit: scenario already compiled and current, skipping",
+					"scenario_slug", sc.Slug, "compile_job_id", job.ID)
+				continue
+			}
+			slog.Info("transit: stored graph no longer matches its source data, recompiling",
+				"scenario_slug", sc.Slug, "superseded_compile_job_id", job.ID)
+		}
+
+		if err := recordCompiled(ctx, store, sc, graph); err != nil {
 			return compiled, err
 		}
 		compiled++
@@ -120,21 +169,44 @@ func CompileSeededIfNeeded(ctx context.Context, store SeededCompileStore) (int, 
 	return compiled, nil
 }
 
-// compileAndRecord compiles one scenario and records it as a succeeded job.
+// sameCompiledGraph reports whether a stored graph and a freshly compiled one
+// describe the same thing.
+//
+// Both sides are marshalled and the bytes compared, rather than compared as Go
+// values, because only one of them has been through storage. jsonb holds no
+// distinction between a nil slice and an empty one, so a graph that went to the
+// database and back can differ from the identical graph in memory by exactly
+// that — and a comparison that called such a pair different would recompile
+// every scenario on every boot, forever, with the "recompiled" log line
+// insisting something had changed. Encoding both sides normalises that away:
+// marshalling is what the stored side was produced by, so it is the one form in
+// which the two are comparable.
+func sameCompiledGraph(stored, fresh TransitGraph) (bool, error) {
+	a, err := json.Marshal(stored)
+	if err != nil {
+		return false, fmt.Errorf("marshalling stored graph: %w", err)
+	}
+	b, err := json.Marshal(fresh)
+	if err != nil {
+		return false, fmt.Errorf("marshalling compiled graph: %w", err)
+	}
+	return bytes.Equal(a, b), nil
+}
+
+// recordCompiled records an already-compiled graph as a succeeded job.
 //
 // The job is created first and completed second, mirroring the async path's
 // queued → succeeded transition rather than inventing a way to write a finished
-// job in one shot. A compile that fails leaves the queued row behind and
-// returns the error, which aborts the boot — the same stance LoadStore already
-// takes, since it compiles the same rows from the same data and would fail
-// immediately afterwards regardless. Only succeeded jobs are ever resolved, so
-// the abandoned row means nothing to a reader.
-func compileAndRecord(ctx context.Context, store SeededCompileStore, sc Scenario) error {
-	graph, err := CompileSeededScenario(ctx, store, sc)
-	if err != nil {
-		return err
-	}
-
+// job in one shot. A write that fails between the two leaves the queued row
+// behind and returns the error, which aborts the boot; only succeeded jobs are
+// ever resolved, so the abandoned row means nothing to a reader.
+//
+// The compile itself happens in the caller, which needs the graph in hand to
+// decide whether recording it is necessary at all. A compile that fails aborts
+// the boot there — the same stance LoadStore already takes, since it compiles
+// the same rows from the same data and would fail immediately afterwards
+// regardless.
+func recordCompiled(ctx context.Context, store SeededCompileStore, sc Scenario, graph TransitGraph) error {
 	id, err := ids.NewUUID()
 	if err != nil {
 		return err
