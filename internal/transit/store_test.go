@@ -144,6 +144,8 @@ func TestStationCoordinates(t *testing.T) {
 		"burbank-airport": {-118.353, 34.202},
 		"los-angeles":     {-118.235, 34.055},
 		"anaheim":         {-117.878, 33.803},
+		"victor-valley":   {-117.218, 34.6443},
+		"las-vegas":       {-115.1778, 36.0545},
 	}
 
 	for slug, wantCoords := range want {

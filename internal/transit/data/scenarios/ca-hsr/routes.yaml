@@ -21678,9 +21678,17 @@
 # simplified with Douglas–Peucker at a 10 m tolerance: 929 raw OSM vertices down
 # to 187 over 285 km, with nothing dropped that was more than 10 m off the line
 # that was kept. The freeway trace stops at its closest approach to the Las Vegas
-# station (1.1 km away, since the station sits east of I-15) and a straight tail
+# station (1.7 km away, since the station sits east of I-15) and a straight tail
 # runs in from there, rather than running on past the terminus and doubling back.
 # OSM data © OpenStreetMap contributors, licensed ODbL (https://www.openstreetmap.org/copyright).
+#
+# The Las Vegas station coordinate itself was originally an uncorrected
+# city-centroid geocode rather than the actual FRA-cleared terminus site
+# (Enterprise, NV, south Strip, between Blue Diamond Rd and Warm Springs Rd) —
+# 13.8 km off, so the "closest approach" pivot above used to land 13 km further
+# up the I-15 median than it should have, and the straight tail ran the rest of
+# the way into the wrong part of the city (SPA-222). Trimmed back to the real
+# closest-approach vertex and re-terminated at the corrected station point.
 #
 # Palmdale → Victor Valley is the High Desert Corridor, a separate 54-mile
 # project that follows no freeway median. None of it is built, so there is no
@@ -21895,23 +21903,4 @@
       - [-115.180379, 36.009755]
       - [-115.180771, 36.027305]
       - [-115.18081, 36.039518]
-      - [-115.180674, 36.12181]
-      - [-115.180612, 36.12914]
-      - [-115.180454, 36.131039]
-      - [-115.179499, 36.134008]
-      - [-115.17807, 36.136292]
-      - [-115.16711, 36.148677]
-      - [-115.162576, 36.153565]
-      - [-115.161726, 36.154813]
-      - [-115.161076, 36.156256]
-      - [-115.160746, 36.157685]
-      - [-115.160714, 36.162654]
-      - [-115.160307, 36.165309]
-      - [-115.159175, 36.16841]
-      - [-115.157525, 36.171307]
-      - [-115.155329, 36.173899]
-      - [-115.153415, 36.175622]
-      - [-115.151684, 36.176869]
-      - [-115.146328, 36.17989]
-      - [-115.145457, 36.180581]
-      - [-115.136, 36.174]
+      - [-115.1778, 36.0545]
