@@ -144,6 +144,45 @@ func TestUserScenarioIsochrone_409_editedMember(t *testing.T) {
 	}
 }
 
+// The origin-range guard lives in the shared enqueue tail, so the authored
+// surfaces inherit it from the same code the seeded one is refused by. This is
+// the check that the tail is genuinely shared: the substance of the rule is
+// covered against the seeded endpoint (SPA-200).
+//
+// The order matters and is asserted by the 409 tests above, not here: a stale
+// graph is still refused as stale, because a range check run against a graph
+// the owner has already superseded would be answering about the wrong stations.
+func TestUserScenarioIsochrone_422_originOutOfRange(t *testing.T) {
+	store := newFakeScenarioStore()
+	created := time.Now().Add(-time.Hour)
+	seedScenarioRow(store, "scn-1", "trip", scnOwner.ID, []string{"svc-1"})
+	store.members["svc-1"] = transit.UserService{ID: "svc-1", UpdatedAt: created.Add(-time.Minute)}
+	graph := freshGraph()
+	for i := range graph.Nodes {
+		graph.Nodes[i].Lat += 1 // ~111 km north of the origin in isoValidBody
+	}
+	store.jobs["trip"] = transit.Job{
+		ID: "job-1", Status: transit.JobStatusSucceeded, CreatedAt: created,
+		CompiledServiceIDs: []string{"svc-1"}, Result: graph,
+	}
+	pub := &routing.FakePublisher{}
+
+	rec := isoServeAs(t, store, pub, scnOwner, "/api/user-scenarios/trip/isochrone", isoValidBody)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status: want 422, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body["code"] != handler.OriginOutOfRangeErrorCode {
+		t.Errorf("code = %v, want %q", body["code"], handler.OriginOutOfRangeErrorCode)
+	}
+	if n := len(pub.Messages()); n != 0 {
+		t.Errorf("published %d messages for an out-of-range origin", n)
+	}
+}
+
 // A fresh graph enqueues rather than computing, and — unlike the public seeded
 // isochrone — records the caller as the job's owner, so only they can poll it.
 func TestUserScenarioIsochrone_202_enqueuesOwnedByTheCaller(t *testing.T) {

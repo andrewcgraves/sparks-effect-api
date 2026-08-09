@@ -59,11 +59,17 @@ func (f *fakeSeededGraphStore) GetLatestSucceededJob(_ context.Context, scenario
 // compiledStore is a scenario with a compiled graph behind it — the shape a
 // booted, seeded deployment is always in.
 func compiledStore() *fakeSeededGraphStore {
+	return compiledStoreOver(freshGraph())
+}
+
+// compiledStoreOver is compiledStore with the graph named, for the tests that
+// care where its stations are rather than only that it has some.
+func compiledStoreOver(graph *transit.TransitGraph) *fakeSeededGraphStore {
 	f := newFakeSeededGraphStore()
 	f.scenarios["ca-hsr"] = transit.Scenario{ID: "sc-1", Slug: "ca-hsr", Name: "CA HSR"}
 	f.jobs["ca-hsr"] = transit.Job{
 		ID: "compile-job-1", Kind: transit.JobKindCompileScenario, Status: transit.JobStatusSucceeded,
-		Result: freshGraph(),
+		Result: graph,
 	}
 	return f
 }
@@ -311,6 +317,117 @@ func TestIsochrone_rejectedRequestsEnqueueNothing(t *testing.T) {
 				t.Errorf("recorded %d routing jobs for a rejected request", n)
 			}
 		})
+	}
+}
+
+// --- the origin-range guard (SPA-200) ---
+
+// distantGraph is freshGraph's stations moved a degree of latitude north —
+// about 111 km, which no mode reaches in 30 minutes and only a drive reaches at
+// all within the budgets the UI offers.
+func distantGraph() *transit.TransitGraph {
+	g := freshGraph()
+	for i := range g.Nodes {
+		g.Nodes[i].Lat += 1
+	}
+	return g
+}
+
+// The refusal the ticket asked for: an origin no station can be reached from is
+// told so, in terms it can act on, and none of the work it would have caused is
+// done.
+func TestIsochrone_422_originOutOfRange(t *testing.T) {
+	store := compiledStoreOver(distantGraph())
+	pub := &routing.FakePublisher{}
+
+	rec := postIsochrone(store, pub, validIsochroneBody)
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status: want 422, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var body struct {
+		Error  string `json:"error"`
+		Code   string `json:"code"`
+		Detail struct {
+			NearestStationSlug string  `json:"nearest_station_slug"`
+			NearestStationKm   float64 `json:"nearest_station_km"`
+			MaxReachKm         float64 `json:"max_reach_km"`
+		} `json:"detail"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal %q: %v", rec.Body.String(), err)
+	}
+	if body.Code != handler.OriginOutOfRangeErrorCode {
+		t.Errorf("code = %q, want %q", body.Code, handler.OriginOutOfRangeErrorCode)
+	}
+	if body.Error == "" {
+		t.Error("no prose for a client that does not recognise the code")
+	}
+	// A 30-minute walk covers 2.5 km; the nearest station is ~111 km away.
+	if body.Detail.MaxReachKm != 2.5 {
+		t.Errorf("max_reach_km = %v, want 2.5", body.Detail.MaxReachKm)
+	}
+	if body.Detail.NearestStationKm < 100 {
+		t.Errorf("nearest_station_km = %v, want the ~111 km the station actually is", body.Detail.NearestStationKm)
+	}
+	if body.Detail.NearestStationSlug == "" {
+		t.Error("detail names no station, so a client cannot point at one")
+	}
+}
+
+// The point of running the check first. Everything below it — the row, the
+// message carrying the whole graph, the worker slot behind it — is what a
+// far-away origin used to cost, and none of it may be spent on one now.
+func TestIsochrone_422_outOfRangeEnqueuesNothing(t *testing.T) {
+	store := compiledStoreOver(distantGraph())
+	pub := &routing.FakePublisher{}
+
+	if rec := postIsochrone(store, pub, validIsochroneBody); rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status: want 422, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if n := len(pub.Messages()); n != 0 {
+		t.Errorf("published %d messages for an out-of-range origin", n)
+	}
+	if n := store.count(); n != 0 {
+		t.Errorf("recorded %d routing jobs for an out-of-range origin", n)
+	}
+}
+
+// The same origin and the same stations, in a mode that covers the distance.
+// This is what stops the guard being calibrated by a test that would pass just
+// as well if it refused everything.
+func TestIsochrone_202_sameOriginInRangeByDrive(t *testing.T) {
+	store := compiledStoreOver(distantGraph())
+	pub := &routing.FakePublisher{}
+
+	// A 120-minute drive covers 160 km, comfortably past the ~111 km station.
+	rec := postIsochrone(store, pub, `{"lat":37.7,"lng":-122.4,"budget_mins":120,"mode":"drive","scenario_slug":"ca-hsr"}`)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status: want 202, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if n := len(pub.Messages()); n != 1 {
+		t.Errorf("published %d messages, want 1", n)
+	}
+}
+
+// A graph with no stations in it says nothing about how far away the origin is,
+// and the guard must not read it as "too far". Whatever such a request did
+// before the check existed, it still does.
+func TestIsochrone_202_graphWithNoNodesIsNotOutOfRange(t *testing.T) {
+	graph := freshGraph()
+	graph.Nodes = nil
+	store := compiledStoreOver(graph)
+	pub := &routing.FakePublisher{}
+
+	rec := postIsochrone(store, pub, validIsochroneBody)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status: want 202, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if n := len(pub.Messages()); n != 1 {
+		t.Errorf("published %d messages, want 1", n)
 	}
 }
 
