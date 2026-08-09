@@ -2,6 +2,7 @@ package transit
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 )
 
@@ -14,6 +15,10 @@ type seededCompileFake struct {
 	// createdJobs counts CreateJob calls, so a test can tell "compiled again"
 	// from "left alone".
 	createdJobs int
+	// movedStations overrides a station's coordinates by slug, standing in for
+	// the correcting UPDATE a migration runs against a deployed database (see
+	// moveStation).
+	movedStations map[string]GeoPoint
 }
 
 func newSeededCompileFake(t *testing.T) *seededCompileFake {
@@ -30,7 +35,15 @@ func (f *seededCompileFake) ListRoutesByScenario(_ context.Context, scenarioID s
 }
 
 func (f *seededCompileFake) ListStationsByScenario(_ context.Context, scenarioID string) ([]Station, error) {
-	return f.store.GetStationsByScenario(scenarioID), nil
+	stations := f.store.GetStationsByScenario(scenarioID)
+	out := make([]Station, len(stations))
+	for i, st := range stations {
+		if loc, moved := f.movedStations[st.Slug]; moved {
+			st.Location = loc
+		}
+		out[i] = st
+	}
+	return out, nil
 }
 
 func (f *seededCompileFake) ListServicesByScenario(_ context.Context, scenarioID string) ([]Service, error) {
@@ -66,16 +79,51 @@ func (f *seededCompileFake) CreateJob(_ context.Context, j Job) error {
 	return nil
 }
 
+// CompleteJob stores the result through a JSON round trip rather than keeping
+// the caller's value, because jobs.result is a jsonb column and that round trip
+// is the one thing a stored graph has been through that a freshly compiled one
+// has not. CompileSeededIfNeeded now compares the two to decide whether to
+// recompile, so a fake that skipped the encoding would be unable to catch the
+// failure that comparison most plausibly has: reporting a graph changed because
+// of how storage represents it, and recompiling on every boot forever.
 func (f *seededCompileFake) CompleteJob(_ context.Context, id string, result TransitGraph, compiledServiceIDs []string) error {
+	stored, err := roundTripGraph(result)
+	if err != nil {
+		return err
+	}
 	for i := range f.jobs {
 		if f.jobs[i].ID == id {
 			f.jobs[i].Status = JobStatusSucceeded
-			f.jobs[i].Result = &result
+			f.jobs[i].Result = stored
 			f.jobs[i].CompiledServiceIDs = compiledServiceIDs
 			return nil
 		}
 	}
 	return nil
+}
+
+// roundTripGraph encodes and decodes a graph the way jobs.result does.
+func roundTripGraph(g TransitGraph) (*TransitGraph, error) {
+	b, err := json.Marshal(g)
+	if err != nil {
+		return nil, err
+	}
+	var out TransitGraph
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// moveStation repositions a station in the rows this fake reads, without
+// touching any graph already compiled from them — the state a deployed database
+// is left in by a migration that corrects a coordinate (SPA-222's 00015).
+func (f *seededCompileFake) moveStation(t *testing.T, slug string, lng, lat float64) {
+	t.Helper()
+	if f.movedStations == nil {
+		f.movedStations = make(map[string]GeoPoint)
+	}
+	f.movedStations[slug] = GeoPoint{Type: "Point", Coordinates: []float64{lng, lat}}
 }
 
 // graphFor returns the graph the fake's latest succeeded job holds for a slug.
@@ -156,8 +204,63 @@ func TestCompileSeededIfNeeded_graphMatchesEmbeddedStore(t *testing.T) {
 	}
 }
 
+// A corrected station coordinate must reach the isochrone (SPA-222 follow-up).
+//
+// The graph carries the coordinates the isochrone is centred on, and it used to
+// be compiled once and never again — so correcting a station in the seed and in
+// the deployed rows left the polygon being cut around the old position
+// indefinitely, while the map pin (served from the embedded store) moved. This
+// is that failure in miniature, in the order it actually happened: seed the
+// pre-correction coordinate, compile, apply the correction to the rows, and
+// require the next boot to carry it into the graph.
+func TestCompileSeededIfNeeded_recompilesAfterAStationMoves(t *testing.T) {
+	ctx := context.Background()
+	fake := newSeededCompileFake(t)
+
+	// The database as it stood before SPA-222: the city-centroid geocode.
+	fake.moveStation(t, "las-vegas", -115.136, 36.174)
+	if _, err := CompileSeededIfNeeded(ctx, fake); err != nil {
+		t.Fatalf("CompileSeededIfNeeded: %v", err)
+	}
+
+	// Migration 00015 corrects the station row under the stored graph.
+	const slug = "ca-hsr"
+	moved := Node{Slug: "las-vegas", Lat: 36.0545, Lng: -115.1778}
+	fake.moveStation(t, moved.Slug, moved.Lng, moved.Lat)
+
+	compiled, err := CompileSeededIfNeeded(ctx, fake)
+	if err != nil {
+		t.Fatalf("CompileSeededIfNeeded after move: %v", err)
+	}
+	if compiled != 1 {
+		t.Fatalf("compiled %d scenarios after moving a station, want 1", compiled)
+	}
+
+	nodes, ok := CompiledGraphData{Graph: fake.graphFor(t, slug)}.Nodes(slug)
+	if !ok {
+		t.Fatal("recompiled graph has no nodes")
+	}
+	for _, n := range nodes {
+		if n.Slug != moved.Slug {
+			continue
+		}
+		if n != moved {
+			t.Errorf("node %q = %+v, want %+v — the graph the isochrone plots from "+
+				"still holds the pre-correction position", moved.Slug, n, moved)
+		}
+		return
+	}
+	t.Fatalf("no %q node in the recompiled graph", moved.Slug)
+}
+
 // Compiling at boot must be idempotent: a database that already carries a
 // compiled graph is left alone, so a restart is not a recompile.
+//
+// Since the skip is now a comparison against what the rows compile to rather
+// than a bare "a job exists", this is also what holds the comparison itself
+// honest: a graph that reports itself changed when nothing changed would
+// recompile on every boot forever, and the createdJobs count below is what
+// catches that.
 func TestCompileSeededIfNeeded_skipsAlreadyCompiledScenarios(t *testing.T) {
 	ctx := context.Background()
 	fake := newSeededCompileFake(t)
