@@ -10,52 +10,11 @@ func servicePathSecs(sg ServiceGraph, from, to string) (int, bool) {
 	return secs, ok
 }
 
-func TestFixture_ExpressLessThanLocal_SFToLA(t *testing.T) {
-	store := mustNewStore(t)
-	g, ok := store.Graph("ca-hsr")
-	if !ok {
-		t.Fatal("missing ca-hsr graph")
-	}
-
-	sc, _ := store.GetScenarioBySlug("ca-hsr")
-	var expressID, localID string
-	for _, svc := range store.GetServicesByScenario(sc.ID) {
-		switch svc.Name {
-		case "HSR Express":
-			expressID = svc.ID
-		case "HSR Local":
-			localID = svc.ID
-		}
-	}
-	if expressID == "" || localID == "" {
-		t.Fatal("express/local service ids not found")
-	}
-
-	var expressSecs, localSecs int
-	var expressOK, localOK bool
-	for _, sg := range g.Services {
-		switch sg.ServiceID {
-		case expressID:
-			expressSecs, expressOK = servicePathSecs(sg, "sf", "los-angeles")
-		case localID:
-			localSecs, localOK = servicePathSecs(sg, "sf", "los-angeles")
-		}
-	}
-	if !expressOK || !localOK {
-		t.Fatalf("path missing: expressOK=%v localOK=%v", expressOK, localOK)
-	}
-	if expressSecs >= localSecs {
-		t.Errorf("express (%d) should be < local (%d)", expressSecs, localSecs)
-	}
-	vt, ok := store.GetVehicleTypeByID(store.GetServicesByScenario(sc.ID)[0].VehicleTypeID)
-	if !ok {
-		t.Fatal("vehicle type missing")
-	}
-	wantDelta := 2 * vt.DwellLevelS
-	if got := localSecs - expressSecs; got != wantDelta {
-		t.Errorf("local−express: want %d (2×DwellLevelS), got %d", wantDelta, got)
-	}
-}
+// The seeded express-beats-local assertion that stood here went with HSR
+// Express when it was parked. What it proved — that a pattern skipping a stop
+// saves exactly that stop's dwell — is proved on its own fixture by
+// TestCompile_expressSkipsIntermediateDwell, which does not need the seed to
+// carry two patterns over one corridor.
 
 func TestFixture_BranchShortestPath_DijkstraBeatsBFS(t *testing.T) {
 	g := &TransitGraph{Services: []ServiceGraph{{

@@ -107,6 +107,49 @@ func TestScenarioBySlug_found(t *testing.T) {
 	}
 }
 
+func TestScenarioBySlug_servicesNameTheirRoute(t *testing.T) {
+	store := mustNewStore(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/scenarios/ca-hsr", nil)
+	req.SetPathValue("slug", "ca-hsr")
+	rec := httptest.NewRecorder()
+
+	ScenarioBySlug(store)(rec, req)
+
+	var body struct {
+		Routes []struct {
+			ID string `json:"id"`
+		} `json:"routes"`
+		Services []struct {
+			Name    string `json:"name"`
+			RouteID string `json:"route_id"`
+		} `json:"services"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	routeIDs := make(map[string]bool, len(body.Routes))
+	for _, route := range body.Routes {
+		routeIDs[route.ID] = true
+	}
+	if len(routeIDs) == 0 {
+		t.Fatal("expected the scenario to carry routes")
+	}
+
+	// A client grouping services by the line they run over needs the route on
+	// the service itself; the stop list alone cannot tell two patterns over one
+	// corridor apart from two genuinely separate lines.
+	for _, svc := range body.Services {
+		if svc.RouteID == "" {
+			t.Errorf("service %q reports no route_id", svc.Name)
+			continue
+		}
+		if !routeIDs[svc.RouteID] {
+			t.Errorf("service %q names route %q, which is not one of the scenario's routes", svc.Name, svc.RouteID)
+		}
+	}
+}
+
 func TestScenarioBySlug_notFound(t *testing.T) {
 	store := mustNewStore(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/scenarios/does-not-exist", nil)

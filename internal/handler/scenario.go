@@ -22,7 +22,12 @@ type vehicleTypeSummary struct {
 }
 
 type serviceSummary struct {
-	ID               string                    `json:"id"`
+	ID string `json:"id"`
+	// The line this service runs over. Several services can share one corridor
+	// — an express and a local pattern are two services and one route — so a
+	// client that wants to present the network by line, rather than by
+	// timetable, cannot derive this from the stop list.
+	RouteID          string                    `json:"route_id"`
 	Name             string                    `json:"name"`
 	VehicleType      vehicleTypeSummary        `json:"vehicle_type"`
 	Direction        string                    `json:"direction"`
@@ -79,8 +84,9 @@ func ScenarioBySlug(store *transit.Store) http.HandlerFunc {
 		for _, svc := range rawServices {
 			vt, _ := store.GetVehicleTypeByID(svc.VehicleTypeID)
 			summaries = append(summaries, serviceSummary{
-				ID:   svc.ID,
-				Name: svc.Name,
+				ID:      svc.ID,
+				RouteID: svc.RouteID,
+				Name:    svc.Name,
 				VehicleType: vehicleTypeSummary{
 					ID:          vt.ID,
 					Name:        vt.Name,
