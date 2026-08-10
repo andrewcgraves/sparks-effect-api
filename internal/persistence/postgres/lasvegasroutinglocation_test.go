@@ -59,10 +59,10 @@ func TestLasVegasRoutingLocationMigrationMatchesTheSeed(t *testing.T) {
 	}
 }
 
-// rewindLasVegasRoutingLocationMigration unwinds 00016 and is the current tail
-// of the rewind chain that starts in snapmigration_test.go — 00016 is the
-// highest migration today, so nothing needs unwinding above it the way every
-// other link in the chain unwinds the one above.
+// rewindLasVegasRoutingLocationMigration unwinds 00016. It is no longer the
+// tail of the rewind chain that starts in snapmigration_test.go — 00017 sits
+// above it now, so this must unwind that first, the same reason every other
+// link in the chain unwinds the migration above it before its own.
 //
 // 00016 adds a column and then UPDATEs it, so unwinding it both drops the
 // column (undoing the ALTER) and unrecords the version — a plain DELETE from
@@ -70,6 +70,7 @@ func TestLasVegasRoutingLocationMigrationMatchesTheSeed(t *testing.T) {
 // the next Migrate call would see it already exists.
 func rewindLasVegasRoutingLocationMigration(t *testing.T, url string) {
 	t.Helper()
+	rewindHSRExpressParkedMigration(t, url)
 	exec(t, url,
 		`ALTER TABLE stations DROP COLUMN IF EXISTS routing_location`,
 		`DELETE FROM goose_db_version WHERE version_id = 16`)
@@ -143,8 +144,12 @@ func TestLasVegasRoutingLocationMigrationIsSafeToReRun(t *testing.T) {
 	}
 
 	// Forget that it ran while keeping the data it wrote, so the second pass
-	// meets exactly the state a YAML-seeded database would present.
-	exec(t, url, `DELETE FROM goose_db_version WHERE version_id = 16`)
+	// meets exactly the state a YAML-seeded database would present. 00017 sits
+	// above 16 now, so it must be forgotten too — goose refuses to re-apply 16
+	// while a later version is still recorded.
+	exec(t, url,
+		`DELETE FROM goose_db_version WHERE version_id = 17`,
+		`DELETE FROM goose_db_version WHERE version_id = 16`)
 	if err := postgres.Migrate(context.Background(), url); err != nil {
 		t.Fatalf("migration re-run over the data it already wrote: %v", err)
 	}
