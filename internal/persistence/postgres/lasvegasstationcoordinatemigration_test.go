@@ -27,13 +27,17 @@ const (
 		`[[-118.119,34.591],[-115.136,36.174]]}`
 )
 
-// rewindLasVegasCoordinateMigration unwinds 00015 and is the current tail of
-// the rewind chain that starts in snapmigration_test.go.
+// rewindLasVegasCoordinateMigration unwinds 00015. It is no longer the tail of
+// the rewind chain that starts in snapmigration_test.go — 00016 sits above it
+// now, so this must unwind that first, the same reason every other link in the
+// chain unwinds the migration above it before its own: goose refuses to
+// re-apply 00015 while a later version (16) is still recorded.
 //
 // 00015 only UPDATEs existing rows — it creates no tables — so unwinding it
 // is just unrecording the version.
 func rewindLasVegasCoordinateMigration(t *testing.T, url string) {
 	t.Helper()
+	rewindLasVegasRoutingLocationMigration(t, url)
 	exec(t, url, `DELETE FROM goose_db_version WHERE version_id = 15`)
 }
 

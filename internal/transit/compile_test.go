@@ -406,6 +406,47 @@ func TestCompile_emitsOneNodePerStation(t *testing.T) {
 	}
 }
 
+// A station with a routing anchor (SPA-234) carries it on the node as a
+// separate pair of fields, leaving Lat/Lng — the place a map plots the station
+// — untouched. A station with no routing anchor must not grow one: RoutingLat
+// and RoutingLng stay nil, not zero, so a consumer can tell "no override" from
+// "override at (0, 0)".
+func TestCompile_nodeCarriesRoutingAnchorSeparatelyFromLocation(t *testing.T) {
+	sc := Scenario{ID: "sc-1", Slug: "test"}
+	stations := testStations()
+	stations[0].RoutingLocation = &GeoPoint{Coordinates: []float64{-122.41, 37.71}}
+	services := []Service{{
+		ID: "svc-local", Active: true, VehicleTypeID: "vt-1",
+		Stops: []ServiceStop{{StationID: "st-a", Sequence: 1}, {StationID: "st-b", Sequence: 2}},
+	}}
+
+	g, err := Compile(sc, nil, stations, services, []VehicleType{testVehicle()}, testSegments())
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	byslug := make(map[string]GraphNode, len(g.Nodes))
+	for _, n := range g.Nodes {
+		byslug[n.Slug] = n
+	}
+
+	a := byslug["a"]
+	if a.Lat != 37.7 || a.Lng != -122.4 {
+		t.Errorf("node a Lat/Lng = (%v, %v), want the unmoved station location (37.7, -122.4)", a.Lat, a.Lng)
+	}
+	if a.RoutingLat == nil || a.RoutingLng == nil {
+		t.Fatalf("node a RoutingLat/RoutingLng = %v/%v, want the routing anchor", a.RoutingLat, a.RoutingLng)
+	}
+	if *a.RoutingLat != 37.71 || *a.RoutingLng != -122.41 {
+		t.Errorf("node a routing anchor = (%v, %v), want (37.71, -122.41)", *a.RoutingLat, *a.RoutingLng)
+	}
+
+	b := byslug["b"]
+	if b.RoutingLat != nil || b.RoutingLng != nil {
+		t.Errorf("node b has no routing_location on its station, want RoutingLat/RoutingLng nil, got %v/%v",
+			b.RoutingLat, b.RoutingLng)
+	}
+}
+
 // A station whose location is malformed must fail the compile, not quietly
 // become a node at (0, 0) — that coordinate is a real place in the Gulf of
 // Guinea, and it would be baked into a persisted graph and plotted from.
@@ -427,6 +468,37 @@ func TestCompile_rejectsStationWithMalformedLocation(t *testing.T) {
 	_, err := Compile(sc, nil, stations, services, []VehicleType{testVehicle()}, segments)
 	if err == nil {
 		t.Fatal("Compile() error = nil, want an error for a station with no usable location")
+	}
+	if !strings.Contains(err.Error(), "b") {
+		t.Errorf("error = %v, want it to name the offending station", err)
+	}
+}
+
+// A malformed routing_location must fail the compile the same way a malformed
+// location does (see above), not silently fall back to Location or bake a
+// half-formed anchor into the persisted graph.
+func TestCompile_rejectsStationWithMalformedRoutingLocation(t *testing.T) {
+	sc := Scenario{ID: "sc-1", Slug: "test"}
+	stations := []Station{
+		{ID: "st-a", Slug: "a", Name: "A", Location: GeoPoint{Coordinates: []float64{-122.4, 37.7}}},
+		{
+			ID: "st-b", Slug: "b", Name: "B",
+			Location:        GeoPoint{Coordinates: []float64{-122.5, 37.8}},
+			RoutingLocation: &GeoPoint{Coordinates: []float64{-122.51}},
+		},
+	}
+	services := []Service{{
+		ID: "svc-local", Active: true, VehicleTypeID: "vt-1",
+		Stops: []ServiceStop{{StationID: "st-a", Sequence: 1}, {StationID: "st-b", Sequence: 2}},
+	}}
+
+	segments := TravelTimes{ScenarioSlug: "test", Segments: []SegmentTime{
+		{FromSlug: "a", ToSlug: "b", RunSeconds: 600},
+	}}
+
+	_, err := Compile(sc, nil, stations, services, []VehicleType{testVehicle()}, segments)
+	if err == nil {
+		t.Fatal("Compile() error = nil, want an error for a station with a malformed routing_location")
 	}
 	if !strings.Contains(err.Error(), "b") {
 		t.Errorf("error = %v, want it to name the offending station", err)

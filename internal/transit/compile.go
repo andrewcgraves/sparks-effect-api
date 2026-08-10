@@ -43,11 +43,20 @@ type ServiceGraph struct {
 // snapped position is a real point on a real alignment. Names carries every
 // distinct member stop name, key member first, so a caller can render
 // "Transbay (also: Salesforce Center)" from one field.
+//
+// RoutingLat/RoutingLng are nil for almost every node: they exist only so a
+// station whose real coordinate the routing worker's Valhalla graph cannot
+// reach yet (Station.RoutingLocation, SPA-234) can still get an egress
+// isochrone, centred on this point instead of Lat/Lng. Nothing that plots a
+// node on a map should read them — Lat/Lng remains the place the station
+// actually is; these are a routing-only stand-in for it.
 type GraphNode struct {
-	Slug  string   `json:"slug"`
-	Lat   float64  `json:"lat"`
-	Lng   float64  `json:"lng"`
-	Names []string `json:"names"`
+	Slug       string   `json:"slug"`
+	Lat        float64  `json:"lat"`
+	Lng        float64  `json:"lng"`
+	RoutingLat *float64 `json:"routing_lat,omitempty"`
+	RoutingLng *float64 `json:"routing_lng,omitempty"`
+	Names      []string `json:"names"`
 }
 
 // TransitGraph is a compiled, Dijkstra-ready representation of a scenario's
@@ -182,12 +191,21 @@ func seededNodes(stations []Station) ([]GraphNode, error) {
 			return nil, fmt.Errorf("compile: station %q has no usable location: %v",
 				st.Slug, st.Location.Coordinates)
 		}
-		nodes[i] = GraphNode{
+		node := GraphNode{
 			Slug:  st.Slug,
 			Lat:   st.Location.Coordinates[1],
 			Lng:   st.Location.Coordinates[0],
 			Names: []string{st.Name},
 		}
+		if rl := st.RoutingLocation; rl != nil {
+			if len(rl.Coordinates) != 2 {
+				return nil, fmt.Errorf("compile: station %q has an unusable routing_location: %v",
+					st.Slug, rl.Coordinates)
+			}
+			node.RoutingLat = &rl.Coordinates[1]
+			node.RoutingLng = &rl.Coordinates[0]
+		}
+		nodes[i] = node
 	}
 	return nodes, nil
 }
