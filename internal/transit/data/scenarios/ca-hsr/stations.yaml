@@ -140,6 +140,16 @@
 # Brightline West spur terminus. Enterprise, NV — the FRA-cleared south Strip
 # site between Blue Diamond Rd and Warm Springs Rd — not the Las Vegas
 # city-centroid geocode this used to carry, which was 13.8 km off (SPA-222).
+#
+# routing_location is a separate, provisional stand-in the routing worker's
+# egress isochrone reads instead of `location` (SPA-234): the terminus site is
+# still in civil-construction phase and has no pedestrian network OpenStreetMap
+# can see yet, so Valhalla rejects a pedestrian isochrone centred on `location`
+# itself ("Locations are in unconnected regions"). The value is Las Vegas Blvd
+# S at this latitude, on the block the site fronts — a densely mapped,
+# unambiguously connected arterial — not a survey point; see migration 00016
+# for the full reasoning. Remove it once the built station's own pedestrian
+# network exists and is mapped.
 - id: "00000000-0000-4005-8001-00000000000f"
   scenario_id: "00000000-0000-4001-8001-000000000001"
   slug: "las-vegas"
@@ -148,3 +158,6 @@
   location:
     type: Point
     coordinates: [-115.1778, 36.0545]
+  routing_location:
+    type: Point
+    coordinates: [-115.1706, 36.0545]

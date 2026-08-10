@@ -272,15 +272,15 @@ func scanRoute(row pgx.Row) (transit.Route, error) {
 
 func (r *Repo) CreateStation(ctx context.Context, st transit.Station) error {
 	_, err := r.pool.Exec(ctx,
-		`INSERT INTO stations (id, scenario_id, slug, name, location, platform_height)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
-		st.ID, st.ScenarioID, st.Slug, st.Name, st.Location, st.PlatformHeight)
+		`INSERT INTO stations (id, scenario_id, slug, name, location, routing_location, platform_height)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		st.ID, st.ScenarioID, st.Slug, st.Name, st.Location, st.RoutingLocation, st.PlatformHeight)
 	return wrap("CreateStation", err)
 }
 
 func (r *Repo) ListStationsByScenario(ctx context.Context, scenarioID string) ([]transit.Station, error) {
 	rows, err := r.pool.Query(ctx,
-		`SELECT id, scenario_id, slug, name, location, platform_height
+		`SELECT id, scenario_id, slug, name, location, routing_location, platform_height
 		 FROM stations WHERE scenario_id = $1 ORDER BY slug`, scenarioID)
 	if err != nil {
 		return nil, wrap("ListStationsByScenario", err)
@@ -290,7 +290,7 @@ func (r *Repo) ListStationsByScenario(ctx context.Context, scenarioID string) ([
 	var out []transit.Station
 	for rows.Next() {
 		var st transit.Station
-		if err := rows.Scan(&st.ID, &st.ScenarioID, &st.Slug, &st.Name, &st.Location, &st.PlatformHeight); err != nil {
+		if err := rows.Scan(&st.ID, &st.ScenarioID, &st.Slug, &st.Name, &st.Location, &st.RoutingLocation, &st.PlatformHeight); err != nil {
 			return nil, wrap("ListStationsByScenario scan", err)
 		}
 		out = append(out, st)
