@@ -166,8 +166,20 @@ func TestGetServicesByScenario(t *testing.T) {
 	sc, _ := store.GetScenarioBySlug("ca-hsr")
 	services := store.GetServicesByScenario(sc.ID)
 
-	if len(services) != 3 {
-		t.Fatalf("expected 3 active services (Express + Local + Brightline West), got %d", len(services))
+	// Named rather than counted, so this says which services the store is meant
+	// to hand out — and, in the case of the parked express pattern, which it is
+	// meant to withhold.
+	served := make(map[string]bool, len(services))
+	for _, svc := range services {
+		served[svc.Name] = true
+	}
+	for _, want := range []string{"HSR Local", "Brightline West"} {
+		if !served[want] {
+			t.Errorf("expected active service %q", want)
+		}
+	}
+	if served["HSR Express"] {
+		t.Error("HSR Express is seeded active: false and must not be served")
 	}
 
 	for _, svc := range services {

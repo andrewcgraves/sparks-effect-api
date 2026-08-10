@@ -1,6 +1,7 @@
 # Services for the CA HSR scenario.
 #
-# HSR Express: key stops only (skips Madera and Kings/Tulare).
+# HSR Express: key stops only (skips Madera and Kings/Tulare). Parked — see
+#   `active` on its entry below.
 # HSR Local: all Phase 1 stops SF–Anaheim.
 # Brightline West: Palmdale–Victor Valley–Las Vegas spur, interchanging with Phase 1 at Palmdale.
 #
@@ -13,7 +14,14 @@
   vehicle_type_id: "00000000-0000-4003-8001-000000000001"
   name: "HSR Express"
   direction: "both"
-  active: true
+  # Parked. Phase 1 is one corridor, and running two stopping patterns over it
+  # makes the network read as two lines everywhere it is presented — an
+  # isochrone reports the same station twice, once per pattern, and the rider
+  # has to work out that they are the same railway. Kept here rather than
+  # deleted: nothing about the pattern is wrong, it is the presentation that
+  # cannot yet carry it. Setting this back to true restores it to both the
+  # compiled graph and the scenario API.
+  active: false
   provenance: calibrated
   stops:
     - station_id: "00000000-0000-4005-8001-000000000001"

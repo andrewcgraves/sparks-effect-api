@@ -356,8 +356,16 @@ func TestNewStore_holdsCompiledGraph(t *testing.T) {
 	if !ok {
 		t.Fatal("expected compiled TransitGraph for ca-hsr")
 	}
-	if len(g.Services) != 3 {
-		t.Fatalf("want 3 service graphs (Express + Local + Brightline West), got %d", len(g.Services))
+	// One graph per active service, whatever the seed currently declares —
+	// counting them against a literal only re-breaks every time a service is
+	// added or parked.
+	sc, _ := store.GetScenarioBySlug("ca-hsr")
+	want := len(store.GetServicesByScenario(sc.ID))
+	if want == 0 {
+		t.Fatal("expected ca-hsr to declare at least one active service")
+	}
+	if len(g.Services) != want {
+		t.Fatalf("want one service graph per active service (%d), got %d", want, len(g.Services))
 	}
 }
 
