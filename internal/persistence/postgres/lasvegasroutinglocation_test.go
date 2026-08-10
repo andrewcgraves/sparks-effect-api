@@ -59,12 +59,15 @@ func TestLasVegasRoutingLocationMigrationMatchesTheSeed(t *testing.T) {
 	}
 }
 
-// rewindLasVegasRoutingLocationMigration unwinds 00016.
+// rewindLasVegasRoutingLocationMigration unwinds 00016 and is the current tail
+// of the rewind chain that starts in snapmigration_test.go — 00016 is the
+// highest migration today, so nothing needs unwinding above it the way every
+// other link in the chain unwinds the one above.
 //
 // 00016 adds a column and then UPDATEs it, so unwinding it both drops the
 // column (undoing the ALTER) and unrecords the version — a plain DELETE from
-// goose_db_version, like 00015's rewind, would leave the column behind and the
-// next Migrate call would see it already exists.
+// goose_db_version, like 00015's old rewind, would leave the column behind and
+// the next Migrate call would see it already exists.
 func rewindLasVegasRoutingLocationMigration(t *testing.T, url string) {
 	t.Helper()
 	exec(t, url,
