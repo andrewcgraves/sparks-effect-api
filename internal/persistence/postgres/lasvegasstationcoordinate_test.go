@@ -50,7 +50,7 @@ func TestLasVegasStationCoordinateMigrationGeometryMatchesTheSeed(t *testing.T) 
 }
 
 func TestLasVegasStationCoordinateMigrationStationMatchesTheSeed(t *testing.T) {
-	store, err := transit.NewStore()
+	store, err := transit.NewStore(transit.DefaultBoardingWaitPolicy())
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestLasVegasStationCoordinateMigrationStationMatchesTheSeed(t *testing.T) {
 // routes.yaml authors it.
 func seededBrightlineWestGeometry(t *testing.T) transit.GeoLineString {
 	t.Helper()
-	store, err := transit.NewStore()
+	store, err := transit.NewStore(transit.DefaultBoardingWaitPolicy())
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}

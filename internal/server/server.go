@@ -65,7 +65,7 @@ func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routi
 	mux.HandleFunc("GET /api/scenarios", handler.Scenarios(store))
 	mux.HandleFunc("GET /api/scenarios/{slug}", handler.ScenarioBySlug(store))
 	mux.HandleFunc("GET /api/scenarios/{slug}/routes", handler.ScenarioRoutes(store))
-	mux.HandleFunc("GET /api/scenarios/{slug}/services", handler.ScenarioServices(store))
+	mux.HandleFunc("GET /api/scenarios/{slug}/services", handler.ScenarioServices(store, cfg.BoardingWait))
 	mux.HandleFunc("GET /api/scenarios/{slug}/stations", handler.ScenarioStations(store))
 	mux.HandleFunc("GET /api/scenarios/{slug}/travel-times", handler.ScenarioTravelTimes(store))
 
@@ -194,31 +194,31 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 	mux.Handle("POST /api/auth/logout", authenticated(handler.Logout(deps)))
 	mux.Handle("GET /api/auth/me", authenticated(handler.Me()))
 	mux.Handle("GET /api/me/scenarios", authenticated(handler.MyScenarios(deps)))
-	mux.Handle("GET /api/me/services", authenticated(handler.MyServices(deps)))
+	mux.Handle("GET /api/me/services", authenticated(handler.MyServices(deps, cfg.BoardingWait)))
 	// Async compile jobs: any authenticated caller may trigger a compile or
 	// poll a job. JobStatus enforces ownership itself (see its doc comment),
 	// since "not found" there means something different from "not admin".
-	mux.Handle("POST /api/scenarios/{slug}/compile", authenticated(handler.CompileScenario(deps)))
+	mux.Handle("POST /api/scenarios/{slug}/compile", authenticated(handler.CompileScenario(deps, cfg.BoardingWait)))
 	mux.Handle("GET /api/jobs/{id}", authenticated(handler.JobStatus(deps)))
 
 	// User-authored services: owner-scoped CRUD. Reads are owner-scoped too —
 	// unlike the curated scenario data these are a user's own drafts, so they
 	// sit behind the same gate as the writes rather than the public reads.
 	mux.Handle("POST /api/services", authenticated(handler.CreateService(deps)))
-	mux.Handle("GET /api/services", authenticated(handler.MyUserServices(deps)))
-	mux.Handle("GET /api/services/{slug}", authenticated(handler.GetService(deps)))
+	mux.Handle("GET /api/services", authenticated(handler.MyUserServices(deps, cfg.BoardingWait)))
+	mux.Handle("GET /api/services/{slug}", authenticated(handler.GetService(deps, cfg.BoardingWait)))
 	mux.Handle("PUT /api/services/{slug}", authenticated(handler.UpdateService(deps)))
 	mux.Handle("DELETE /api/services/{slug}", authenticated(handler.DeleteService(deps)))
 	// Compiling a single service is the degenerate scenario compile; owner-scoped
 	// like the rest of the authored surface.
-	mux.Handle("POST /api/services/{slug}/compile", authenticated(handler.CompileUserService(deps)))
+	mux.Handle("POST /api/services/{slug}/compile", authenticated(handler.CompileUserService(deps, cfg.BoardingWait)))
 	// Read that compile back, and plot over it, without wrapping the service in
 	// a scenario first (SPA-140). Twins of the /api/user-scenarios pair below,
 	// owner-scoped identically. The database-less 503 list above needs no entry
 	// for either: "/api/services/" is a subtree pattern and already covers them.
 	mux.Handle("GET /api/services/{slug}/graph", authenticated(handler.UserServiceGraph(deps)))
 	mux.Handle("POST /api/services/{slug}/isochrone",
-		authenticated(requirePublisher(publisher, handler.UserServiceIsochrone(deps, publisher, lg))))
+		authenticated(requirePublisher(publisher, handler.UserServiceIsochrone(deps, publisher, lg, cfg.BoardingWait))))
 
 	// User-owned scenarios: owner-scoped CRUD over a curated set of UserService
 	// ids. Named /api/user-scenarios, distinct from the public /api/scenarios
@@ -231,13 +231,13 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 	mux.Handle("DELETE /api/user-scenarios/{slug}", authenticated(handler.DeleteUserScenario(deps)))
 	// Compile a user scenario's curated members into one graph, then read it back
 	// by slug. Both owner-scoped, unlike the public seeded /api/scenarios/{slug}/graph.
-	mux.Handle("POST /api/user-scenarios/{slug}/compile", authenticated(handler.CompileUserScenario(deps)))
+	mux.Handle("POST /api/user-scenarios/{slug}/compile", authenticated(handler.CompileUserScenario(deps, cfg.BoardingWait)))
 	mux.Handle("GET /api/user-scenarios/{slug}/graph", authenticated(handler.UserScenarioGraph(deps)))
 	// The user-authored counterpart to POST /api/isochrone (SPA-83): computes
 	// over the scenario's compiled graph rather than the seeded store, and
 	// answers 409 with a distinct code when that graph is stale (SPA-116).
 	mux.Handle("POST /api/user-scenarios/{slug}/isochrone",
-		authenticated(requirePublisher(publisher, handler.UserScenarioIsochrone(deps, publisher, lg))))
+		authenticated(requirePublisher(publisher, handler.UserScenarioIsochrone(deps, publisher, lg, cfg.BoardingWait))))
 
 	// Admin-only.
 	mux.Handle("POST /api/admin/users", adminOnly(handler.CreateUser(deps)))

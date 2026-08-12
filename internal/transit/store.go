@@ -25,8 +25,9 @@ type Store struct {
 	graphs       map[string]*TransitGraph
 }
 
-// NewStore loads all embedded seed data and returns a ready Store.
-func NewStore() (*Store, error) {
+// NewStore loads all embedded seed data and returns a ready Store, compiling
+// each scenario under boardingWait (the global policy from config).
+func NewStore(boardingWait BoardingWaitPolicy) (*Store, error) {
 	s := &Store{
 		travelTimes: make(map[string]TravelTimes),
 		graphs:      make(map[string]*TransitGraph),
@@ -41,7 +42,7 @@ func NewStore() (*Store, error) {
 		if !e.IsDir() {
 			continue
 		}
-		if err := s.loadScenario(e.Name()); err != nil {
+		if err := s.loadScenario(e.Name(), boardingWait); err != nil {
 			return nil, fmt.Errorf("transit: loading scenario %q: %w", e.Name(), err)
 		}
 	}
@@ -51,9 +52,10 @@ func NewStore() (*Store, error) {
 
 // LoadStore builds a read-optimized, compiled Store from a Repository. It reads
 // every scenario's rows (routes, stations, services, travel-time segments) plus
-// the global vehicle types, then compiles each scenario's in-memory TransitGraph.
-// This is the persisted read path: rows in, isochrone-ready graph out.
-func LoadStore(ctx context.Context, repo Repository) (*Store, error) {
+// the global vehicle types, then compiles each scenario's in-memory TransitGraph
+// under boardingWait. This is the persisted read path: rows in, isochrone-ready
+// graph out.
+func LoadStore(ctx context.Context, repo Repository, boardingWait BoardingWaitPolicy) (*Store, error) {
 	s := &Store{
 		travelTimes: make(map[string]TravelTimes),
 		graphs:      make(map[string]*TransitGraph),
@@ -94,7 +96,7 @@ func LoadStore(ctx context.Context, repo Repository) (*Store, error) {
 		s.services = append(s.services, services...)
 		s.travelTimes[sc.Slug] = tt
 
-		g, err := Compile(sc, routes, stations, services, vts, tt)
+		g, err := Compile(sc, routes, stations, services, vts, tt, boardingWait)
 		if err != nil {
 			return nil, fmt.Errorf("transit: compiling %q: %w", sc.Slug, err)
 		}
@@ -104,7 +106,7 @@ func LoadStore(ctx context.Context, repo Repository) (*Store, error) {
 	return s, nil
 }
 
-func (s *Store) loadScenario(slug string) error {
+func (s *Store) loadScenario(slug string, boardingWait BoardingWaitPolicy) error {
 	base := "data/scenarios/" + slug
 
 	var sc Scenario
@@ -146,7 +148,7 @@ func (s *Store) loadScenario(slug string) error {
 	}
 	s.travelTimes[slug] = tt
 
-	g, err := Compile(sc, routes, stations, services, vts, tt)
+	g, err := Compile(sc, routes, stations, services, vts, tt, boardingWait)
 	if err != nil {
 		return err
 	}

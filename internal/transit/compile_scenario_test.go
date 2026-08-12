@@ -38,9 +38,9 @@ func scenarioFixture() ([]Route, []Station, []Service, []VehicleType) {
 func TestCompileScenario_compilesActiveServices(t *testing.T) {
 	routes, stations, services, vehicleTypes := scenarioFixture()
 
-	got, err := CompileScenario(routes, stations, services, vehicleTypes)
+	got, err := CompileScenario(routes, stations, services, vehicleTypes, DefaultBoardingWaitPolicy())
 	if err != nil {
-		t.Fatalf("CompileScenario() error = %v, want nil", err)
+		t.Fatalf("CompileScenario(DefaultBoardingWaitPolicy()) error = %v, want nil", err)
 	}
 	if len(got.Services) != 1 {
 		t.Fatalf("len(Services) = %d, want 1", len(got.Services))
@@ -62,9 +62,9 @@ func TestCompileScenario_skipsInactiveServices(t *testing.T) {
 	routes, stations, services, vehicleTypes := scenarioFixture()
 	services[0].Active = false
 
-	got, err := CompileScenario(routes, stations, services, vehicleTypes)
+	got, err := CompileScenario(routes, stations, services, vehicleTypes, DefaultBoardingWaitPolicy())
 	if err != nil {
-		t.Fatalf("CompileScenario() error = %v, want nil", err)
+		t.Fatalf("CompileScenario(DefaultBoardingWaitPolicy()) error = %v, want nil", err)
 	}
 	if len(got.Services) != 0 {
 		t.Errorf("Services = %+v, want none for an inactive service", got.Services)
@@ -78,9 +78,9 @@ func TestCompileScenario_compilesMultipleServices(t *testing.T) {
 	second.ID = "svc-2"
 	services = append(services, second)
 
-	got, err := CompileScenario(routes, stations, services, vehicleTypes)
+	got, err := CompileScenario(routes, stations, services, vehicleTypes, DefaultBoardingWaitPolicy())
 	if err != nil {
-		t.Fatalf("CompileScenario() error = %v, want nil", err)
+		t.Fatalf("CompileScenario(DefaultBoardingWaitPolicy()) error = %v, want nil", err)
 	}
 	if len(got.Services) != 2 {
 		t.Fatalf("len(Services) = %d, want 2", len(got.Services))
@@ -93,8 +93,8 @@ func TestCompileScenario_errorsOnUnknownRoute(t *testing.T) {
 	routes, stations, services, vehicleTypes := scenarioFixture()
 	services[0].RouteID = "no-such-route"
 
-	if _, err := CompileScenario(routes, stations, services, vehicleTypes); err == nil {
-		t.Error("CompileScenario() error = nil, want an error for an unknown route id")
+	if _, err := CompileScenario(routes, stations, services, vehicleTypes, DefaultBoardingWaitPolicy()); err == nil {
+		t.Error("CompileScenario(DefaultBoardingWaitPolicy()) error = nil, want an error for an unknown route id")
 	}
 }
 
@@ -103,17 +103,17 @@ func TestCompileScenario_errorsOnUnknownVehicleType(t *testing.T) {
 	routes, stations, services, vehicleTypes := scenarioFixture()
 	services[0].VehicleTypeID = "no-such-vehicle"
 
-	if _, err := CompileScenario(routes, stations, services, vehicleTypes); err == nil {
-		t.Error("CompileScenario() error = nil, want an error for an unknown vehicle type id")
+	if _, err := CompileScenario(routes, stations, services, vehicleTypes, DefaultBoardingWaitPolicy()); err == nil {
+		t.Error("CompileScenario(DefaultBoardingWaitPolicy()) error = nil, want an error for an unknown vehicle type id")
 	}
 }
 
 // An empty scenario (no services) compiles to an empty graph rather than an
 // error — the boundary an async job hits for a freshly-created scenario.
 func TestCompileScenario_emptyScenarioCompilesToEmptyGraph(t *testing.T) {
-	got, err := CompileScenario(nil, nil, nil, nil)
+	got, err := CompileScenario(nil, nil, nil, nil, DefaultBoardingWaitPolicy())
 	if err != nil {
-		t.Fatalf("CompileScenario() error = %v, want nil", err)
+		t.Fatalf("CompileScenario(DefaultBoardingWaitPolicy()) error = %v, want nil", err)
 	}
 	if len(got.Services) != 0 {
 		t.Errorf("Services = %+v, want none", got.Services)

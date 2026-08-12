@@ -87,9 +87,9 @@ type ServiceIsochroneStore interface {
 // scenario's current membership; see transit.GraphStale for what "stale" means
 // and why. Since SPA-182 it answers 202 with a routing job rather than a
 // computed result — the seeded /api/isochrone does the same.
-func UserScenarioIsochrone(store ScenarioIsochroneStore, publisher routing.Publisher, log *slog.Logger) http.HandlerFunc {
+func UserScenarioIsochrone(store ScenarioIsochroneStore, publisher routing.Publisher, log *slog.Logger, boardingWait transit.BoardingWaitPolicy) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		authoredTargetIsochrone(w, r, scenarioTarget{store}, store, publisher, log)
+		authoredTargetIsochrone(w, r, scenarioTarget{store}, store, publisher, log, boardingWait)
 	}
 }
 
@@ -108,9 +108,9 @@ func UserScenarioIsochrone(store ScenarioIsochroneStore, publisher routing.Publi
 // In practice that reduces to the timestamp arm: a service is always its own
 // sole member, so it can only go stale by being edited — less often than a
 // scenario, which is also stale on a membership change or any member's edit.
-func UserServiceIsochrone(store ServiceIsochroneStore, publisher routing.Publisher, log *slog.Logger) http.HandlerFunc {
+func UserServiceIsochrone(store ServiceIsochroneStore, publisher routing.Publisher, log *slog.Logger, boardingWait transit.BoardingWaitPolicy) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		authoredTargetIsochrone(w, r, serviceTarget{store}, store, publisher, log)
+		authoredTargetIsochrone(w, r, serviceTarget{store}, store, publisher, log, boardingWait)
 	}
 }
 
@@ -122,7 +122,7 @@ func UserServiceIsochrone(store ServiceIsochroneStore, publisher routing.Publish
 // current — a stale target must never leave a routing job behind for a worker
 // to compute over a graph the owner has already superseded.
 func authoredTargetIsochrone(w http.ResponseWriter, r *http.Request, target authoredTarget,
-	routingStore RoutingStore, publisher routing.Publisher, log *slog.Logger) {
+	routingStore RoutingStore, publisher routing.Publisher, log *slog.Logger, boardingWait transit.BoardingWaitPolicy) {
 	req, ok := validateIsochroneRequest(w, r)
 	if !ok {
 		return
@@ -144,7 +144,7 @@ func authoredTargetIsochrone(w http.ResponseWriter, r *http.Request, target auth
 		writeInternalError(r.Context(), w, "loading member services", err)
 		return
 	}
-	if transit.GraphStale(job, memberIDs, updatedAtByID(members)) {
+	if transit.GraphStale(job, memberIDs, updatedAtByID(members), boardingWait) {
 		writeErrorCode(w, http.StatusConflict, StaleGraphErrorCode,
 			"compiled graph is stale; recompile the "+noun+" and retry")
 		return

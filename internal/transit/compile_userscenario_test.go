@@ -25,9 +25,9 @@ func TestCompileUserScenario_compilesMemberServices(t *testing.T) {
 	routes := []Route{adapterRoute()}
 	services := []UserService{userServiceFixture("svc-1", "line-a")}
 
-	got, err := CompileUserScenario(routes, services, nil)
+	got, err := CompileUserScenario(routes, services, nil, DefaultBoardingWaitPolicy())
 	if err != nil {
-		t.Fatalf("CompileUserScenario() error = %v, want nil", err)
+		t.Fatalf("CompileUserScenario(DefaultBoardingWaitPolicy()) error = %v, want nil", err)
 	}
 	if len(got.Services) != 1 {
 		t.Fatalf("len(Services) = %d, want 1", len(got.Services))
@@ -54,9 +54,9 @@ func TestCompileUserScenario_compilesMultipleMembers(t *testing.T) {
 		userServiceFixture("svc-2", "line-b"),
 	}
 
-	got, err := CompileUserScenario(routes, services, nil)
+	got, err := CompileUserScenario(routes, services, nil, DefaultBoardingWaitPolicy())
 	if err != nil {
-		t.Fatalf("CompileUserScenario() error = %v, want nil", err)
+		t.Fatalf("CompileUserScenario(DefaultBoardingWaitPolicy()) error = %v, want nil", err)
 	}
 	if len(got.Services) != 2 {
 		t.Fatalf("len(Services) = %d, want 2", len(got.Services))
@@ -72,9 +72,9 @@ func TestCompileUserScenario_mergesColocatedStopsAcrossMembers(t *testing.T) {
 		userServiceFixture("svc-2", "line-b"),
 	}
 
-	got, err := CompileUserScenario(routes, services, nil)
+	got, err := CompileUserScenario(routes, services, nil, DefaultBoardingWaitPolicy())
 	if err != nil {
-		t.Fatalf("CompileUserScenario() error = %v, want nil", err)
+		t.Fatalf("CompileUserScenario(DefaultBoardingWaitPolicy()) error = %v, want nil", err)
 	}
 	// The two members share stop coordinates (0,0) and (0,1), so both stops
 	// cluster across services: two realised clusters, two graph nodes.
@@ -91,8 +91,8 @@ func TestCompileUserScenario_mergesColocatedStopsAcrossMembers(t *testing.T) {
 func TestCompileUserScenario_errorsOnUnknownRoute(t *testing.T) {
 	services := []UserService{userServiceFixture("svc-1", "line-a")}
 
-	if _, err := CompileUserScenario(nil, services, nil); err == nil {
-		t.Error("CompileUserScenario() error = nil, want an error for an unknown route id")
+	if _, err := CompileUserScenario(nil, services, nil, DefaultBoardingWaitPolicy()); err == nil {
+		t.Error("CompileUserScenario(DefaultBoardingWaitPolicy()) error = nil, want an error for an unknown route id")
 	}
 }
 
@@ -100,9 +100,9 @@ func TestCompileUserScenario_errorsOnUnknownRoute(t *testing.T) {
 // error — the boundary a compile hits for a freshly-created, unpopulated
 // scenario.
 func TestCompileUserScenario_emptyScenarioCompilesToEmptyGraph(t *testing.T) {
-	got, err := CompileUserScenario(nil, nil, nil)
+	got, err := CompileUserScenario(nil, nil, nil, DefaultBoardingWaitPolicy())
 	if err != nil {
-		t.Fatalf("CompileUserScenario() error = %v, want nil", err)
+		t.Fatalf("CompileUserScenario(DefaultBoardingWaitPolicy()) error = %v, want nil", err)
 	}
 	if len(got.Services) != 0 {
 		t.Errorf("Services = %+v, want none", got.Services)

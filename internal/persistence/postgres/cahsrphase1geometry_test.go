@@ -48,7 +48,7 @@ func TestCaHsrPhase1MigrationGeometryMatchesTheSeed(t *testing.T) {
 // seededPhase1Geometry is the Phase 1 alignment as routes.yaml authors it.
 func seededPhase1Geometry(t *testing.T) transit.GeoLineString {
 	t.Helper()
-	store, err := transit.NewStore()
+	store, err := transit.NewStore(transit.DefaultBoardingWaitPolicy())
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}

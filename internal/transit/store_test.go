@@ -8,7 +8,7 @@ import (
 
 func mustNewStore(t *testing.T) *Store {
 	t.Helper()
-	s, err := NewStore()
+	s, err := NewStore(DefaultBoardingWaitPolicy())
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -16,7 +16,7 @@ func mustNewStore(t *testing.T) *Store {
 }
 
 func TestNewStore(t *testing.T) {
-	store, err := NewStore()
+	store, err := NewStore(DefaultBoardingWaitPolicy())
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}

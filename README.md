@@ -22,7 +22,7 @@ seed YAML (domain model + segment times)
         ▼
 Compile() → TransitGraph, stored as a succeeded compile job
   • per-service edges (run seconds + dwell)
-  • boarding wait = best headway / 2
+  • boarding wait from BOARDING_WAIT_POLICY (default none → 0)
   • nodes (position + names) so the graph plots on its own
         │
         ▼
@@ -43,6 +43,13 @@ GET /api/routing-jobs/{id}  →  status, then the result
 Runtime unit of truth is **seconds** (`Edge.Seconds`, `WaitSecs`,
 `TravelTimeBetween`). HTTP fields that are already minute-labeled
 (`budget_mins`, `access_mins`, `remaining_mins`) stay as-is on the wire.
+
+`BOARDING_WAIT_POLICY` is one of `none` (the default), `half_headway`,
+`full_headway`, or `fixed` with `BOARDING_WAIT_FIXED_SECS`. A malformed or
+incomplete setting falls back to `none` rather than refusing to boot: a typo
+should cost a wait, never a deployment, and never charge one nobody asked for.
+The service reads report the resolved wait as `boarding_wait_policy` and
+`boarding_wait_secs`, so a client never re-derives `min(headway)/2` itself.
 
 ### The queue contract
 

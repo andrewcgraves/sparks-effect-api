@@ -134,7 +134,7 @@ func CreateService(store ServiceStore) http.HandlerFunc {
 // GetService returns one service by slug. Reads are owner-scoped: a service is
 // authored content, not curated platform data, so it is visible only to its
 // owner (and to admins, per auth.CanAccess).
-func GetService(store ServiceStore) http.HandlerFunc {
+func GetService(store ServiceStore, boardingWait transit.BoardingWaitPolicy) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		svc, ok := loadService(w, r, store)
 		if !ok {
@@ -143,7 +143,7 @@ func GetService(store ServiceStore) http.HandlerFunc {
 		if !authorizeService(w, r, svc) {
 			return
 		}
-		writeJSON(w, http.StatusOK, svc)
+		writeJSON(w, http.StatusOK, withBoardingWait(r.Context(), svc, boardingWait))
 	}
 }
 
@@ -152,7 +152,7 @@ func GetService(store ServiceStore) http.HandlerFunc {
 // Distinct from MyServices, which lists the seeded transit.Service rows the
 // physics compiler consumes; these are the self-contained services a user
 // authored themselves.
-func MyUserServices(store ServiceStore) http.HandlerFunc {
+func MyUserServices(store ServiceStore, boardingWait transit.BoardingWaitPolicy) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := auth.UserFrom(r.Context())
 		if !ok {
@@ -168,7 +168,7 @@ func MyUserServices(store ServiceStore) http.HandlerFunc {
 		if services == nil {
 			services = []transit.UserService{}
 		}
-		writeJSON(w, http.StatusOK, services)
+		writeJSON(w, http.StatusOK, withBoardingWaits(r.Context(), services, boardingWait))
 	}
 }
 

@@ -47,7 +47,7 @@ type SeededCompileStore interface {
 // and the worker's compile-job path both route through it, so a graph produced
 // on startup and one produced by POST /api/scenarios/{slug}/compile are the
 // same graph.
-func CompileSeededScenario(ctx context.Context, src SeededCompileSource, sc Scenario) (TransitGraph, error) {
+func CompileSeededScenario(ctx context.Context, src SeededCompileSource, sc Scenario, boardingWait BoardingWaitPolicy) (TransitGraph, error) {
 	routes, err := src.ListRoutesByScenario(ctx, sc.ID)
 	if err != nil {
 		return TransitGraph{}, fmt.Errorf("transit: loading routes for %q: %w", sc.Slug, err)
@@ -72,7 +72,7 @@ func CompileSeededScenario(ctx context.Context, src SeededCompileSource, sc Scen
 		return TransitGraph{}, fmt.Errorf("transit: scenario %q has no travel times to compile", sc.Slug)
 	}
 
-	graph, err := Compile(sc, routes, stations, services, vehicleTypes, tt)
+	graph, err := Compile(sc, routes, stations, services, vehicleTypes, tt, boardingWait)
 	if err != nil {
 		return TransitGraph{}, fmt.Errorf("transit: compiling %q: %w", sc.Slug, err)
 	}
@@ -129,7 +129,7 @@ func CompileSeededScenario(ctx context.Context, src SeededCompileSource, sc Scen
 // The job it writes is unowned (see Job.OwnerID). Seeding runs before any
 // account exists, and needing admin credentials to get a public graph is the
 // manual step this closes.
-func CompileSeededIfNeeded(ctx context.Context, store SeededCompileStore) (int, error) {
+func CompileSeededIfNeeded(ctx context.Context, store SeededCompileStore, boardingWait BoardingWaitPolicy) (int, error) {
 	scenarios, err := store.ListScenarios(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("transit: listing scenarios to compile: %w", err)
@@ -142,7 +142,7 @@ func CompileSeededIfNeeded(ctx context.Context, store SeededCompileStore) (int, 
 			return compiled, fmt.Errorf("transit: checking compiled graph for %q: %w", sc.Slug, err)
 		}
 
-		graph, err := CompileSeededScenario(ctx, store, sc)
+		graph, err := CompileSeededScenario(ctx, store, sc, boardingWait)
 		if err != nil {
 			return compiled, err
 		}

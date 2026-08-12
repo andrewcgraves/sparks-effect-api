@@ -43,7 +43,7 @@ func MyScenarios(store OwnerStore) http.HandlerFunc {
 // MyServices returns the services owned by the authenticated caller. Admins are
 // scoped to their own rows here too: admin rights gate privileged endpoints,
 // they do not redefine what "mine" means.
-func MyServices(store OwnerStore) http.HandlerFunc {
+func MyServices(store OwnerStore, boardingWait transit.BoardingWaitPolicy) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := auth.UserFrom(r.Context())
 		if !ok {
@@ -59,6 +59,6 @@ func MyServices(store OwnerStore) http.HandlerFunc {
 		if services == nil {
 			services = []transit.Service{}
 		}
-		writeJSON(w, http.StatusOK, services)
+		writeJSON(w, http.StatusOK, withBoardingWaits(r.Context(), services, boardingWait))
 	}
 }

@@ -127,7 +127,7 @@ func ScenarioRoutes(store *transit.Store) http.HandlerFunc {
 }
 
 // ScenarioServices returns a handler that lists the services for a scenario.
-func ScenarioServices(store *transit.Store) http.HandlerFunc {
+func ScenarioServices(store *transit.Store, boardingWait transit.BoardingWaitPolicy) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		slug := r.PathValue("slug")
 		sc, ok := store.GetScenarioBySlug(slug)
@@ -135,7 +135,7 @@ func ScenarioServices(store *transit.Store) http.HandlerFunc {
 			writeError(w, http.StatusNotFound, "scenario not found")
 			return
 		}
-		writeJSON(w, http.StatusOK, store.GetServicesByScenario(sc.ID))
+		writeJSON(w, http.StatusOK, withBoardingWaits(r.Context(), store.GetServicesByScenario(sc.ID), boardingWait))
 	}
 }
 

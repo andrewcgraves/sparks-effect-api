@@ -97,7 +97,8 @@ func crossingScenario() ([]Route, []Station, []Service, []VehicleType) {
 // is precisely the failure SPA-83's chainer would hit — a node key with no
 // location — so it is asserted directly on a compiled graph.
 func TestCompileScenario_nodesCloseOverEveryEdgeKey(t *testing.T) {
-	graph, err := CompileScenario(crossingScenario())
+	routes, stations, services, vehicleTypes := crossingScenario()
+	graph, err := CompileScenario(routes, stations, services, vehicleTypes, DefaultBoardingWaitPolicy())
 	if err != nil {
 		t.Fatalf("CompileScenario() error = %v, want nil", err)
 	}
@@ -133,7 +134,8 @@ func TestCompileScenario_nodesCloseOverEveryEdgeKey(t *testing.T) {
 // The merged interchange node carries the cluster-key member's coordinate, not
 // a centroid, all the way through the physics compile.
 func TestCompileScenario_mergedNodeUsesKeyMemberCoordinate(t *testing.T) {
-	graph, err := CompileScenario(crossingScenario())
+	routes, stations, services, vehicleTypes := crossingScenario()
+	graph, err := CompileScenario(routes, stations, services, vehicleTypes, DefaultBoardingWaitPolicy())
 	if err != nil {
 		t.Fatalf("CompileScenario() error = %v, want nil", err)
 	}
@@ -173,9 +175,9 @@ func TestCompileServices_userServiceNodeCarriesPersistedSnappedCoord(t *testing.
 	}
 
 	cs := mustCompilableFromUserService(t, adapterRoute(), svc)
-	graph, err := CompileServices([]CompilableService{cs}, nil)
+	graph, err := CompileServices([]CompilableService{cs}, nil, DefaultBoardingWaitPolicy())
 	if err != nil {
-		t.Fatalf("CompileServices() error = %v, want nil", err)
+		t.Fatalf("CompileServices(DefaultBoardingWaitPolicy()) error = %v, want nil", err)
 	}
 
 	bySlug := nodeBySlug(graph.Nodes)
