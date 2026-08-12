@@ -106,9 +106,8 @@ func (sg *ServiceGraph) applyBoardingWait(policy BoardingWaitPolicy, windows []F
 }
 
 // ResolveForWindows returns the policy kind and wait seconds that would be
-// baked into a ServiceGraph for the given frequency windows. Callers that
-// already validated the policy (config.Load) treat a resolution error as
-// impossible; it is still surfaced rather than silently remapped.
+// baked into a ServiceGraph for the given frequency windows. A resolution
+// error is surfaced rather than silently remapped onto a non-zero wait.
 func (p BoardingWaitPolicy) ResolveForWindows(windows []FrequencyWindow) (kind string, secs int, err error) {
 	secs, err = p.WaitSecs(windows)
 	if err != nil {

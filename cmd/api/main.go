@@ -25,13 +25,7 @@ import (
 
 func main() {
 	_ = godotenv.Load()
-	cfg, err := config.Load()
-	if err != nil {
-		// Logger is not installed yet; stderr is enough for a boot-time
-		// configuration fault that must stop the process before it serves.
-		slog.Error("invalid configuration", "error", err)
-		os.Exit(1)
-	}
+	cfg := config.Load()
 
 	// Installed as the process-wide default too, so code with no logger
 	// threaded to it still emits the same leveled JSON through slog's
