@@ -324,9 +324,9 @@ func TestCompileServices_journeyCrossesAMergedNode(t *testing.T) {
 		},
 	}
 
-	graph, err := CompileServices([]CompilableService{svcA, svcB}, nil)
+	graph, err := CompileServices([]CompilableService{svcA, svcB}, nil, DefaultBoardingWaitPolicy())
 	if err != nil {
-		t.Fatalf("CompileServices() error = %v, want nil", err)
+		t.Fatalf("CompileServices(DefaultBoardingWaitPolicy()) error = %v, want nil", err)
 	}
 
 	// The cross stops merged onto a--cross (it sorts before b--cross).
@@ -508,8 +508,8 @@ func TestCompileServices_rejectsInterchangePairOnSameService(t *testing.T) {
 		{A: StopIdentity{ServiceID: "svc-a", Slug: "a--north"}, B: StopIdentity{ServiceID: "svc-a", Slug: "a--south"}},
 	}
 
-	if _, err := CompileServices(svcs, pairs); err == nil {
-		t.Error("CompileServices() error = nil, want an error for a same-service interchange pair")
+	if _, err := CompileServices(svcs, pairs, DefaultBoardingWaitPolicy()); err == nil {
+		t.Error("CompileServices(DefaultBoardingWaitPolicy()) error = nil, want an error for a same-service interchange pair")
 	}
 }
 
@@ -524,8 +524,8 @@ func TestCompileServices_rejectsInterchangePairWithUnknownStop(t *testing.T) {
 		{A: StopIdentity{ServiceID: "svc-a", Slug: "a--north"}, B: StopIdentity{ServiceID: "svc-b", Slug: "b--nonexistent"}},
 	}
 
-	if _, err := CompileServices(svcs, pairs); err == nil {
-		t.Error("CompileServices() error = nil, want an error for an unknown stop slug")
+	if _, err := CompileServices(svcs, pairs, DefaultBoardingWaitPolicy()); err == nil {
+		t.Error("CompileServices(DefaultBoardingWaitPolicy()) error = nil, want an error for an unknown stop slug")
 	}
 }
 
@@ -557,9 +557,9 @@ func TestCompileServices_journeyCrossesADeclaredInterchange(t *testing.T) {
 		{A: StopIdentity{ServiceID: "svc-a", Slug: "a--cross"}, B: StopIdentity{ServiceID: "svc-b", Slug: "b--cross"}},
 	}
 
-	graph, err := CompileServices([]CompilableService{svcA, svcB}, pairs)
+	graph, err := CompileServices([]CompilableService{svcA, svcB}, pairs, DefaultBoardingWaitPolicy())
 	if err != nil {
-		t.Fatalf("CompileServices() error = %v, want nil", err)
+		t.Fatalf("CompileServices(DefaultBoardingWaitPolicy()) error = %v, want nil", err)
 	}
 
 	secs, _, _, ok := graphDijkstra(&graph, "a--west", "b--north")

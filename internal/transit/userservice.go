@@ -28,6 +28,12 @@ type UserService struct {
 	FrequencyWindows []FrequencyWindow  `json:"frequency_windows"`
 	CreatedAt        time.Time          `json:"created_at"`
 	UpdatedAt        time.Time          `json:"updated_at"`
+	// BoardingWaitPolicy and BoardingWaitSecs are the resolved boarding wait
+	// that would be compiled into this service's graph under the current global
+	// policy (SPA-236). They are response-only — never persisted — and filled
+	// by the read handlers so a client never has to re-derive them.
+	BoardingWaitPolicy string `json:"boarding_wait_policy,omitempty"`
+	BoardingWaitSecs   int    `json:"boarding_wait_secs"`
 }
 
 // VehicleParams are the rolling-stock capabilities a user sets on their own

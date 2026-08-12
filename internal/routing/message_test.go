@@ -49,7 +49,8 @@ func goldenGraph() *transit.TransitGraph {
 			Edges: []transit.Edge{
 				{FromSlug: "north", ToSlug: "south", Seconds: 1800},
 			},
-			WaitSecs: 300,
+			WaitSecs:   300,
+			WaitPolicy: string(transit.BoardingWaitFixed),
 		}},
 		Nodes: []transit.GraphNode{
 			{Slug: "north", Lat: 37.7749, Lng: -122.4194, Names: []string{"North"}},

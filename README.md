@@ -22,7 +22,7 @@ seed YAML (domain model + segment times)
         ▼
 Compile() → TransitGraph, stored as a succeeded compile job
   • per-service edges (run seconds + dwell)
-  • boarding wait = best headway / 2
+  • boarding wait from BOARDING_WAIT_POLICY (default none → 0)
   • nodes (position + names) so the graph plots on its own
         │
         ▼

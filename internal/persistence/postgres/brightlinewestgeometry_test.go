@@ -21,7 +21,7 @@ import (
 // Victor Valley's coordinate is unaffected by that fix and 00012 is still
 // its source of truth for a deployed database, so the pin for it stays here.
 func TestBrightlineWestMigrationStationsMatchTheSeed(t *testing.T) {
-	store, err := transit.NewStore()
+	store, err := transit.NewStore(transit.DefaultBoardingWaitPolicy())
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}

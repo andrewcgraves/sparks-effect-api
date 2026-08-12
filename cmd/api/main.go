@@ -25,7 +25,13 @@ import (
 
 func main() {
 	_ = godotenv.Load()
-	cfg := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		// Logger is not installed yet; stderr is enough for a boot-time
+		// configuration fault that must stop the process before it serves.
+		slog.Error("invalid configuration", "error", err)
+		os.Exit(1)
+	}
 
 	// Installed as the process-wide default too, so code with no logger
 	// threaded to it still emits the same leveled JSON through slog's
@@ -113,7 +119,7 @@ func loadStore(ctx context.Context, cfg config.Config, lg *slog.Logger) (*transi
 
 	if cfg.DatabaseURL == "" {
 		lg.Info("DATABASE_URL not set; using read-only embedded store (authentication disabled)")
-		store, err := transit.NewStore()
+		store, err := transit.NewStore(cfg.BoardingWait)
 		return store, nil, noop, err
 	}
 
@@ -139,7 +145,11 @@ func loadStore(ctx context.Context, cfg config.Config, lg *slog.Logger) (*transi
 	// public isochrone without an admin triggering a compile by hand (SPA-181).
 	// A scenario that already has a compiled graph is skipped, so a restart
 	// against a populated database does no work here.
-	compiled, err := transit.CompileSeededIfNeeded(ctx, repo)
+	//
+	// Changing BOARDING_WAIT_POLICY makes every stored ServiceGraph compare
+	// unequal (WaitPolicy / WaitSecs), so the first boot after a policy change
+	// recompiles once — expected, not a fault (SPA-236).
+	compiled, err := transit.CompileSeededIfNeeded(ctx, repo, cfg.BoardingWait)
 	if err != nil {
 		repo.Close()
 		return nil, nil, noop, err
@@ -148,7 +158,7 @@ func loadStore(ctx context.Context, cfg config.Config, lg *slog.Logger) (*transi
 		lg.Info("compiled seeded scenarios", "count", compiled)
 	}
 
-	store, err := transit.LoadStore(ctx, repo)
+	store, err := transit.LoadStore(ctx, repo, cfg.BoardingWait)
 	if err != nil {
 		repo.Close()
 		return nil, nil, noop, err

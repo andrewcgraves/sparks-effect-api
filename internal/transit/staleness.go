@@ -3,7 +3,8 @@ package transit
 import "time"
 
 // GraphStale reports whether job's compiled graph no longer reflects a user
-// scenario's current state (SPA-83 decision 4, corrected by SPA-116).
+// scenario's current state (SPA-83 decision 4, corrected by SPA-116; boarding
+// wait policy added by SPA-236).
 //
 // The original rule compared timestamps alone —
 // max(scenario.updated_at, max(member.updated_at)) > job.created_at — which
@@ -21,6 +22,14 @@ import "time"
 // the one question timestamps are actually good at: whether a still-present
 // member changed since compile, via currentServiceUpdatedAt.
 //
+// currentPolicy is the boarding-wait policy the next compile would bake in.
+// A global policy change touches neither membership nor updated_at, so without
+// this check a user-authored graph would silently keep charging the old wait.
+// Each ServiceGraph records the policy that produced its WaitSecs; any mismatch
+// (including a pre-SPA-236 graph with an empty WaitPolicy) is stale. For fixed
+// policies the seconds are compared too, so changing BOARDING_WAIT_FIXED_SECS
+// alone is caught.
+//
 // The comparison point is job.CreatedAt, not a completion timestamp, and must
 // stay that way: job created T0, worker reads data at T0+2, user edits at
 // T0+3, job completes at T0+4 carrying pre-edit data. Against created_at
@@ -29,7 +38,7 @@ import "time"
 // silently so. Comparing against created_at can produce one spurious 409 and
 // recompile in the narrow window before the worker's read, which converges
 // harmlessly; comparing against completion cannot detect the edit at all.
-func GraphStale(job Job, currentServiceIDs []string, currentServiceUpdatedAt map[string]time.Time) bool {
+func GraphStale(job Job, currentServiceIDs []string, currentServiceUpdatedAt map[string]time.Time, currentPolicy BoardingWaitPolicy) bool {
 	compiled := make(map[string]bool, len(job.CompiledServiceIDs))
 	for _, id := range job.CompiledServiceIDs {
 		compiled[id] = true
@@ -44,6 +53,24 @@ func GraphStale(job Job, currentServiceIDs []string, currentServiceUpdatedAt map
 	}
 	for _, id := range currentServiceIDs {
 		if t, ok := currentServiceUpdatedAt[id]; ok && t.After(job.CreatedAt) {
+			return true
+		}
+	}
+	if job.Result != nil && boardingWaitStale(*job.Result, currentPolicy) {
+		return true
+	}
+	return false
+}
+
+// boardingWaitStale reports whether any service graph was compiled under a
+// different boarding-wait policy (or fixed seconds) than currentPolicy.
+func boardingWaitStale(graph TransitGraph, current BoardingWaitPolicy) bool {
+	wantKind := string(current.kindOrNone())
+	for _, sg := range graph.Services {
+		if sg.WaitPolicy != wantKind {
+			return true
+		}
+		if current.Kind == BoardingWaitFixed && sg.WaitSecs != current.FixedSecs {
 			return true
 		}
 	}

@@ -13,7 +13,8 @@
             "seconds": 1800
           }
         ],
-        "wait_secs": 300
+        "wait_secs": 300,
+        "wait_policy": "fixed"
       }
     ],
     "merge": {},

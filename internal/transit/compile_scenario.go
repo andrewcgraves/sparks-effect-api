@@ -22,7 +22,7 @@ import "fmt"
 // slug, so a cluster's key is the slug they already shared — but running it
 // keeps one compile path rather than two, and it does report the shared
 // stations as realised clusters.
-func CompileScenario(routes []Route, stations []Station, services []Service, vehicleTypes []VehicleType) (TransitGraph, error) {
+func CompileScenario(routes []Route, stations []Station, services []Service, vehicleTypes []VehicleType, boardingWait BoardingWaitPolicy) (TransitGraph, error) {
 	routesByID := make(map[string]Route, len(routes))
 	for _, rt := range routes {
 		routesByID[rt.ID] = rt
@@ -52,7 +52,7 @@ func CompileScenario(routes []Route, stations []Station, services []Service, veh
 		}
 		compilables = append(compilables, cs)
 	}
-	return CompileServices(compilables, nil)
+	return CompileServices(compilables, nil, boardingWait)
 }
 
 // CompileServices compiles a set of services that share a scenario into one
@@ -80,7 +80,7 @@ func CompileScenario(routes []Route, stations []Station, services []Service, veh
 // has no such concept). It is validated here, against these exact svcs,
 // before MergeColocatedStops ever sees it — the one place both a pair's
 // claimed identities and the real stop list are in scope together.
-func CompileServices(svcs []CompilableService, pairs []InterchangePair) (TransitGraph, error) {
+func CompileServices(svcs []CompilableService, pairs []InterchangePair, boardingWait BoardingWaitPolicy) (TransitGraph, error) {
 	if err := validateInterchangePairs(svcs, pairs); err != nil {
 		return TransitGraph{}, err
 	}
@@ -92,7 +92,7 @@ func CompileServices(svcs []CompilableService, pairs []InterchangePair) (Transit
 	// not provide (its seeded isochrone sources positions elsewhere).
 	graph := TransitGraph{Merge: report, Nodes: nodes}
 	for _, cs := range merged {
-		sg, err := CompileServicePhysics(cs)
+		sg, err := CompileServicePhysics(cs, boardingWait)
 		if err != nil {
 			return TransitGraph{}, err
 		}

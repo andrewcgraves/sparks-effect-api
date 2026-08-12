@@ -28,7 +28,7 @@ import (
 // Edges reuse the same forward motion time in both directions (the existing
 // hand-authored-table compiler's convention — see TravelTimes), varying only by
 // which end's dwell they carry, matching pathDwellSecs in compile.go.
-func CompileServicePhysics(svc CompilableService) (ServiceGraph, error) {
+func CompileServicePhysics(svc CompilableService, boardingWait BoardingWaitPolicy) (ServiceGraph, error) {
 	line, err := ToPhysicsLine(svc.Route.Geometry)
 	if err != nil {
 		return ServiceGraph{}, fmt.Errorf("compile: service %q: %w", svc.ID, err)
@@ -73,7 +73,10 @@ func CompileServicePhysics(svc CompilableService) (ServiceGraph, error) {
 		DecelerationMS2: svc.Vehicle.DecelerationMS2,
 	}
 
-	sg := ServiceGraph{ServiceID: svc.ID, WaitSecs: bestHeadwayOver2(svc.Windows)}
+	sg := ServiceGraph{ServiceID: svc.ID}
+	if err := sg.applyBoardingWait(boardingWait, svc.Windows); err != nil {
+		return ServiceGraph{}, fmt.Errorf("compile: service %q: %w", svc.ID, err)
+	}
 	for _, span := range spans {
 		runSecsF, err := physics.SpanRunSeconds(span, vehicle)
 		if err != nil {

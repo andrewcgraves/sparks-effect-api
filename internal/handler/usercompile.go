@@ -17,9 +17,9 @@ import (
 // alone as the degenerate one-member scenario (see transit.CompileUserScenario)
 // — and in being owner-scoped: a caller may only compile their own service, and
 // a service they do not own answers 404, exactly as the service CRUD does.
-func CompileUserService(store CompileStore) http.HandlerFunc {
+func CompileUserService(store CompileStore, boardingWait transit.BoardingWaitPolicy) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		compileAuthoredTarget(w, r, store, serviceTarget{store})
+		compileAuthoredTarget(w, r, store, serviceTarget{store}, boardingWait)
 	}
 }
 
@@ -28,9 +28,9 @@ func CompileUserService(store CompileStore) http.HandlerFunc {
 // The scenario twin of CompileUserService: it compiles the caller's curated set
 // of member services as one network. Owner-scoped identically — a scenario the
 // caller does not own answers 404.
-func CompileUserScenario(store CompileStore) http.HandlerFunc {
+func CompileUserScenario(store CompileStore, boardingWait transit.BoardingWaitPolicy) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		compileAuthoredTarget(w, r, store, scenarioTarget{store})
+		compileAuthoredTarget(w, r, store, scenarioTarget{store}, boardingWait)
 	}
 }
 
@@ -40,7 +40,7 @@ func CompileUserScenario(store CompileStore) http.HandlerFunc {
 // Authentication is checked before the target is resolved, so an unauthenticated
 // caller gets a 401 rather than the 404 an unknown slug would earn — the request
 // is unauthenticated regardless of which slug it names.
-func compileAuthoredTarget(w http.ResponseWriter, r *http.Request, store CompileStore, target authoredTarget) {
+func compileAuthoredTarget(w http.ResponseWriter, r *http.Request, store CompileStore, target authoredTarget, boardingWait transit.BoardingWaitPolicy) {
 	user, ok := auth.UserFrom(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "authentication required")
@@ -56,7 +56,7 @@ func compileAuthoredTarget(w http.ResponseWriter, r *http.Request, store Compile
 	if !ok {
 		return
 	}
-	enqueueCompile(store, job)
+	enqueueCompile(store, job, boardingWait)
 	writeJSON(w, http.StatusAccepted, job)
 }
 

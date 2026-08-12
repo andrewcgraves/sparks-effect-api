@@ -153,7 +153,7 @@ const (
 
 func newTestServer(t *testing.T, deps AuthDeps) http.Handler {
 	t.Helper()
-	store, err := transit.NewStore()
+	store, err := transit.NewStore(transit.DefaultBoardingWaitPolicy())
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}

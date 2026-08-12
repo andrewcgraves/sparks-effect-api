@@ -12,7 +12,7 @@ func compileSeeded(t *testing.T, route Route, stations []Station, svc Service, v
 	if err != nil {
 		return ServiceGraph{}, err
 	}
-	return CompileServicePhysics(cs)
+	return CompileServicePhysics(cs, DefaultBoardingWaitPolicy())
 }
 
 func physicsTestVehicle() VehicleType {
@@ -72,7 +72,7 @@ func TestCompileServicePhysics_twoStopStraightLine(t *testing.T) {
 
 	got, err := compileSeeded(t, route, stations, svc, physicsTestVehicle())
 	if err != nil {
-		t.Fatalf("CompileServicePhysics() error = %v, want nil", err)
+		t.Fatalf("CompileServicePhysics(DefaultBoardingWaitPolicy()) error = %v, want nil", err)
 	}
 	if got.ServiceID != "svc-1" {
 		t.Errorf("ServiceID = %q, want %q", got.ServiceID, "svc-1")
@@ -129,7 +129,7 @@ func TestCompileServicePhysics_edgesReportDwellAlongsideTotal(t *testing.T) {
 
 	got, err := compileSeeded(t, route, stations, svc, physicsTestVehicle())
 	if err != nil {
-		t.Fatalf("CompileServicePhysics() error = %v, want nil", err)
+		t.Fatalf("CompileServicePhysics(DefaultBoardingWaitPolicy()) error = %v, want nil", err)
 	}
 
 	const motionSecs = 11129
@@ -175,7 +175,7 @@ func TestCompileServicePhysics_feedsDijkstra(t *testing.T) {
 
 	sg, err := compileSeeded(t, route, stations, svc, physicsTestVehicle())
 	if err != nil {
-		t.Fatalf("CompileServicePhysics() error = %v, want nil", err)
+		t.Fatalf("CompileServicePhysics(DefaultBoardingWaitPolicy()) error = %v, want nil", err)
 	}
 
 	secs, ok := servicePathSecs(sg, "a", "b")
@@ -212,7 +212,7 @@ func TestCompileServicePhysics_threeStopsProduceTwoSpans(t *testing.T) {
 
 	got, err := compileSeeded(t, route, stations, svc, physicsTestVehicle())
 	if err != nil {
-		t.Fatalf("CompileServicePhysics() error = %v, want nil", err)
+		t.Fatalf("CompileServicePhysics(DefaultBoardingWaitPolicy()) error = %v, want nil", err)
 	}
 	if len(got.Edges) != 4 {
 		t.Fatalf("len(Edges) = %d, want 4 (a<->b, b<->c)", len(got.Edges))
@@ -298,7 +298,7 @@ func TestCompileServicePhysics_errorsOnUnknownStation(t *testing.T) {
 	}
 
 	if _, err := compileSeeded(t, route, stations, svc, physicsTestVehicle()); err == nil {
-		t.Error("CompileServicePhysics() error = nil, want an error for an unknown station id")
+		t.Error("CompileServicePhysics(DefaultBoardingWaitPolicy()) error = nil, want an error for an unknown station id")
 	}
 }
 
@@ -318,7 +318,7 @@ func TestCompileServicePhysics_errorsOnRouteWithFewerThanTwoPoints(t *testing.T)
 	}
 
 	if _, err := compileSeeded(t, route, stations, svc, physicsTestVehicle()); err == nil {
-		t.Error("CompileServicePhysics() error = nil, want an error for a route with < 2 geometry points")
+		t.Error("CompileServicePhysics(DefaultBoardingWaitPolicy()) error = nil, want an error for a route with < 2 geometry points")
 	}
 }
 
@@ -340,8 +340,8 @@ func TestCompileServicePhysics_errorsOnDuplicateStopSlug(t *testing.T) {
 		},
 	}
 
-	if _, err := CompileServicePhysics(svc); err == nil {
-		t.Error("CompileServicePhysics() error = nil, want an error for two stops sharing a slug")
+	if _, err := CompileServicePhysics(svc, DefaultBoardingWaitPolicy()); err == nil {
+		t.Error("CompileServicePhysics(DefaultBoardingWaitPolicy()) error = nil, want an error for two stops sharing a slug")
 	}
 }
 
@@ -364,6 +364,6 @@ func TestCompileServicePhysics_errorsOnSegmentCountMismatch(t *testing.T) {
 	}
 
 	if _, err := compileSeeded(t, route, stations, svc, physicsTestVehicle()); err == nil {
-		t.Error("CompileServicePhysics() error = nil, want an error on a route/segment count mismatch")
+		t.Error("CompileServicePhysics(DefaultBoardingWaitPolicy()) error = nil, want an error on a route/segment count mismatch")
 	}
 }

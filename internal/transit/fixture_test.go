@@ -76,7 +76,7 @@ func TestFixture_CompileFailuresDescriptive(t *testing.T) {
 
 	_, err := Compile(sc, nil, stations, nil, nil, TravelTimes{
 		Segments: []SegmentTime{{FromSlug: "a", ToSlug: "ghost", RunSeconds: 60}},
-	})
+	}, DefaultBoardingWaitPolicy())
 	if err == nil || !strings.Contains(err.Error(), "ghost") {
 		t.Fatalf("unknown slug: want error mentioning ghost, got %v", err)
 	}
@@ -84,7 +84,7 @@ func TestFixture_CompileFailuresDescriptive(t *testing.T) {
 	_, err = Compile(sc, nil, stations, []Service{{
 		ID: "svc-1", Active: true, VehicleTypeID: "vt-1",
 		Stops: []ServiceStop{{StationID: "st-a", Sequence: 1}, {StationID: "missing", Sequence: 2}},
-	}}, []VehicleType{vt}, testSegments())
+	}}, []VehicleType{vt}, testSegments(), DefaultBoardingWaitPolicy())
 	if err == nil || !strings.Contains(err.Error(), "missing") {
 		t.Fatalf("unknown stop: want error mentioning missing, got %v", err)
 	}
@@ -93,14 +93,14 @@ func TestFixture_CompileFailuresDescriptive(t *testing.T) {
 	_, err = Compile(sc, nil, orphanStations, []Service{{
 		ID: "svc-1", Active: true, VehicleTypeID: "vt-1",
 		Stops: []ServiceStop{{StationID: "st-orphan", Sequence: 1}},
-	}}, []VehicleType{vt}, testSegments())
+	}}, []VehicleType{vt}, testSegments(), DefaultBoardingWaitPolicy())
 	if err == nil || !strings.Contains(err.Error(), "orphan") {
 		t.Fatalf("disconnected stop: want error mentioning orphan, got %v", err)
 	}
 }
 
 func TestFixture_NewStoreRejectsWouldSurfaceCompileErrors(t *testing.T) {
-	_, err := NewStore()
+	_, err := NewStore(DefaultBoardingWaitPolicy())
 	if err != nil {
 		t.Fatalf("valid seed must boot: %v", err)
 	}

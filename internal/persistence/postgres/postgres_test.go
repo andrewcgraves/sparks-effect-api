@@ -105,7 +105,7 @@ func TestSeedAndCompiledReadPathAcrossRestart(t *testing.T) {
 	}
 	defer repo2.Close()
 
-	store, err := transit.LoadStore(ctx, repo2)
+	store, err := transit.LoadStore(ctx, repo2, transit.DefaultBoardingWaitPolicy())
 	if err != nil {
 		t.Fatalf("LoadStore: %v", err)
 	}

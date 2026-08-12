@@ -20,10 +20,21 @@ type Edge struct {
 	DwellS   int    `json:"dwell_s,omitempty"`
 }
 
+// ServiceGraph is one service's contribution to a TransitGraph: its directed
+// edges plus the boarding wait charged once when a rider boards this service
+// at the path origin (see graphDijkstra).
+//
+// WaitSecs is that boarding wait in seconds — not a transfer penalty. How it
+// is derived is controlled by the global BoardingWaitPolicy (default none → 0);
+// WaitPolicy records which policy produced it so GraphStale and the API read
+// surface can tell a stored graph from the current setting without re-deriving.
+// WaitPolicy is additive and optional on decode: a jobs.result row written
+// before it unmarshals with WaitPolicy empty.
 type ServiceGraph struct {
-	ServiceID string `json:"service_id"`
-	Edges     []Edge `json:"edges"`
-	WaitSecs  int    `json:"wait_secs"`
+	ServiceID  string `json:"service_id"`
+	Edges      []Edge `json:"edges"`
+	WaitSecs   int    `json:"wait_secs"`
+	WaitPolicy string `json:"wait_policy,omitempty"`
 }
 
 // GraphNode is one addressable point in a compiled graph: the key every
@@ -94,6 +105,7 @@ func Compile(
 	services []Service,
 	vehicleTypes []VehicleType,
 	segmentRunTimes TravelTimes,
+	boardingWait BoardingWaitPolicy,
 ) (*TransitGraph, error) {
 	stationsByID := make(map[string]Station, len(stations))
 	stationsBySlug := make(map[string]Station, len(stations))
@@ -144,7 +156,10 @@ func Compile(
 			slugs = append(slugs, st.Slug)
 		}
 
-		sg := ServiceGraph{ServiceID: svc.ID, WaitSecs: bestHeadwayOver2(svc.FrequencyWindows)}
+		sg := ServiceGraph{ServiceID: svc.ID}
+		if err := sg.applyBoardingWait(boardingWait, svc.FrequencyWindows); err != nil {
+			return nil, fmt.Errorf("compile: service %q: %w", svc.ID, err)
+		}
 		for i := 0; i+1 < len(slugs); i++ {
 			fromSlug, toSlug := slugs[i], slugs[i+1]
 			runSecs, path, pathErr := segmentPathSeconds(adj, fromSlug, toSlug)
@@ -316,16 +331,10 @@ func reversePath(path []string) []string {
 }
 
 func bestHeadwayOver2(windows []FrequencyWindow) int {
-	if len(windows) == 0 {
-		return 0
-	}
-	best := windows[0].HeadwayS
-	for _, w := range windows[1:] {
-		if w.HeadwayS < best {
-			best = w.HeadwayS
-		}
-	}
-	return best / 2
+	// Preserved as the half_headway resolver for shared frequency-window tests.
+	// Compilers go through BoardingWaitPolicy.WaitSecs instead.
+	secs, _ := BoardingWaitPolicy{Kind: BoardingWaitHalfHeadway}.WaitSecs(windows)
+	return secs
 }
 
 func resolveDwell(stop ServiceStop, st Station, vt VehicleType) int {

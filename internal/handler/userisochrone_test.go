@@ -17,7 +17,7 @@ import (
 
 func userIsochroneMux(store handler.ScenarioIsochroneStore, pub routing.Publisher) *http.ServeMux {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/user-scenarios/{slug}/isochrone", handler.UserScenarioIsochrone(store, pub, logger.Discard()))
+	mux.HandleFunc("POST /api/user-scenarios/{slug}/isochrone", handler.UserScenarioIsochrone(store, pub, logger.Discard(), transit.DefaultBoardingWaitPolicy()))
 	return mux
 }
 
@@ -38,7 +38,7 @@ const isoValidBody = `{"lat":37.7,"lng":-122.4,"budget_mins":30,"mode":"walk"}`
 func freshGraph() *transit.TransitGraph {
 	return &transit.TransitGraph{
 		Services: []transit.ServiceGraph{{
-			ServiceID: "svc-1", WaitSecs: 60,
+			ServiceID: "svc-1", WaitSecs: 0, WaitPolicy: string(transit.BoardingWaitNone),
 			Edges: []transit.Edge{{FromSlug: "a", ToSlug: "b", Seconds: 300}},
 		}},
 		Nodes: []transit.GraphNode{
@@ -220,7 +220,7 @@ func TestUserScenarioIsochrone_202_enqueuesOwnedByTheCaller(t *testing.T) {
 
 func userServiceIsochroneMux(store handler.ServiceIsochroneStore, pub routing.Publisher) *http.ServeMux {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/services/{slug}/isochrone", handler.UserServiceIsochrone(store, pub, logger.Discard()))
+	mux.HandleFunc("POST /api/services/{slug}/isochrone", handler.UserServiceIsochrone(store, pub, logger.Discard(), transit.DefaultBoardingWaitPolicy()))
 	return mux
 }
 
@@ -385,7 +385,9 @@ func TestUserServiceIsochrone_202_graphWithoutTransitEdges(t *testing.T) {
 	store := newFakeServiceStore()
 	created := time.Now().Add(-time.Hour)
 	seedServiceRow(store, "svc-1", "line-a", svcOwner.ID, created.Add(-time.Minute))
-	edgeless := &transit.TransitGraph{Services: []transit.ServiceGraph{{ServiceID: "svc-1"}}}
+	edgeless := &transit.TransitGraph{Services: []transit.ServiceGraph{{
+		ServiceID: "svc-1", WaitPolicy: string(transit.BoardingWaitNone),
+	}}}
 	store.jobs["line-a"] = transit.Job{
 		ID: "job-1", Status: transit.JobStatusSucceeded, CreatedAt: created,
 		CompiledServiceIDs: []string{"svc-1"}, Result: edgeless,

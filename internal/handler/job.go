@@ -36,7 +36,7 @@ type CompileStore interface {
 // persists a queued job and hands the compile off to a background goroutine,
 // so the caller gets a job id back immediately rather than waiting for the
 // physics compile and graph build to finish.
-func CompileScenario(store CompileStore) http.HandlerFunc {
+func CompileScenario(store CompileStore, boardingWait transit.BoardingWaitPolicy) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := auth.UserFrom(r.Context())
 		if !ok {
@@ -63,7 +63,7 @@ func CompileScenario(store CompileStore) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		enqueueCompile(store, job)
+		enqueueCompile(store, job, boardingWait)
 		writeJSON(w, http.StatusAccepted, job)
 	}
 }
@@ -78,9 +78,9 @@ func CompileScenario(store CompileStore) http.HandlerFunc {
 // scenario, and single user service — since the queued → running →
 // succeeded/failed surface is identical across them; only the job's kind and
 // target differ, and worker.Compile switches on that.
-func enqueueCompile(store CompileStore, job transit.Job) {
+func enqueueCompile(store CompileStore, job transit.Job, boardingWait transit.BoardingWaitPolicy) {
 	go func() {
-		if err := worker.Compile(context.Background(), store, job); err != nil {
+		if err := worker.Compile(context.Background(), store, job, boardingWait); err != nil {
 			slog.Error("worker: compile job failed", "job_id", job.ID, "error", err)
 		}
 	}()

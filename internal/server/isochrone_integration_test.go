@@ -41,7 +41,7 @@ func TestIntegration_SeededIsochroneServedFromCompiledGraph(t *testing.T) {
 		t.Errorf("error = %q, want 'no compiled graph for this scenario yet'", errBody["error"])
 	}
 
-	compiled, err := transit.CompileSeededIfNeeded(ctx, repo)
+	compiled, err := transit.CompileSeededIfNeeded(ctx, repo, transit.DefaultBoardingWaitPolicy())
 	if err != nil {
 		t.Fatalf("CompileSeededIfNeeded: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestIntegration_BootDoesNotRecompileASeededDatabase(t *testing.T) {
 	if _, err := transit.SeedIfEmpty(ctx, repo); err != nil {
 		t.Fatalf("SeedIfEmpty: %v", err)
 	}
-	if _, err := transit.CompileSeededIfNeeded(ctx, repo); err != nil {
+	if _, err := transit.CompileSeededIfNeeded(ctx, repo, transit.DefaultBoardingWaitPolicy()); err != nil {
 		t.Fatalf("CompileSeededIfNeeded: %v", err)
 	}
 	first, err := repo.ListJobs(ctx)
@@ -123,7 +123,7 @@ func TestIntegration_BootDoesNotRecompileASeededDatabase(t *testing.T) {
 	if seeded {
 		t.Error("second SeedIfEmpty re-seeded a populated database")
 	}
-	compiled, err := transit.CompileSeededIfNeeded(ctx, repo)
+	compiled, err := transit.CompileSeededIfNeeded(ctx, repo, transit.DefaultBoardingWaitPolicy())
 	if err != nil {
 		t.Fatalf("CompileSeededIfNeeded (second): %v", err)
 	}

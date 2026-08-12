@@ -124,7 +124,7 @@ type ServiceStop struct {
 // UserService express headways identically, so this is one type rather than
 // two. It deliberately carries no row identity — a window has no meaning
 // outside the service that owns it, and both persistence paths write the whole
-// ordered set together — which is what lets helpers like bestHeadwayOver2 run
+// ordered set together — which is what lets BoardingWaitPolicy.WaitSecs run
 // against either model.
 type FrequencyWindow struct {
 	StartTime string `yaml:"start_time" json:"start_time"`
@@ -155,6 +155,12 @@ type Service struct {
 	OwnerID          *string           `yaml:"owner_id,omitempty" json:"owner_id,omitempty"`
 	Stops            []ServiceStop     `yaml:"stops"            json:"stops"`
 	FrequencyWindows []FrequencyWindow `yaml:"frequency_windows" json:"frequency_windows"`
+	// BoardingWaitPolicy and BoardingWaitSecs are the resolved boarding wait
+	// that would be compiled into this service's graph under the current global
+	// policy (SPA-236). They are response-only — never persisted — and filled
+	// by the read handlers so a client never has to re-derive them.
+	BoardingWaitPolicy string `yaml:"-" json:"boarding_wait_policy,omitempty"`
+	BoardingWaitSecs   int    `yaml:"-" json:"boarding_wait_secs"`
 }
 
 // SegmentTime is the run-time-only seconds for one adjacent station pair along a service.

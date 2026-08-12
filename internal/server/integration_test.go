@@ -58,7 +58,7 @@ func integrationServer(t *testing.T) (http.Handler, *postgres.Repo) {
 	}
 	t.Cleanup(repo.Close)
 
-	store, err := transit.NewStore()
+	store, err := transit.NewStore(transit.DefaultBoardingWaitPolicy())
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}

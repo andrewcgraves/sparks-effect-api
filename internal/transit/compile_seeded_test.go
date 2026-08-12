@@ -152,7 +152,7 @@ func TestCompileSeededIfNeeded_graphMatchesEmbeddedStore(t *testing.T) {
 	ctx := context.Background()
 	fake := newSeededCompileFake(t)
 
-	if _, err := CompileSeededIfNeeded(ctx, fake); err != nil {
+	if _, err := CompileSeededIfNeeded(ctx, fake, DefaultBoardingWaitPolicy()); err != nil {
 		t.Fatalf("CompileSeededIfNeeded: %v", err)
 	}
 
@@ -219,7 +219,7 @@ func TestCompileSeededIfNeeded_recompilesAfterAStationMoves(t *testing.T) {
 
 	// The database as it stood before SPA-222: the city-centroid geocode.
 	fake.moveStation(t, "las-vegas", -115.136, 36.174)
-	if _, err := CompileSeededIfNeeded(ctx, fake); err != nil {
+	if _, err := CompileSeededIfNeeded(ctx, fake, DefaultBoardingWaitPolicy()); err != nil {
 		t.Fatalf("CompileSeededIfNeeded: %v", err)
 	}
 
@@ -228,7 +228,7 @@ func TestCompileSeededIfNeeded_recompilesAfterAStationMoves(t *testing.T) {
 	moved := Node{Slug: "las-vegas", Lat: 36.0545, Lng: -115.1778}
 	fake.moveStation(t, moved.Slug, moved.Lng, moved.Lat)
 
-	compiled, err := CompileSeededIfNeeded(ctx, fake)
+	compiled, err := CompileSeededIfNeeded(ctx, fake, DefaultBoardingWaitPolicy())
 	if err != nil {
 		t.Fatalf("CompileSeededIfNeeded after move: %v", err)
 	}
@@ -265,7 +265,7 @@ func TestCompileSeededIfNeeded_skipsAlreadyCompiledScenarios(t *testing.T) {
 	ctx := context.Background()
 	fake := newSeededCompileFake(t)
 
-	compiled, err := CompileSeededIfNeeded(ctx, fake)
+	compiled, err := CompileSeededIfNeeded(ctx, fake, DefaultBoardingWaitPolicy())
 	if err != nil {
 		t.Fatalf("CompileSeededIfNeeded: %v", err)
 	}
@@ -274,7 +274,7 @@ func TestCompileSeededIfNeeded_skipsAlreadyCompiledScenarios(t *testing.T) {
 		t.Fatalf("first run compiled %d scenarios, want %d", compiled, wantScenarios)
 	}
 
-	again, err := CompileSeededIfNeeded(ctx, fake)
+	again, err := CompileSeededIfNeeded(ctx, fake, DefaultBoardingWaitPolicy())
 	if err != nil {
 		t.Fatalf("CompileSeededIfNeeded (second): %v", err)
 	}
@@ -287,6 +287,39 @@ func TestCompileSeededIfNeeded_skipsAlreadyCompiledScenarios(t *testing.T) {
 	}
 }
 
+// A global boarding-wait policy change is invisible to membership/updated_at,
+// but it changes WaitSecs / WaitPolicy on every ServiceGraph, so the stored
+// graph must compare unequal and a new compile job must be written (SPA-236).
+func TestCompileSeededIfNeeded_recompilesAfterBoardingWaitPolicyChange(t *testing.T) {
+	ctx := context.Background()
+	fake := newSeededCompileFake(t)
+
+	if _, err := CompileSeededIfNeeded(ctx, fake, DefaultBoardingWaitPolicy()); err != nil {
+		t.Fatalf("CompileSeededIfNeeded: %v", err)
+	}
+	jobsBefore := fake.createdJobs
+
+	compiled, err := CompileSeededIfNeeded(ctx, fake, BoardingWaitPolicy{Kind: BoardingWaitHalfHeadway})
+	if err != nil {
+		t.Fatalf("CompileSeededIfNeeded after policy change: %v", err)
+	}
+	if compiled != 1 {
+		t.Fatalf("compiled %d scenarios after policy change, want 1", compiled)
+	}
+	if fake.createdJobs != jobsBefore+1 {
+		t.Errorf("jobs created = %d, want %d", fake.createdJobs, jobsBefore+1)
+	}
+
+	g := fake.graphFor(t, "ca-hsr")
+	byID := map[string]ServiceGraph{}
+	for _, sg := range g.Services {
+		byID[sg.ServiceID] = sg
+	}
+	if got := byID["00000000-0000-4004-8001-000000000002"].WaitSecs; got != 1800 {
+		t.Errorf("HSR Local WaitSecs after half_headway recompile: want 1800, got %d", got)
+	}
+}
+
 // The job a boot compile writes carries no owner: seeding happens before any
 // account exists, and requiring admin credentials to get a public graph is the
 // manual step this closes.
@@ -294,7 +327,7 @@ func TestCompileSeededIfNeeded_jobIsUnowned(t *testing.T) {
 	ctx := context.Background()
 	fake := newSeededCompileFake(t)
 
-	if _, err := CompileSeededIfNeeded(ctx, fake); err != nil {
+	if _, err := CompileSeededIfNeeded(ctx, fake, DefaultBoardingWaitPolicy()); err != nil {
 		t.Fatalf("CompileSeededIfNeeded: %v", err)
 	}
 

@@ -2,12 +2,14 @@
 package config
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"strconv"
 	"time"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/logger"
+	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
 // Config holds the settings needed to run the API server.
@@ -48,6 +50,11 @@ type Config struct {
 	// admin is established.
 	BootstrapAdminEmail    string
 	BootstrapAdminPassword string
+	// BoardingWait is the global boarding-wait policy compiled into every
+	// ServiceGraph.WaitSecs (SPA-236). Set BOARDING_WAIT_POLICY to none (the
+	// default), half_headway, full_headway, or fixed. fixed also requires
+	// BOARDING_WAIT_FIXED_SECS (≥ 0); an incomplete pair is a Load error.
+	BoardingWait transit.BoardingWaitPolicy
 }
 
 // defaultSessionTTL bounds how long a stolen token stays useful. A day is short
@@ -62,8 +69,9 @@ const defaultSessionTTL = 24 * time.Hour
 const defaultRoutingQueue = "routing.jobs"
 
 // Load reads configuration from environment variables, applying defaults
-// for anything unset.
-func Load() Config {
+// for anything unset. A malformed boarding-wait policy is a hard error: the
+// process must not boot with a silently remapped non-zero wait.
+func Load() (Config, error) {
 	maxConns := 0
 	if v := os.Getenv("DATABASE_MAX_CONNS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -82,6 +90,11 @@ func Load() Config {
 		logLevel = slog.LevelDebug
 	}
 
+	boardingWait, err := loadBoardingWait()
+	if err != nil {
+		return Config{}, err
+	}
+
 	return Config{
 		Port:                   getEnv("PORT", "8080"),
 		AMQPURL:                os.Getenv("AMQP_URL"),
@@ -93,7 +106,25 @@ func Load() Config {
 		SessionTTL:             sessionTTL,
 		BootstrapAdminEmail:    os.Getenv("BOOTSTRAP_ADMIN_EMAIL"),
 		BootstrapAdminPassword: os.Getenv("BOOTSTRAP_ADMIN_PASSWORD"),
+		BoardingWait:           boardingWait,
+	}, nil
+}
+
+func loadBoardingWait() (transit.BoardingWaitPolicy, error) {
+	kind := os.Getenv("BOARDING_WAIT_POLICY")
+	var fixed *int
+	if v := os.Getenv("BOARDING_WAIT_FIXED_SECS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return transit.BoardingWaitPolicy{}, fmt.Errorf("config: BOARDING_WAIT_FIXED_SECS: %w", err)
+		}
+		fixed = &n
 	}
+	p, err := transit.ParseBoardingWaitPolicy(kind, fixed)
+	if err != nil {
+		return transit.BoardingWaitPolicy{}, fmt.Errorf("config: %w", err)
+	}
+	return p, nil
 }
 
 func getEnv(key, fallback string) string {

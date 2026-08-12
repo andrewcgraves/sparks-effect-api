@@ -13,7 +13,7 @@ import (
 )
 
 func TestNew_healthz(t *testing.T) {
-	store, err := transit.NewStore()
+	store, err := transit.NewStore(transit.DefaultBoardingWaitPolicy())
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -29,7 +29,7 @@ func TestNew_healthz(t *testing.T) {
 }
 
 func TestCORS_flagOn_localhostOrigin_GET(t *testing.T) {
-	store, err := transit.NewStore()
+	store, err := transit.NewStore(transit.DefaultBoardingWaitPolicy())
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestCORS_flagOn_localhostOrigin_GET(t *testing.T) {
 }
 
 func TestCORS_flagOn_localhostOrigin_OPTIONS(t *testing.T) {
-	store, err := transit.NewStore()
+	store, err := transit.NewStore(transit.DefaultBoardingWaitPolicy())
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestCORS_flagOn_localhostOrigin_OPTIONS(t *testing.T) {
 }
 
 func TestCORS_flagOn_nonLocalhostOrigin(t *testing.T) {
-	store, err := transit.NewStore()
+	store, err := transit.NewStore(transit.DefaultBoardingWaitPolicy())
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestCORS_flagOn_nonLocalhostOrigin(t *testing.T) {
 }
 
 func TestCORS_productionOrigin_allowedRegardlessOfFlag(t *testing.T) {
-	store, err := transit.NewStore()
+	store, err := transit.NewStore(transit.DefaultBoardingWaitPolicy())
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestCORS_productionOrigin_allowedRegardlessOfFlag(t *testing.T) {
 }
 
 func TestCORS_allowsXTraceIdHeader(t *testing.T) {
-	store, err := transit.NewStore()
+	store, err := transit.NewStore(transit.DefaultBoardingWaitPolicy())
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestCORS_allowsXTraceIdHeader(t *testing.T) {
 }
 
 func TestCORS_flagOff_localhostOrigin(t *testing.T) {
-	store, err := transit.NewStore()
+	store, err := transit.NewStore(transit.DefaultBoardingWaitPolicy())
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}

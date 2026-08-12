@@ -414,7 +414,7 @@ func compiledEdges(t *testing.T, rt transit.Route, svc transit.UserService) map[
 	if err != nil {
 		t.Fatalf("CompilableFromUserService: %v", err)
 	}
-	sg, err := transit.CompileServicePhysics(compilable)
+	sg, err := transit.CompileServicePhysics(compilable, transit.DefaultBoardingWaitPolicy())
 	if err != nil {
 		t.Fatalf("CompileServicePhysics: %v", err)
 	}

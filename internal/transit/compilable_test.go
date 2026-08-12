@@ -375,13 +375,13 @@ func TestCompileServicePhysics_bothAdaptersAgreeOnRunTime(t *testing.T) {
 	}
 	authored := mustCompilableFromUserService(t, adapterRoute(), userSvc)
 
-	seededGraph, err := CompileServicePhysics(seeded)
+	seededGraph, err := CompileServicePhysics(seeded, DefaultBoardingWaitPolicy())
 	if err != nil {
-		t.Fatalf("CompileServicePhysics(seeded) error = %v, want nil", err)
+		t.Fatalf("CompileServicePhysics(seeded, DefaultBoardingWaitPolicy()) error = %v, want nil", err)
 	}
-	authoredGraph, err := CompileServicePhysics(authored)
+	authoredGraph, err := CompileServicePhysics(authored, DefaultBoardingWaitPolicy())
 	if err != nil {
-		t.Fatalf("CompileServicePhysics(authored) error = %v, want nil", err)
+		t.Fatalf("CompileServicePhysics(authored, DefaultBoardingWaitPolicy()) error = %v, want nil", err)
 	}
 
 	if len(seededGraph.Edges) != len(authoredGraph.Edges) {

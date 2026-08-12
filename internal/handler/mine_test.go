@@ -78,7 +78,7 @@ func TestMyScenariosReturnsOnlyTheCallersRows(t *testing.T) {
 
 func TestMyServicesReturnsOnlyTheCallersRows(t *testing.T) {
 	store := newFakeOwnerStore()
-	rec := getAs(t, handler.MyServices(store), "/api/me/services", transit.User{ID: "user-2"})
+	rec := getAs(t, handler.MyServices(store, transit.DefaultBoardingWaitPolicy()), "/api/me/services", transit.User{ID: "user-2"})
 
 	var got []transit.Service
 	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {

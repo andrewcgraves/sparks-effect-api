@@ -66,7 +66,7 @@ func TestCompile_createsServiceGraphsWithEdges(t *testing.T) {
 		},
 	}
 
-	g, err := Compile(sc, nil, testStations(), services, []VehicleType{testVehicle()}, testSegments())
+	g, err := Compile(sc, nil, testStations(), services, []VehicleType{testVehicle()}, testSegments(), DefaultBoardingWaitPolicy())
 	if err != nil {
 		t.Fatalf("Compile: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestCompile_edgeSecondsIncludeRunAndDwell(t *testing.T) {
 		},
 	}}
 
-	g, err := Compile(sc, nil, stations, services, []VehicleType{testVehicle()}, testSegments())
+	g, err := Compile(sc, nil, stations, services, []VehicleType{testVehicle()}, testSegments(), DefaultBoardingWaitPolicy())
 	if err != nil {
 		t.Fatalf("Compile: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestCompile_edgesReportDwellAlongsideTotal(t *testing.T) {
 		},
 	}}
 
-	g, err := Compile(sc, nil, stations, services, []VehicleType{testVehicle()}, segments)
+	g, err := Compile(sc, nil, stations, services, []VehicleType{testVehicle()}, segments, DefaultBoardingWaitPolicy())
 	if err != nil {
 		t.Fatalf("Compile: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestCompile_expressSkipsIntermediateDwell(t *testing.T) {
 		},
 	}
 
-	g, err := Compile(sc, nil, stations, []Service{express, local}, []VehicleType{testVehicle()}, testSegments())
+	g, err := Compile(sc, nil, stations, []Service{express, local}, []VehicleType{testVehicle()}, testSegments(), DefaultBoardingWaitPolicy())
 	if err != nil {
 		t.Fatalf("Compile: %v", err)
 	}
@@ -243,7 +243,7 @@ func TestCompile_dwellResolution(t *testing.T) {
 		},
 	}}
 
-	g, err := Compile(sc, nil, stations, services, []VehicleType{vt}, segments)
+	g, err := Compile(sc, nil, stations, services, []VehicleType{vt}, segments, DefaultBoardingWaitPolicy())
 	if err != nil {
 		t.Fatalf("Compile: %v", err)
 	}
@@ -266,7 +266,7 @@ func TestCompile_unknownStationSlugInSegments(t *testing.T) {
 	tt := TravelTimes{
 		Segments: []SegmentTime{{FromSlug: "a", ToSlug: "missing", RunSeconds: 300}},
 	}
-	_, err := Compile(sc, nil, testStations(), nil, nil, tt)
+	_, err := Compile(sc, nil, testStations(), nil, nil, tt, DefaultBoardingWaitPolicy())
 	if err == nil {
 		t.Fatal("expected error for unknown segment station slug")
 	}
@@ -283,7 +283,7 @@ func TestCompile_unknownServiceStopStation(t *testing.T) {
 		VehicleTypeID: "vt-1",
 		Stops:         []ServiceStop{{StationID: "st-unknown", Sequence: 1}},
 	}}
-	_, err := Compile(sc, nil, testStations(), services, []VehicleType{testVehicle()}, testSegments())
+	_, err := Compile(sc, nil, testStations(), services, []VehicleType{testVehicle()}, testSegments(), DefaultBoardingWaitPolicy())
 	if err == nil {
 		t.Fatal("expected error for unknown service stop station")
 	}
@@ -301,7 +301,7 @@ func TestCompile_serviceStopNotOnSegmentPath(t *testing.T) {
 		VehicleTypeID: "vt-1",
 		Stops:         []ServiceStop{{StationID: "st-orphan", Sequence: 1}},
 	}}
-	_, err := Compile(sc, nil, stations, services, []VehicleType{testVehicle()}, testSegments())
+	_, err := Compile(sc, nil, stations, services, []VehicleType{testVehicle()}, testSegments(), DefaultBoardingWaitPolicy())
 	if err == nil {
 		t.Fatal("expected error for service stop not on segment path")
 	}
@@ -334,7 +334,8 @@ func TestCompile_waitSecsFromFrequencyWindows(t *testing.T) {
 		makeService("svc-multi", []int{1800, 3600}),
 	}
 
-	g, err := Compile(sc, nil, testStations(), services, []VehicleType{testVehicle()}, testSegments())
+	g, err := Compile(sc, nil, testStations(), services, []VehicleType{testVehicle()}, testSegments(),
+		BoardingWaitPolicy{Kind: BoardingWaitHalfHeadway})
 	if err != nil {
 		t.Fatalf("Compile: %v", err)
 	}
@@ -347,6 +348,9 @@ func TestCompile_waitSecsFromFrequencyWindows(t *testing.T) {
 	}
 	if got := byID["svc-multi"].WaitSecs; got != 900 {
 		t.Errorf("svc-multi WaitSecs (best/peak headway): want 900, got %d", got)
+	}
+	if got := byID["svc-one"].WaitPolicy; got != string(BoardingWaitHalfHeadway) {
+		t.Errorf("svc-one WaitPolicy: want %q, got %q", BoardingWaitHalfHeadway, got)
 	}
 }
 
@@ -380,7 +384,7 @@ func TestCompile_emitsOneNodePerStation(t *testing.T) {
 		Stops: []ServiceStop{{StationID: "st-a", Sequence: 1}, {StationID: "st-b", Sequence: 2}},
 	}}
 
-	g, err := Compile(sc, nil, stations, services, []VehicleType{testVehicle()}, testSegments())
+	g, err := Compile(sc, nil, stations, services, []VehicleType{testVehicle()}, testSegments(), DefaultBoardingWaitPolicy())
 	if err != nil {
 		t.Fatalf("Compile: %v", err)
 	}
@@ -420,7 +424,7 @@ func TestCompile_nodeCarriesRoutingAnchorSeparatelyFromLocation(t *testing.T) {
 		Stops: []ServiceStop{{StationID: "st-a", Sequence: 1}, {StationID: "st-b", Sequence: 2}},
 	}}
 
-	g, err := Compile(sc, nil, stations, services, []VehicleType{testVehicle()}, testSegments())
+	g, err := Compile(sc, nil, stations, services, []VehicleType{testVehicle()}, testSegments(), DefaultBoardingWaitPolicy())
 	if err != nil {
 		t.Fatalf("Compile: %v", err)
 	}
@@ -465,9 +469,9 @@ func TestCompile_rejectsStationWithMalformedLocation(t *testing.T) {
 		{FromSlug: "a", ToSlug: "b", RunSeconds: 600},
 	}}
 
-	_, err := Compile(sc, nil, stations, services, []VehicleType{testVehicle()}, segments)
+	_, err := Compile(sc, nil, stations, services, []VehicleType{testVehicle()}, segments, DefaultBoardingWaitPolicy())
 	if err == nil {
-		t.Fatal("Compile() error = nil, want an error for a station with no usable location")
+		t.Fatal("Compile(DefaultBoardingWaitPolicy()) error = nil, want an error for a station with no usable location")
 	}
 	if !strings.Contains(err.Error(), "b") {
 		t.Errorf("error = %v, want it to name the offending station", err)
@@ -496,9 +500,9 @@ func TestCompile_rejectsStationWithMalformedRoutingLocation(t *testing.T) {
 		{FromSlug: "a", ToSlug: "b", RunSeconds: 600},
 	}}
 
-	_, err := Compile(sc, nil, stations, services, []VehicleType{testVehicle()}, segments)
+	_, err := Compile(sc, nil, stations, services, []VehicleType{testVehicle()}, segments, DefaultBoardingWaitPolicy())
 	if err == nil {
-		t.Fatal("Compile() error = nil, want an error for a station with a malformed routing_location")
+		t.Fatal("Compile(DefaultBoardingWaitPolicy()) error = nil, want an error for a station with a malformed routing_location")
 	}
 	if !strings.Contains(err.Error(), "b") {
 		t.Errorf("error = %v, want it to name the offending station", err)

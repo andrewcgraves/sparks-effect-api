@@ -38,8 +38,12 @@ func TestCompileAuthoredTargetNonOwnerIsNotFound(t *testing.T) {
 		slug    string
 		wantMsg string
 	}{
-		{"service", handler.CompileUserService, "/api/services/line-a/compile", "line-a", "service not found"},
-		{"scenario", handler.CompileUserScenario, "/api/user-scenarios/trip/compile", "trip", "scenario not found"},
+		{"service", func(s handler.CompileStore) http.HandlerFunc {
+			return handler.CompileUserService(s, transit.DefaultBoardingWaitPolicy())
+		}, "/api/services/line-a/compile", "line-a", "service not found"},
+		{"scenario", func(s handler.CompileStore) http.HandlerFunc {
+			return handler.CompileUserScenario(s, transit.DefaultBoardingWaitPolicy())
+		}, "/api/user-scenarios/trip/compile", "trip", "scenario not found"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

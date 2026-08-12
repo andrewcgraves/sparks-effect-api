@@ -22,7 +22,7 @@ const lasVegasRoutingLocationMigrationPath = "migrations/00016_las_vegas_routing
 //
 // This needs no database — it compares the files themselves.
 func TestLasVegasRoutingLocationMigrationMatchesTheSeed(t *testing.T) {
-	store, err := transit.NewStore()
+	store, err := transit.NewStore(transit.DefaultBoardingWaitPolicy())
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}

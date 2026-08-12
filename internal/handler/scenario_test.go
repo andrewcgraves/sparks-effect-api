@@ -11,7 +11,7 @@ import (
 
 func mustNewStore(t *testing.T) *transit.Store {
 	t.Helper()
-	store, err := transit.NewStore()
+	store, err := transit.NewStore(transit.DefaultBoardingWaitPolicy())
 	if err != nil {
 		t.Fatalf("transit.NewStore: %v", err)
 	}
@@ -257,7 +257,7 @@ func TestScenarioServices_found(t *testing.T) {
 	req.SetPathValue("slug", "ca-hsr")
 	rec := httptest.NewRecorder()
 
-	ScenarioServices(store)(rec, req)
+	ScenarioServices(store, transit.DefaultBoardingWaitPolicy())(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
@@ -293,7 +293,7 @@ func TestScenarioServices_notFound(t *testing.T) {
 	req.SetPathValue("slug", "nope")
 	rec := httptest.NewRecorder()
 
-	ScenarioServices(store)(rec, req)
+	ScenarioServices(store, transit.DefaultBoardingWaitPolicy())(rec, req)
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", rec.Code)
@@ -306,7 +306,7 @@ func TestScenarioServices_notFound_contentType(t *testing.T) {
 	req.SetPathValue("slug", "nope")
 	rec := httptest.NewRecorder()
 
-	ScenarioServices(store)(rec, req)
+	ScenarioServices(store, transit.DefaultBoardingWaitPolicy())(rec, req)
 
 	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
 		t.Errorf("Content-Type: want application/json, got %q", ct)
