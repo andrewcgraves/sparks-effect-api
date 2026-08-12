@@ -8,6 +8,9 @@ import (
 	"time"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/logger"
+	// Config depends on a domain type only to hand every caller one validated
+	// BoardingWaitPolicy instead of a raw kind/seconds pair. Deliberate for
+	// SPA-236; if config grows more domain imports, parse in main instead.
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
@@ -52,8 +55,9 @@ type Config struct {
 	// BoardingWait is the global boarding-wait policy compiled into every
 	// ServiceGraph.WaitSecs (SPA-236). Set BOARDING_WAIT_POLICY to none (the
 	// default), half_headway, full_headway, or fixed. fixed also requires
-	// BOARDING_WAIT_FIXED_SECS (≥ 0). A malformed or incomplete setting falls
-	// back to none — same soft-default pattern as other env knobs.
+	// BOARDING_WAIT_FIXED_SECS (≥ 0), which is read only under that policy.
+	// A malformed or incomplete setting falls back to none — same soft-default
+	// pattern as other env knobs; see loadBoardingWait.
 	BoardingWait transit.BoardingWaitPolicy
 }
 
@@ -105,20 +109,30 @@ func Load() Config {
 }
 
 // loadBoardingWait reads BOARDING_WAIT_POLICY / BOARDING_WAIT_FIXED_SECS.
-// Unset → none. Malformed or incomplete values also resolve to none so a typo
-// cannot boot the process charging a non-zero wait.
+// Unset → none. Malformed or incomplete values also resolve to none.
+//
+// SPA-236 originally asked for a malformed setting to be rejected at load time;
+// the soft default is a deliberate departure from that acceptance criterion. It
+// keeps both failure modes of a typo cheap: the process still boots, and the
+// worst a mistyped policy can do is charge no wait rather than an invented one.
+//
+// The seconds companion is read only under the fixed policy, the one kind that
+// gives it meaning, so a stale or garbage BOARDING_WAIT_FIXED_SECS left next to
+// half_headway cannot discard an otherwise valid policy.
 func loadBoardingWait() transit.BoardingWaitPolicy {
 	kind := os.Getenv("BOARDING_WAIT_POLICY")
 	var fixed *int
-	if v := os.Getenv("BOARDING_WAIT_FIXED_SECS"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil {
-			return transit.DefaultBoardingWaitPolicy()
+	if transit.BoardingWaitKind(kind) == transit.BoardingWaitFixed {
+		if n, err := strconv.Atoi(os.Getenv("BOARDING_WAIT_FIXED_SECS")); err == nil {
+			fixed = &n
 		}
-		fixed = &n
 	}
 	p, err := transit.ParseBoardingWaitPolicy(kind, fixed)
 	if err != nil {
+		// Warned rather than swallowed: the whole point of booting anyway is
+		// that the operator can fix the typo, which needs them to see it.
+		slog.Warn("config: BOARDING_WAIT_POLICY ignored, charging no boarding wait",
+			"boarding_wait_policy", kind, "error", err)
 		return transit.DefaultBoardingWaitPolicy()
 	}
 	return p

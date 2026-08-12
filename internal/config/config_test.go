@@ -115,6 +115,19 @@ func TestLoad_boardingWait_fromEnv(t *testing.T) {
 	}
 }
 
+func TestLoad_boardingWait_fixedReadsItsSeconds(t *testing.T) {
+	t.Setenv("BOARDING_WAIT_POLICY", "fixed")
+	t.Setenv("BOARDING_WAIT_FIXED_SECS", "120")
+
+	cfg := Load()
+	if cfg.BoardingWait.Kind != transit.BoardingWaitFixed {
+		t.Fatalf("BoardingWait.Kind: want %q, got %q", transit.BoardingWaitFixed, cfg.BoardingWait.Kind)
+	}
+	if cfg.BoardingWait.FixedSecs != 120 {
+		t.Errorf("BoardingWait.FixedSecs: want 120, got %d", cfg.BoardingWait.FixedSecs)
+	}
+}
+
 func TestLoad_boardingWait_fixedWithoutSecondsFallsBackToNone(t *testing.T) {
 	t.Setenv("BOARDING_WAIT_POLICY", "fixed")
 	t.Setenv("BOARDING_WAIT_FIXED_SECS", "")
@@ -122,6 +135,46 @@ func TestLoad_boardingWait_fixedWithoutSecondsFallsBackToNone(t *testing.T) {
 	cfg := Load()
 	if cfg.BoardingWait.Kind != transit.BoardingWaitNone {
 		t.Errorf("BoardingWait.Kind: want %q (default), got %q", transit.BoardingWaitNone, cfg.BoardingWait.Kind)
+	}
+}
+
+// An unreadable seconds value is the same case as an absent one: fixed has no
+// wait to charge, so the policy defaults rather than inventing a number.
+func TestLoad_boardingWait_fixedWithUnparseableSecondsFallsBackToNone(t *testing.T) {
+	t.Setenv("BOARDING_WAIT_POLICY", "fixed")
+	t.Setenv("BOARDING_WAIT_FIXED_SECS", "abc")
+
+	cfg := Load()
+	if cfg.BoardingWait.Kind != transit.BoardingWaitNone {
+		t.Errorf("BoardingWait.Kind: want %q (default), got %q", transit.BoardingWaitNone, cfg.BoardingWait.Kind)
+	}
+	if cfg.BoardingWait.FixedSecs != 0 {
+		t.Errorf("BoardingWait.FixedSecs: want 0, got %d", cfg.BoardingWait.FixedSecs)
+	}
+}
+
+func TestLoad_boardingWait_negativeFixedSecondsFallsBackToNone(t *testing.T) {
+	t.Setenv("BOARDING_WAIT_POLICY", "fixed")
+	t.Setenv("BOARDING_WAIT_FIXED_SECS", "-30")
+
+	cfg := Load()
+	if cfg.BoardingWait.Kind != transit.BoardingWaitNone {
+		t.Errorf("BoardingWait.Kind: want %q (default), got %q", transit.BoardingWaitNone, cfg.BoardingWait.Kind)
+	}
+}
+
+// The seconds companion means nothing to a headway policy, so a leftover or
+// mistyped one must not cost the operator the policy they did set.
+func TestLoad_boardingWait_ignoresFixedSecondsUnderAHeadwayPolicy(t *testing.T) {
+	t.Setenv("BOARDING_WAIT_POLICY", "half_headway")
+	t.Setenv("BOARDING_WAIT_FIXED_SECS", "abc")
+
+	cfg := Load()
+	if cfg.BoardingWait.Kind != transit.BoardingWaitHalfHeadway {
+		t.Errorf("BoardingWait.Kind: want %q, got %q", transit.BoardingWaitHalfHeadway, cfg.BoardingWait.Kind)
+	}
+	if cfg.BoardingWait.FixedSecs != 0 {
+		t.Errorf("BoardingWait.FixedSecs: want 0, got %d", cfg.BoardingWait.FixedSecs)
 	}
 }
 

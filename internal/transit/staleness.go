@@ -65,9 +65,11 @@ func GraphStale(job Job, currentServiceIDs []string, currentServiceUpdatedAt map
 // boardingWaitStale reports whether any service graph was compiled under a
 // different boarding-wait policy (or fixed seconds) than currentPolicy.
 func boardingWaitStale(graph TransitGraph, current BoardingWaitPolicy) bool {
-	wantKind := string(current.kindOrNone())
+	wantKind := current.kindOrNone()
 	for _, sg := range graph.Services {
-		if sg.WaitPolicy != wantKind {
+		// WaitPolicy is a string on the wire (jobs.result JSON); compare it as
+		// the kind it represents so an unknown value cannot pass for a valid one.
+		if BoardingWaitKind(sg.WaitPolicy) != wantKind {
 			return true
 		}
 		if current.Kind == BoardingWaitFixed && sg.WaitSecs != current.FixedSecs {

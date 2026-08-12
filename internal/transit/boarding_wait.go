@@ -94,26 +94,23 @@ func (p BoardingWaitPolicy) kindOrNone() BoardingWaitKind {
 	return p.Kind
 }
 
-// applyBoardingWait resolves policy against windows onto this service graph.
-func (sg *ServiceGraph) applyBoardingWait(policy BoardingWaitPolicy, windows []FrequencyWindow) error {
-	wait, err := policy.WaitSecs(windows)
+// resolveInto writes the wait seconds for windows and the kind that produced
+// them through the given pointers. It is the single place a resolved policy is
+// recorded: the compile path writes it onto a ServiceGraph, the read models
+// write it onto their response-only fields. On error both targets are left
+// untouched rather than silently remapped onto a non-zero wait.
+func (p BoardingWaitPolicy) resolveInto(windows []FrequencyWindow, kind *string, secs *int) error {
+	wait, err := p.WaitSecs(windows)
 	if err != nil {
 		return err
 	}
-	sg.WaitSecs = wait
-	sg.WaitPolicy = string(policy.kindOrNone())
+	*kind, *secs = string(p.kindOrNone()), wait
 	return nil
 }
 
-// ResolveForWindows returns the policy kind and wait seconds that would be
-// baked into a ServiceGraph for the given frequency windows. A resolution
-// error is surfaced rather than silently remapped onto a non-zero wait.
-func (p BoardingWaitPolicy) ResolveForWindows(windows []FrequencyWindow) (kind string, secs int, err error) {
-	secs, err = p.WaitSecs(windows)
-	if err != nil {
-		return "", 0, err
-	}
-	return string(p.kindOrNone()), secs, nil
+// applyBoardingWait resolves policy against windows onto this service graph.
+func (sg *ServiceGraph) applyBoardingWait(policy BoardingWaitPolicy, windows []FrequencyWindow) error {
+	return policy.resolveInto(windows, &sg.WaitPolicy, &sg.WaitSecs)
 }
 
 // minHeadway returns the smallest HeadwayS across windows (the peak window).

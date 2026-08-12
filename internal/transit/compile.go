@@ -330,13 +330,6 @@ func reversePath(path []string) []string {
 	return out
 }
 
-func bestHeadwayOver2(windows []FrequencyWindow) int {
-	// Preserved as the half_headway resolver for shared frequency-window tests.
-	// Compilers go through BoardingWaitPolicy.WaitSecs instead.
-	secs, _ := BoardingWaitPolicy{Kind: BoardingWaitHalfHeadway}.WaitSecs(windows)
-	return secs
-}
-
 func resolveDwell(stop ServiceStop, st Station, vt VehicleType) int {
 	if stop.DwellS != nil {
 		return *stop.DwellS

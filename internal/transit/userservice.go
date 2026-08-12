@@ -36,6 +36,13 @@ type UserService struct {
 	BoardingWaitSecs   int    `json:"boarding_wait_secs"`
 }
 
+// ResolveBoardingWait fills the response-only boarding-wait fields from policy
+// and this service's own frequency windows, matching Service so one caller
+// serves both models.
+func (s *UserService) ResolveBoardingWait(policy BoardingWaitPolicy) error {
+	return policy.resolveInto(s.FrequencyWindows, &s.BoardingWaitPolicy, &s.BoardingWaitSecs)
+}
+
 // VehicleParams are the rolling-stock capabilities a user sets on their own
 // service, inline — there is no shared vehicle-type catalog for user services.
 type VehicleParams struct {

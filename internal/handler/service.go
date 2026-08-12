@@ -143,7 +143,7 @@ func GetService(store ServiceStore, boardingWait transit.BoardingWaitPolicy) htt
 		if !authorizeService(w, r, svc) {
 			return
 		}
-		writeJSON(w, http.StatusOK, withUserBoardingWait(svc, boardingWait))
+		writeJSON(w, http.StatusOK, withBoardingWait(r.Context(), svc, boardingWait))
 	}
 }
 
@@ -168,7 +168,7 @@ func MyUserServices(store ServiceStore, boardingWait transit.BoardingWaitPolicy)
 		if services == nil {
 			services = []transit.UserService{}
 		}
-		writeJSON(w, http.StatusOK, withUserBoardingWaits(services, boardingWait))
+		writeJSON(w, http.StatusOK, withBoardingWaits(r.Context(), services, boardingWait))
 	}
 }
 

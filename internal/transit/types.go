@@ -163,6 +163,13 @@ type Service struct {
 	BoardingWaitSecs   int    `yaml:"-" json:"boarding_wait_secs"`
 }
 
+// ResolveBoardingWait fills the response-only boarding-wait fields from policy
+// and this service's own frequency windows. Both service models expose this,
+// so a caller can fill either without a parallel implementation.
+func (s *Service) ResolveBoardingWait(policy BoardingWaitPolicy) error {
+	return policy.resolveInto(s.FrequencyWindows, &s.BoardingWaitPolicy, &s.BoardingWaitSecs)
+}
+
 // SegmentTime is the run-time-only seconds for one adjacent station pair along a service.
 // Values are run time only (train in motion); dwell is added at compile time.
 // Segments are stored in service direction (northernmost terminus first for Phase 1).

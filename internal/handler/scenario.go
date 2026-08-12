@@ -135,7 +135,7 @@ func ScenarioServices(store *transit.Store, boardingWait transit.BoardingWaitPol
 			writeError(w, http.StatusNotFound, "scenario not found")
 			return
 		}
-		writeJSON(w, http.StatusOK, withBoardingWaits(store.GetServicesByScenario(sc.ID), boardingWait))
+		writeJSON(w, http.StatusOK, withBoardingWaits(r.Context(), store.GetServicesByScenario(sc.ID), boardingWait))
 	}
 }
 
