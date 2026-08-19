@@ -80,6 +80,28 @@ Travel mode is stored in the domain's own vocabulary — `walk` / `bike` /
 `drive`. "Costing" is Valhalla's word for the same concept and stays at the
 worker's client boundary.
 
+### Capping the backlog
+
+All three isochrone endpoints publish to one queue that one worker consumes
+serially, so nothing but a ceiling bounds how much work can be waiting. Since
+SPA-219 an enqueue is refused with `429` and the `backlog_full` code, plus a
+`Retry-After`, once `MAX_INFLIGHT_ISOCHRONES` routing jobs are already queued or
+running (default 20; `0` disables the cap). The refusal happens before the
+request body is read and before any graph is fetched, so a flood costs one
+indexed `count` each rather than an ever-growing queue that legitimate requests
+wait behind.
+
+The signal is the count of unfinished `routing_jobs` rather than the broker's
+queue depth: the rows are the record this API already writes on that path, and
+they also count a job the worker has picked up but not finished. Only jobs
+younger than `handler.RoutingJobStaleAfter` count, which is what keeps a dead
+worker's abandoned rows from wedging the cap shut forever — and is why recovery
+needs nothing: the count falls as the worker drains, or as jobs age out.
+
+The ceiling is per deployment, not per caller. That is deliberate: bounding
+total work is what it is for, and per-caller fairness needs a per-caller key,
+which is a separate piece of work.
+
 ### Polling a routing job
 
 `GET /api/routing-jobs/{id}` returns the job's status and, once succeeded, its

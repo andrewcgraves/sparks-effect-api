@@ -28,6 +28,15 @@ import (
 
 func integrationServer(t *testing.T) (http.Handler, *postgres.Repo) {
 	t.Helper()
+	return integrationServerCapped(t, 0)
+}
+
+// integrationServerCapped is integrationServer with the isochrone enqueue cap
+// set (SPA-219). Zero, which is what integrationServer passes, disables it —
+// so every test written before the cap existed goes on seeing the API it was
+// written against.
+func integrationServerCapped(t *testing.T, maxInFlight int) (http.Handler, *postgres.Repo) {
+	t.Helper()
 	url := os.Getenv("TEST_DATABASE_URL")
 	if url == "" {
 		url = os.Getenv("DATABASE_URL")
@@ -62,7 +71,7 @@ func integrationServer(t *testing.T) (http.Handler, *postgres.Repo) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	cfg := config.Config{Port: "8080", SessionTTL: time.Hour}
+	cfg := config.Config{Port: "8080", SessionTTL: time.Hour, MaxInFlightIsochrones: maxInFlight}
 	return New(cfg, store, repo, &routing.FakePublisher{}, logger.Discard()).Handler, repo
 }
 

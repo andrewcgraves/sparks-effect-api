@@ -124,6 +124,27 @@ func TestCORS_allowsXTraceIdHeader(t *testing.T) {
 	}
 }
 
+// The Retry-After on a capped isochrone's 429 (SPA-219) is only readable from
+// a browser if it is named here — a cross-origin response otherwise exposes
+// none of its headers to script.
+func TestCORS_exposesRetryAfter(t *testing.T) {
+	store, err := transit.NewStore(transit.DefaultBoardingWaitPolicy())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: true}, store, nil, &routing.FakePublisher{}, logger.Discard())
+
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req.Header.Set("Origin", "http://localhost:5173")
+	rec := httptest.NewRecorder()
+	srv.Handler.ServeHTTP(rec, req)
+
+	got := rec.Header().Get("Access-Control-Expose-Headers")
+	if !strings.Contains(got, "Retry-After") {
+		t.Errorf("Access-Control-Expose-Headers: want to contain %q, got %q", "Retry-After", got)
+	}
+}
+
 func TestCORS_flagOff_localhostOrigin(t *testing.T) {
 	store, err := transit.NewStore(transit.DefaultBoardingWaitPolicy())
 	if err != nil {

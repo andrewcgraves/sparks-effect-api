@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
@@ -137,5 +138,76 @@ func TestIntegration_BootDoesNotRecompileASeededDatabase(t *testing.T) {
 	}
 	if len(second) != len(first) {
 		t.Errorf("jobs after second boot = %d, want %d (no new compile)", len(second), len(first))
+	}
+}
+
+// The enqueue cap end to end against a real database (SPA-219): real routing
+// job rows are what the count reads, so this is the only place the threshold,
+// the refusal, and the recovery are exercised over the query that actually
+// decides them.
+func TestIntegration_IsochroneEnqueueCap(t *testing.T) {
+	const limit = 2
+
+	h, repo := integrationServerCapped(t, limit)
+	ctx := context.Background()
+
+	if _, err := transit.SeedIfEmpty(ctx, repo); err != nil {
+		t.Fatalf("SeedIfEmpty: %v", err)
+	}
+	if _, err := transit.CompileSeededIfNeeded(ctx, repo, transit.DefaultBoardingWaitPolicy()); err != nil {
+		t.Fatalf("CompileSeededIfNeeded: %v", err)
+	}
+
+	// Up to the limit, the backlog is work the worker is expected to get
+	// through, so the requests are accepted.
+	var accepted []string
+	for i := 0; i < limit; i++ {
+		rec := request(t, h, http.MethodPost, "/api/isochrone", "", seededIsochroneBody)
+		if rec.Code != http.StatusAccepted {
+			t.Fatalf("enqueue %d: status %d, want 202; body %s", i, rec.Code, rec.Body.String())
+		}
+		var job transit.RoutingJob
+		if err := json.Unmarshal(rec.Body.Bytes(), &job); err != nil {
+			t.Fatalf("decode routing job: %v", err)
+		}
+		accepted = append(accepted, job.ID)
+	}
+
+	// At the limit the next one is refused, and refused cheaply: nothing is
+	// recorded and nothing is published, which is the whole point.
+	rec := request(t, h, http.MethodPost, "/api/isochrone", "", seededIsochroneBody)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("over the cap: status %d, want 429; body %s", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("Retry-After") == "" {
+		t.Error("the 429 carries no Retry-After")
+	}
+	var body struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body.Code != handler.BacklogFullErrorCode {
+		t.Errorf("code = %q, want %q", body.Code, handler.BacklogFullErrorCode)
+	}
+
+	inFlight, err := repo.CountInFlightRoutingJobs(ctx, handler.RoutingJobStaleAfter)
+	if err != nil {
+		t.Fatalf("CountInFlightRoutingJobs: %v", err)
+	}
+	if inFlight != limit {
+		t.Errorf("in flight = %d, want %d: the refused request left a row behind", inFlight, limit)
+	}
+
+	// Recovery needs nothing but a job leaving the queued/running set — here by
+	// the one transition this repository owns.
+	if err := repo.FailRoutingJob(ctx, accepted[0], "finished for the test"); err != nil {
+		t.Fatalf("FailRoutingJob: %v", err)
+	}
+
+	rec = request(t, h, http.MethodPost, "/api/isochrone", "", seededIsochroneBody)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("after the backlog drained: status %d, want 202; body %s", rec.Code, rec.Body.String())
 	}
 }

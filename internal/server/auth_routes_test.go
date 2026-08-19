@@ -21,6 +21,8 @@ import (
 // the handler package's own tests.
 type stubAuthDeps struct {
 	sessions map[string]transit.User
+	// inFlight is the routing backlog the enqueue cap reads (SPA-219).
+	inFlight int
 }
 
 func (s *stubAuthDeps) GetSessionUser(_ context.Context, tokenHash string) (transit.User, bool, error) {
@@ -144,6 +146,13 @@ func (s *stubAuthDeps) CreateRoutingJob(context.Context, *transit.RoutingJob) er
 func (s *stubAuthDeps) FailRoutingJob(context.Context, string, string) error        { return nil }
 func (s *stubAuthDeps) GetRoutingJobByID(context.Context, string) (transit.RoutingJob, bool, error) {
 	return transit.RoutingJob{}, false, nil
+}
+
+// inFlight is what the enqueue cap sees (SPA-219). Zero by default, so the cap
+// admits every request and the gate each isochrone route sits behind stays the
+// only thing this file's assertions turn on.
+func (s *stubAuthDeps) CountInFlightRoutingJobs(context.Context, time.Duration) (int, error) {
+	return s.inFlight, nil
 }
 
 const (

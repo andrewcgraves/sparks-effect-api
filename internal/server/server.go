@@ -37,6 +37,9 @@ type AuthDeps interface {
 	handler.ScenarioStore
 	// RoutingStore backs the isochrone enqueue surface and the routing job poll.
 	handler.RoutingStore
+	// RoutingBacklogStore backs the enqueue cap that refuses isochrones once
+	// too much routing work is already outstanding (SPA-219).
+	handler.RoutingBacklogStore
 	// GetSessionUser backs the middleware's auth.SessionLookup.
 	GetSessionUser(ctx context.Context, tokenHash string) (transit.User, bool, error)
 }
@@ -69,9 +72,18 @@ func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routi
 	mux.HandleFunc("GET /api/scenarios/{slug}/stations", handler.ScenarioStations(store))
 	mux.HandleFunc("GET /api/scenarios/{slug}/travel-times", handler.ScenarioTravelTimes(store))
 
+	// One cap shared by all three isochrone endpoints: they enqueue onto the
+	// same queue for the same single worker, so a per-endpoint ceiling would
+	// bound nothing. Built here rather than at each registration so the
+	// "disabled" warning is logged once (SPA-219).
+	capBacklog := passThrough
+	if deps != nil {
+		capBacklog = handler.CapIsochroneBacklog(deps, cfg.MaxInFlightIsochrones, lg)
+	}
+
 	registerRouteRoutes(mux, deps)
-	registerCompileRoutes(mux, deps, publisher, lg)
-	registerAuthRoutes(mux, cfg, deps, publisher, lg)
+	registerCompileRoutes(mux, deps, publisher, capBacklog, lg)
+	registerAuthRoutes(mux, cfg, deps, publisher, capBacklog, lg)
 
 	h := cors(mux, cfg.AllowLocalhostCORS)
 
@@ -126,7 +138,8 @@ func registerRouteRoutes(mux *http.ServeMux, deps AuthDeps) {
 // The routing job poll is public in the same sense the seeded isochrone is:
 // registered without a gate, but wrapped in auth.OptionalAuth so an owned job
 // can still recognise its owner. See handler.RoutingJobStatus for the rule.
-func registerCompileRoutes(mux *http.ServeMux, deps AuthDeps, publisher routing.Publisher, lg *slog.Logger) {
+func registerCompileRoutes(mux *http.ServeMux, deps AuthDeps, publisher routing.Publisher,
+	capBacklog func(http.Handler) http.Handler, lg *slog.Logger) {
 	if deps == nil {
 		mux.HandleFunc("GET /api/scenarios/{slug}/graph", noDatabase("compiled graph storage is unavailable"))
 		mux.HandleFunc("POST /api/isochrone", noDatabase("compiled graph storage is unavailable"))
@@ -134,10 +147,16 @@ func registerCompileRoutes(mux *http.ServeMux, deps AuthDeps, publisher routing.
 		return
 	}
 	mux.HandleFunc("GET /api/scenarios/{slug}/graph", handler.ScenarioGraph(deps))
-	mux.HandleFunc("POST /api/isochrone", requirePublisher(publisher, handler.Isochrone(deps, publisher, lg)))
+	mux.Handle("POST /api/isochrone",
+		requirePublisher(publisher, capBacklog(handler.Isochrone(deps, publisher, lg))))
 	mux.Handle("GET /api/routing-jobs/{id}",
 		auth.OptionalAuth(deps.GetSessionUser)(handler.RoutingJobStatus(deps)))
 }
+
+// passThrough is the identity middleware, used for the enqueue cap in a build
+// with no database: there is nothing to count in-flight jobs in, and the
+// isochrone routes are registered as 503s in that build anyway.
+func passThrough(next http.Handler) http.Handler { return next }
 
 // requirePublisher guards an isochrone endpoint with the broker it depends on.
 //
@@ -146,7 +165,7 @@ func registerCompileRoutes(mux *http.ServeMux, deps AuthDeps, publisher routing.
 // 503 up front is more honest than accepting the request, recording a routing
 // job, and immediately marking it failed — which is what the handler would do
 // with a publisher that cannot reach anything.
-func requirePublisher(publisher routing.Publisher, h http.HandlerFunc) http.HandlerFunc {
+func requirePublisher(publisher routing.Publisher, h http.Handler) http.Handler {
 	if publisher == nil {
 		return serviceUnavailable("the routing queue is unavailable: no broker configured")
 	}
@@ -169,7 +188,8 @@ func requirePublisher(publisher routing.Publisher, h http.HandlerFunc) http.Hand
 // With no database configured there is nothing to authenticate against, so
 // every route answers 503 rather than 404 — a client can tell "not deployed
 // with auth" from "no such endpoint".
-func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, publisher routing.Publisher, lg *slog.Logger) {
+func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, publisher routing.Publisher,
+	capBacklog func(http.Handler) http.Handler, lg *slog.Logger) {
 	if deps == nil {
 		for _, pattern := range []string{
 			"/api/auth/login", "/api/auth/logout", "/api/auth/me",
@@ -218,7 +238,8 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 	// for either: "/api/services/" is a subtree pattern and already covers them.
 	mux.Handle("GET /api/services/{slug}/graph", authenticated(handler.UserServiceGraph(deps)))
 	mux.Handle("POST /api/services/{slug}/isochrone",
-		authenticated(requirePublisher(publisher, handler.UserServiceIsochrone(deps, publisher, lg, cfg.BoardingWait))))
+		authenticated(requirePublisher(publisher,
+			capBacklog(handler.UserServiceIsochrone(deps, publisher, lg, cfg.BoardingWait)))))
 
 	// User-owned scenarios: owner-scoped CRUD over a curated set of UserService
 	// ids. Named /api/user-scenarios, distinct from the public /api/scenarios
@@ -237,7 +258,8 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 	// over the scenario's compiled graph rather than the seeded store, and
 	// answers 409 with a distinct code when that graph is stale (SPA-116).
 	mux.Handle("POST /api/user-scenarios/{slug}/isochrone",
-		authenticated(requirePublisher(publisher, handler.UserScenarioIsochrone(deps, publisher, lg, cfg.BoardingWait))))
+		authenticated(requirePublisher(publisher,
+			capBacklog(handler.UserScenarioIsochrone(deps, publisher, lg, cfg.BoardingWait)))))
 
 	// Admin-only.
 	mux.Handle("POST /api/admin/users", adminOnly(handler.CreateUser(deps)))
@@ -317,6 +339,10 @@ func cors(next http.Handler, allowLocalhost bool) http.Handler {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Trace-Id")
+			// Response headers a browser client may read. Without this the
+			// Retry-After on a capped isochrone's 429 (SPA-219) is invisible
+			// to the SPA, which is the one caller it is written for.
+			w.Header().Set("Access-Control-Expose-Headers", "Retry-After")
 			w.Header().Add("Vary", "Origin")
 
 			if r.Method == http.MethodOptions {

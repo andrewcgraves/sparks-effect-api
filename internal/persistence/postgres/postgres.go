@@ -10,6 +10,7 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -866,6 +867,35 @@ func (r *Repo) GetRoutingJobByID(ctx context.Context, id string) (transit.Routin
 		return transit.RoutingJob{}, false, wrap("GetRoutingJobByID", err)
 	}
 	return j, true, nil
+}
+
+// CountInFlightRoutingJobs returns how many routing jobs are still waiting on a
+// worker: queued or running, and created within `within` of now.
+//
+// The age bound is what stops the count from being a ratchet. Nothing sweeps
+// abandoned rows — a job whose worker never picked it up is only failed when
+// someone polls it (see handler.RoutingJobStatus), and the public isochrone's
+// caller may well have closed the tab. Counting those forever would let one
+// outage leave the enqueue cap permanently tripped, refusing work no worker is
+// actually doing. Bounding by age instead means the backlog this reports is
+// work a live worker could still plausibly be on, and that it drains on its
+// own once the enqueues stop.
+//
+// The cutoff is computed here rather than as an interval against the
+// database's now() to match handler.failIfStale, which measures the same
+// staleness in Go against the same created_at.
+func (r *Repo) CountInFlightRoutingJobs(ctx context.Context, within time.Duration) (int, error) {
+	var n int
+	err := r.pool.QueryRow(ctx,
+		`SELECT count(*) FROM routing_jobs
+		 WHERE status = ANY($1) AND created_at > $2`,
+		[]string{transit.JobStatusQueued, transit.JobStatusRunning},
+		time.Now().Add(-within),
+	).Scan(&n)
+	if err != nil {
+		return 0, wrap("CountInFlightRoutingJobs", err)
+	}
+	return n, nil
 }
 
 // FailRoutingJob marks a routing job failed. The API calls it for exactly one
