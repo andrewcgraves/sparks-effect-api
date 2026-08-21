@@ -104,6 +104,69 @@ func TestCORS_productionOrigin_allowedRegardlessOfFlag(t *testing.T) {
 	}
 }
 
+// Preview deployments (SPA-252) talk to the staging API from a per-deployment
+// hostname on the Vercel team, not the production alias. The git alias is
+// truncated to a prefix plus a short slug — not the full branch name.
+func TestCORS_previewOrigin_allowedRegardlessOfFlag(t *testing.T) {
+	store, err := transit.NewStore(transit.DefaultBoardingWaitPolicy())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: false}, store, nil, &routing.FakePublisher{}, logger.Discard())
+
+	const origin = "https://sparks-effect-website-git-claude-2643c5-andrewcgraves-projects.vercel.app"
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req.Header.Set("Origin", origin)
+	rec := httptest.NewRecorder()
+	srv.Handler.ServeHTTP(rec, req)
+
+	got := rec.Header().Get("Access-Control-Allow-Origin")
+	if got != origin {
+		t.Errorf("Access-Control-Allow-Origin: want %q, got %q", origin, got)
+	}
+}
+
+func TestCORS_previewOrigin_OPTIONS(t *testing.T) {
+	store, err := transit.NewStore(transit.DefaultBoardingWaitPolicy())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: false}, store, nil, &routing.FakePublisher{}, logger.Discard())
+
+	const origin = "https://sparks-effect-website-7geea1s8q-andrewcgraves-projects.vercel.app"
+	req := httptest.NewRequest(http.MethodOptions, "/healthz", nil)
+	req.Header.Set("Origin", origin)
+	req.Header.Set("Access-Control-Request-Method", "GET")
+	rec := httptest.NewRecorder()
+	srv.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Errorf("OPTIONS status: want 204, got %d", rec.Code)
+	}
+	got := rec.Header().Get("Access-Control-Allow-Origin")
+	if got != origin {
+		t.Errorf("Access-Control-Allow-Origin: want %q, got %q", origin, got)
+	}
+}
+
+func TestCORS_unrelatedVercelOrigin_rejected(t *testing.T) {
+	store, err := transit.NewStore(transit.DefaultBoardingWaitPolicy())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: false}, store, nil, &routing.FakePublisher{}, logger.Discard())
+
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req.Header.Set("Origin", "https://some-other-app.vercel.app")
+	rec := httptest.NewRecorder()
+	srv.Handler.ServeHTTP(rec, req)
+
+	got := rec.Header().Get("Access-Control-Allow-Origin")
+	if got != "" {
+		t.Errorf("Access-Control-Allow-Origin: want empty for unrelated vercel.app, got %q", got)
+	}
+}
+
 func TestCORS_allowsXTraceIdHeader(t *testing.T) {
 	store, err := transit.NewStore(transit.DefaultBoardingWaitPolicy())
 	if err != nil {
@@ -160,5 +223,32 @@ func TestCORS_flagOff_localhostOrigin(t *testing.T) {
 	got := rec.Header().Get("Access-Control-Allow-Origin")
 	if got != "" {
 		t.Errorf("Access-Control-Allow-Origin: want empty when flag off, got %q", got)
+	}
+}
+
+func TestIsVercelPreviewOrigin(t *testing.T) {
+	tests := []struct {
+		origin string
+		want   bool
+	}{
+		{origin: "https://andrewcgraves-projects.vercel.app", want: true},
+		// Truncated git alias from sparks-effect-website#66 — branch name is not in the host.
+		{origin: "https://sparks-effect-website-git-claude-2643c5-andrewcgraves-projects.vercel.app", want: true},
+		// Per-commit URL: project + 9-character hash + team slug.
+		{origin: "https://sparks-effect-website-7geea1s8q-andrewcgraves-projects.vercel.app", want: true},
+		{origin: "https://preview.andrewcgraves-projects.vercel.app", want: true},
+		{origin: "https://sparks-effect-website.vercel.app", want: false},
+		{origin: "https://some-other-app.vercel.app", want: false},
+		{origin: "https://notandrewcgraves-projects.vercel.app", want: false},
+		{origin: "http://sparks-effect-website-git-claude-2643c5-andrewcgraves-projects.vercel.app", want: false},
+		{origin: "https://andrewcgraves-projects.vercel.app.evil.com", want: false},
+		{origin: "https://evil.com", want: false},
+		{origin: "", want: false},
+		{origin: "null", want: false},
+	}
+	for _, tt := range tests {
+		if got := isVercelPreviewOrigin(tt.origin); got != tt.want {
+			t.Errorf("isVercelPreviewOrigin(%q) = %v, want %v", tt.origin, got, tt.want)
+		}
 	}
 }
