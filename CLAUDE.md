@@ -9,3 +9,8 @@ Use the Makefile for all build/test tasks (Go project).
 - `make vet` / `make lint` — static checks
 - `make tidy` — `go mod tidy`
 - `make clean` — remove build artifacts
+
+## Branching
+
+One trunk: `main`. Branch from it, PR into it. There is no `prd` branch —
+production is promoted by re-tagging an image. See `docs/releases.md`.
