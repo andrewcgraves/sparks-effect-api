@@ -354,9 +354,56 @@ func TestCompile_nonPositiveReverseOverrideFails(t *testing.T) {
 		if err == nil {
 			t.Fatalf("reverse_run_seconds=%d: expected error", rev)
 		}
-		if !strings.Contains(err.Error(), "a") || !strings.Contains(err.Error(), "b") {
-			t.Errorf("reverse_run_seconds=%d: error should name the segment, got: %v", rev, err)
+		if !strings.Contains(err.Error(), "a→b") {
+			t.Errorf("reverse_run_seconds=%d: error should name the segment a→b, got: %v", rev, err)
 		}
+	}
+}
+
+// A wholly symmetric diamond must compile to the same duration both ways.
+// Two equal-hop routes (a-c-d at 600 s and a-b-d at 200 s) make an independent
+// reverse BFS pick the other route, because adjacency-list order is not
+// symmetric — so run time and dwell would come from different physical paths.
+func TestCompile_symmetricDiamondKeepsBothDirectionsOnTheForwardPath(t *testing.T) {
+	sc := Scenario{ID: "sc-1", Slug: "test"}
+	stations := []Station{
+		{ID: "st-a", Slug: "a", Name: "A", Location: GeoPoint{Coordinates: []float64{-122.4, 37.7}}},
+		{ID: "st-b", Slug: "b", Name: "B", Location: GeoPoint{Coordinates: []float64{-122.5, 37.8}}},
+		{ID: "st-c", Slug: "c", Name: "C", Location: GeoPoint{Coordinates: []float64{-122.6, 37.9}}},
+		{ID: "st-d", Slug: "d", Name: "D", Location: GeoPoint{Coordinates: []float64{-122.7, 38.0}}},
+	}
+	segments := TravelTimes{Segments: []SegmentTime{
+		{FromSlug: "a", ToSlug: "c", RunSeconds: 300},
+		{FromSlug: "a", ToSlug: "b", RunSeconds: 100},
+		{FromSlug: "b", ToSlug: "d", RunSeconds: 100},
+		{FromSlug: "c", ToSlug: "d", RunSeconds: 300},
+	}}
+	services := []Service{{
+		ID:            "svc-ad",
+		Active:        true,
+		VehicleTypeID: "vt-1",
+		Stops: []ServiceStop{
+			{StationID: "st-a", Sequence: 1},
+			{StationID: "st-d", Sequence: 2},
+		},
+	}}
+
+	g, err := Compile(sc, nil, stations, services, []VehicleType{testVehicle()}, segments, DefaultBoardingWaitPolicy())
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	byKey := map[string]Edge{}
+	for _, e := range g.Services[0].Edges {
+		byKey[e.FromSlug+"→"+e.ToSlug] = e
+	}
+	fwd := byKey["a→d"]
+	rev := byKey["d→a"]
+	const want = 780 // a-c-d run 600 + arrival dwell 180; reverse of the same path
+	if fwd.Seconds != want || rev.Seconds != want {
+		t.Errorf("a→d %d, d→a %d, want %d both ways (same physical route)", fwd.Seconds, rev.Seconds, want)
+	}
+	if fwd.DwellS != 180 || rev.DwellS != 180 {
+		t.Errorf("DwellS: a→d %d, d→a %d, want 180 both ways from the c-route", fwd.DwellS, rev.DwellS)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/persistence/postgres"
+	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
 // 00018 adds reverse_run_seconds on segments and writes the two CA HSR
@@ -49,7 +50,31 @@ func insertPreFixAsymmetricSegments(t *testing.T, url string) {
 		     ('`+phase1ScenarioID+`', 'sf', 'millbrae', 760, '`+phase1RouteID+`')`)
 }
 
+// A second scenario whose gilroy→merced would be rewritten if 00018 matched
+// on slugs alone. Distinct from phase1ScenarioID so the ca-hsr UPDATE cannot
+// hit it through scenario_id.
+const (
+	otherScenarioID = "00000000-0000-4001-8008-000000000001"
+	otherRouteID    = "00000000-0000-4002-8008-000000000001"
+)
+
+func insertUnrelatedGilroyMerced(t *testing.T, url string) {
+	t.Helper()
+	exec(t, url,
+		`INSERT INTO scenarios (id, slug, name) VALUES ('`+otherScenarioID+`', 'other', 'Other')`,
+		`INSERT INTO routes (id, scenario_id, slug, name, geometry)
+		   VALUES ('`+otherRouteID+`', '`+otherScenarioID+`', 'other-route', 'Other',
+		           '{"type":"LineString","coordinates":[[-121.9,37.3],[-118.2,34.0]]}'::jsonb)`,
+		`INSERT INTO segments (scenario_id, from_slug, to_slug, run_seconds, route_id)
+		   VALUES ('`+otherScenarioID+`', 'gilroy', 'merced', 9999, '`+otherRouteID+`')`)
+}
+
 func segmentReverseSecs(t *testing.T, url, from, to string) *int {
+	t.Helper()
+	return segmentReverseSecsInScenario(t, url, phase1ScenarioID, from, to)
+}
+
+func segmentReverseSecsInScenario(t *testing.T, url, scenarioID, from, to string) *int {
 	t.Helper()
 	ctx := context.Background()
 	conn, err := pgx.Connect(ctx, url)
@@ -60,9 +85,10 @@ func segmentReverseSecs(t *testing.T, url, from, to string) *int {
 
 	var got *int
 	if err := conn.QueryRow(ctx,
-		`SELECT reverse_run_seconds FROM segments WHERE from_slug = $1 AND to_slug = $2`,
-		from, to).Scan(&got); err != nil {
-		t.Fatalf("%s→%s reverse_run_seconds: %v", from, to, err)
+		`SELECT reverse_run_seconds FROM segments
+		  WHERE scenario_id = $1 AND from_slug = $2 AND to_slug = $3`,
+		scenarioID, from, to).Scan(&got); err != nil {
+		t.Fatalf("%s %s→%s reverse_run_seconds: %v", scenarioID, from, to, err)
 	}
 	return got
 }
@@ -82,6 +108,7 @@ func TestSegmentReverseRunSecondsMigrationCorrectsAnAlreadyPopulatedScenario(t *
 	_, url := freshRepo(t)
 	rewindSegmentReverseRunSecondsMigration(t, url)
 	insertPreFixAsymmetricSegments(t, url)
+	insertUnrelatedGilroyMerced(t, url)
 
 	if err := postgres.Migrate(context.Background(), url); err != nil {
 		t.Fatalf("migration failed over a seeded ca-hsr: %v", err)
@@ -92,19 +119,71 @@ func TestSegmentReverseRunSecondsMigrationCorrectsAnAlreadyPopulatedScenario(t *
 	if got := segmentReverseSecs(t, url, "sf", "millbrae"); got != nil {
 		t.Errorf("sf→millbrae reverse_run_seconds: want nil, got %v", *got)
 	}
+	if got := segmentReverseSecsInScenario(t, url, otherScenarioID, "gilroy", "merced"); got != nil {
+		t.Errorf("unrelated gilroy→merced reverse_run_seconds: want nil, got %v", *got)
+	}
 }
 
-// On a fresh database the migration runs before the seed, so there are no
-// segment rows to update and it must touch nothing — the seed inserts the
-// overrides from YAML a moment later. The ALTER TABLE still runs (the column
-// must exist for that insert), so this only asserts the UPDATE's half is a
-// no-op.
+// 00018's UPDATEs must not invent rows, and must not rewrite a hop that is
+// not ca-hsr's. On a fresh database they match nothing (migrations run before
+// SeedIfEmpty). After the seed runs, the compiled gilroy↔merced edges must
+// match the embedded store: 3140 southbound (3050+90 dwell) and 3030
+// northbound (2940+90 dwell).
 func TestSegmentReverseRunSecondsMigrationIsANoOpOnAnEmptyDatabase(t *testing.T) {
-	_, url := freshRepo(t)
+	t.Run("unrelated pair is left alone", func(t *testing.T) {
+		_, url := freshRepo(t)
+		rewindSegmentReverseRunSecondsMigration(t, url)
+		insertUnrelatedGilroyMerced(t, url)
 
-	if got := scalarCount(t, url, `SELECT count(*) FROM segments`); got != 0 {
-		t.Errorf("migration wrote segments on an empty database: got %d", got)
-	}
+		if err := postgres.Migrate(context.Background(), url); err != nil {
+			t.Fatalf("migration over an unrelated gilroy→merced: %v", err)
+		}
+
+		got := segmentReverseSecsInScenario(t, url, otherScenarioID, "gilroy", "merced")
+		if got != nil {
+			t.Errorf("unrelated gilroy→merced reverse_run_seconds: want nil, got %v", *got)
+		}
+	})
+
+	t.Run("fresh install compiles directed mountain hops", func(t *testing.T) {
+		repo, _ := freshRepo(t)
+		ctx := context.Background()
+		seeded, err := transit.SeedIfEmpty(ctx, repo)
+		if err != nil {
+			t.Fatalf("SeedIfEmpty: %v", err)
+		}
+		if !seeded {
+			t.Fatal("expected seed to run on empty database")
+		}
+
+		sc, ok, err := repo.GetScenarioBySlug(ctx, "ca-hsr")
+		if err != nil || !ok {
+			t.Fatalf("GetScenarioBySlug: ok=%v err=%v", ok, err)
+		}
+		graph, err := transit.CompileSeededScenario(ctx, repo, sc, transit.DefaultBoardingWaitPolicy())
+		if err != nil {
+			t.Fatalf("CompileSeededScenario: %v", err)
+		}
+
+		data := transit.CompiledGraphData{Graph: &graph}
+		gotGilroy, _, _, ok := data.TravelTimeBetween("ca-hsr", "gilroy", "merced")
+		if !ok {
+			t.Fatal("gilroy→merced not found in compiled graph")
+		}
+		gotMerced, _, _, ok := data.TravelTimeBetween("ca-hsr", "merced", "gilroy")
+		if !ok {
+			t.Fatal("merced→gilroy not found in compiled graph")
+		}
+		if gotGilroy == gotMerced {
+			t.Errorf("gilroy↔merced: want different durations, both %d", gotGilroy)
+		}
+		if gotGilroy != 3140 {
+			t.Errorf("gilroy→merced: want 3140 (run_seconds 3050 + dwell 90), got %d", gotGilroy)
+		}
+		if gotMerced != 3030 {
+			t.Errorf("merced→gilroy: want 3030 (run_seconds 2940 + dwell 90), got %d", gotMerced)
+		}
+	})
 }
 
 // A database that already holds the overrides — seeded from YAML, then

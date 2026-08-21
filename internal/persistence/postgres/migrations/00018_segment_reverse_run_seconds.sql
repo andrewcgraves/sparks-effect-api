@@ -26,7 +26,8 @@
 -- Migrations run before SeedIfEmpty, so on an empty database the UPDATE below
 -- touches zero rows and the seed inserts the overrides from YAML a moment
 -- later. On a deployed database the rows exist and the UPDATEs do the work
--- instead.
+-- instead. The UPDATEs join scenarios on slug 'ca-hsr' so a user-authored
+-- hop that happens to share these station slugs is not rewritten.
 --
 -- CompileSeededIfNeeded (compile_seeded.go) notices the resulting drift
 -- between the stored graph and what the rows now compile to and recompiles on
@@ -42,13 +43,19 @@
 
 ALTER TABLE segments ADD COLUMN IF NOT EXISTS reverse_run_seconds integer;
 
-UPDATE segments
+UPDATE segments s
 SET reverse_run_seconds = 2940
-WHERE from_slug = 'gilroy' AND to_slug = 'merced';
+FROM scenarios sc
+WHERE s.scenario_id = sc.id
+  AND sc.slug = 'ca-hsr'
+  AND s.from_slug = 'gilroy' AND s.to_slug = 'merced';
 
-UPDATE segments
+UPDATE segments s
 SET reverse_run_seconds = 1490
-WHERE from_slug = 'bakersfield' AND to_slug = 'palmdale';
+FROM scenarios sc
+WHERE s.scenario_id = sc.id
+  AND sc.slug = 'ca-hsr'
+  AND s.from_slug = 'bakersfield' AND s.to_slug = 'palmdale';
 
 -- +goose Down
 ALTER TABLE segments DROP COLUMN IF EXISTS reverse_run_seconds;
