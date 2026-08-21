@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -326,16 +327,23 @@ func logRequests(lg *slog.Logger, next http.Handler) http.Handler {
 	})
 }
 
-// allowedOrigins are always permitted for CORS, regardless of the
-// ALLOW_LOCALHOST_CORS testing flag.
+// allowedOrigins are exact Origins always permitted for CORS, regardless of
+// the ALLOW_LOCALHOST_CORS testing flag. Production SPA hosts live here.
 var allowedOrigins = map[string]bool{
 	"https://sparks-effect-website.vercel.app": true,
 }
 
+// vercelPreviewHost is the Vercel team that hosts branch preview deployments
+// (SPA-252). Those previews talk to the staging API, so they must be allowed
+// the same way production is. A preview hostname is
+// https://<deployment>-andrewcgraves-projects.vercel.app — not a wildcard
+// *.vercel.app, and not the production alias already in allowedOrigins.
+const vercelPreviewHost = "andrewcgraves-projects.vercel.app"
+
 func cors(next http.Handler, allowLocalhost bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		if allowedOrigins[origin] || (allowLocalhost && isLocalhostOrigin(origin)) {
+		if originAllowed(origin, allowLocalhost) {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Trace-Id")
@@ -352,6 +360,40 @@ func cors(next http.Handler, allowLocalhost bool) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func originAllowed(origin string, allowLocalhost bool) bool {
+	if origin == "" {
+		return false
+	}
+	if allowedOrigins[origin] || isVercelPreviewOrigin(origin) {
+		return true
+	}
+	return allowLocalhost && isLocalhostOrigin(origin)
+}
+
+// isVercelPreviewOrigin reports whether origin is an HTTPS deployment on the
+// Vercel team that hosts this project's previews. Vercel puts the team slug
+// at the end of the hostname, so a branch deploy looks like
+// sparks-effect-website-git-<branch>-andrewcgraves-projects.vercel.app —
+// there is no extra dot before the team slug.
+func isVercelPreviewOrigin(origin string) bool {
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	if u.Scheme != "https" || u.User != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "" {
+		return false
+	}
+	if host == vercelPreviewHost {
+		return true
+	}
+	return strings.HasSuffix(host, "."+vercelPreviewHost) ||
+		strings.HasSuffix(host, "-"+vercelPreviewHost)
 }
 
 func isLocalhostOrigin(origin string) bool {
