@@ -653,3 +653,70 @@ func TestCompile_rejectsStationWithMalformedRoutingLocation(t *testing.T) {
 		t.Errorf("error = %v, want it to name the offending station", err)
 	}
 }
+
+// The reverse edge is priced by walking the forward path backwards through the
+// adjacency, and that adjacency is where reverse_run_seconds lives:
+// buildSegmentAdj stores the override on the reverse entry of its own segment.
+// This checks the override survives that walk on a leg spanning more than one
+// segment — the service skips b, so the compiler paths a→b→c and has to pick
+// the override up mid-route rather than as the whole hop.
+//
+// It complements TestCompile_symmetricDiamondKeepsBothDirectionsOnTheForwardPath:
+// that one proves symmetric input compiles symmetrically, this one proves the
+// same code path still produces the asymmetry SPA-245 asked for.
+func TestCompile_reverseOverrideHonouredAcrossMultiHopLeg(t *testing.T) {
+	sc := Scenario{ID: "sc-1", Slug: "test"}
+	rev := 400
+	segments := testSegments() // a→b 600, b→c 1200
+	segments.Segments[0].ReverseRunSeconds = &rev
+
+	// Stops at the two ends only — a (seq 1) and c (seq 2), skipping b.
+	services := []Service{{
+		ID:            "svc-express",
+		Active:        true,
+		VehicleTypeID: "vt-1",
+		Stops: []ServiceStop{
+			{StationID: "st-a", Sequence: 1},
+			{StationID: "st-c", Sequence: 2},
+		},
+	}}
+
+	// Platform heights match testVehicle's floor height, so every dwell is
+	// DwellLevelS (90) and the arithmetic below stays readable.
+	g, err := Compile(sc, nil, platformStations("high", "high", "high"), services,
+		[]VehicleType{testVehicle()}, segments, DefaultBoardingWaitPolicy())
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	byKey := map[string]Edge{}
+	for _, e := range g.Services[0].Edges {
+		byKey[e.FromSlug+"→"+e.ToSlug] = e
+	}
+	fwd, ok := byKey["a→c"]
+	if !ok {
+		t.Fatalf("no a→c edge compiled, got %v", g.Services[0].Edges)
+	}
+	revEdge, ok := byKey["c→a"]
+	if !ok {
+		t.Fatalf("no c→a edge compiled, got %v", g.Services[0].Edges)
+	}
+	// Forward: both segments at their declared run time, plus one dwell at c —
+	// b is passed through, not called at.
+	if run := fwd.Seconds - fwd.DwellS; run != 1800 {
+		t.Errorf("a→c run time: want 1800 (600+1200), got %d (Seconds %d DwellS %d)", run, fwd.Seconds, fwd.DwellS)
+	}
+	// Reverse: 1200 for c→b, which carries no override, plus the overridden 400
+	// for b→a. The override applies to its own segment only, not the whole leg.
+	if run := revEdge.Seconds - revEdge.DwellS; run != 1600 {
+		t.Errorf("c→a run time: want 1600 (1200 + 400 override), got %d (Seconds %d DwellS %d)",
+			run, revEdge.Seconds, revEdge.DwellS)
+	}
+	// The asymmetry belongs entirely to the run time: the same single stop is
+	// served on arrival either way, so dwell must not move with it.
+	if fwd.DwellS != revEdge.DwellS {
+		t.Fatalf("dwell should match both ways, got a→c %d and c→a %d", fwd.DwellS, revEdge.DwellS)
+	}
+	if fwd.DwellS != 90 {
+		t.Errorf("a→c dwell: want 90 (one called stop at 90), got %d", fwd.DwellS)
+	}
+}
