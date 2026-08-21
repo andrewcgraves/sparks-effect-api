@@ -104,8 +104,9 @@ func TestCORS_productionOrigin_allowedRegardlessOfFlag(t *testing.T) {
 	}
 }
 
-// Branch preview deployments (SPA-252) talk to the staging API from a
-// per-deployment hostname on the Vercel team, not the production alias.
+// Preview deployments (SPA-252) talk to the staging API from a per-deployment
+// hostname on the Vercel team, not the production alias. The git alias is
+// truncated to a prefix plus a short slug — not the full branch name.
 func TestCORS_previewOrigin_allowedRegardlessOfFlag(t *testing.T) {
 	store, err := transit.NewStore(transit.DefaultBoardingWaitPolicy())
 	if err != nil {
@@ -113,7 +114,7 @@ func TestCORS_previewOrigin_allowedRegardlessOfFlag(t *testing.T) {
 	}
 	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: false}, store, nil, &routing.FakePublisher{}, logger.Discard())
 
-	const origin = "https://sparks-effect-website-git-spa-252-andrewcgraves-projects.vercel.app"
+	const origin = "https://sparks-effect-website-git-claude-2643c5-andrewcgraves-projects.vercel.app"
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	req.Header.Set("Origin", origin)
 	rec := httptest.NewRecorder()
@@ -132,7 +133,7 @@ func TestCORS_previewOrigin_OPTIONS(t *testing.T) {
 	}
 	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: false}, store, nil, &routing.FakePublisher{}, logger.Discard())
 
-	const origin = "https://sparks-effect-website-abc123-andrewcgraves-projects.vercel.app"
+	const origin = "https://sparks-effect-website-7geea1s8q-andrewcgraves-projects.vercel.app"
 	req := httptest.NewRequest(http.MethodOptions, "/healthz", nil)
 	req.Header.Set("Origin", origin)
 	req.Header.Set("Access-Control-Request-Method", "GET")
@@ -231,13 +232,15 @@ func TestIsVercelPreviewOrigin(t *testing.T) {
 		want   bool
 	}{
 		{origin: "https://andrewcgraves-projects.vercel.app", want: true},
-		{origin: "https://sparks-effect-website-git-feat-foo-andrewcgraves-projects.vercel.app", want: true},
-		{origin: "https://sparks-effect-website-abc123xyz-andrewcgraves-projects.vercel.app", want: true},
+		// Truncated git alias from sparks-effect-website#66 — branch name is not in the host.
+		{origin: "https://sparks-effect-website-git-claude-2643c5-andrewcgraves-projects.vercel.app", want: true},
+		// Per-commit URL: project + 9-character hash + team slug.
+		{origin: "https://sparks-effect-website-7geea1s8q-andrewcgraves-projects.vercel.app", want: true},
 		{origin: "https://preview.andrewcgraves-projects.vercel.app", want: true},
 		{origin: "https://sparks-effect-website.vercel.app", want: false},
 		{origin: "https://some-other-app.vercel.app", want: false},
 		{origin: "https://notandrewcgraves-projects.vercel.app", want: false},
-		{origin: "http://sparks-effect-website-git-feat-foo-andrewcgraves-projects.vercel.app", want: false},
+		{origin: "http://sparks-effect-website-git-claude-2643c5-andrewcgraves-projects.vercel.app", want: false},
 		{origin: "https://andrewcgraves-projects.vercel.app.evil.com", want: false},
 		{origin: "https://evil.com", want: false},
 		{origin: "", want: false},

@@ -333,11 +333,14 @@ var allowedOrigins = map[string]bool{
 	"https://sparks-effect-website.vercel.app": true,
 }
 
-// vercelPreviewHost is the Vercel team that hosts branch preview deployments
+// vercelPreviewHost is the Vercel team that hosts preview deployments
 // (SPA-252). Those previews talk to the staging API, so they must be allowed
-// the same way production is. A preview hostname is
-// https://<deployment>-andrewcgraves-projects.vercel.app — not a wildcard
-// *.vercel.app, and not the production alias already in allowedOrigins.
+// the same way production is. The matcher is the team suffix, not a branch
+// name: Vercel assigns a new hostname per deployment (a 9-character hash, or
+// a truncated git alias plus a short slug) and the DNS label is capped at 63
+// characters, so the branch rarely appears in full. What is stable is
+// -<team>.vercel.app. Not a wildcard *.vercel.app, and not the production
+// alias already in allowedOrigins.
 const vercelPreviewHost = "andrewcgraves-projects.vercel.app"
 
 func cors(next http.Handler, allowLocalhost bool) http.Handler {
@@ -373,10 +376,11 @@ func originAllowed(origin string, allowLocalhost bool) bool {
 }
 
 // isVercelPreviewOrigin reports whether origin is an HTTPS deployment on the
-// Vercel team that hosts this project's previews. Vercel puts the team slug
-// at the end of the hostname, so a branch deploy looks like
-// sparks-effect-website-git-<branch>-andrewcgraves-projects.vercel.app —
-// there is no extra dot before the team slug.
+// Vercel team that hosts this project's previews. Real hosts from this
+// project look like sparks-effect-website-git-claude-2643c5-andrewcgraves-projects.vercel.app
+// (truncated git alias) or sparks-effect-website-<9-char-hash>-andrewcgraves-projects.vercel.app
+// (per-commit URL). The team slug is a suffix of the DNS label, not a
+// subdomain — there is no extra dot before it.
 func isVercelPreviewOrigin(origin string) bool {
 	u, err := url.Parse(origin)
 	if err != nil {
