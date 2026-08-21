@@ -144,10 +144,11 @@ func TestLasVegasRoutingLocationMigrationIsSafeToReRun(t *testing.T) {
 	}
 
 	// Forget that it ran while keeping the data it wrote, so the second pass
-	// meets exactly the state a YAML-seeded database would present. 00017 sits
-	// above 16 now, so it must be forgotten too — goose refuses to re-apply 16
-	// while a later version is still recorded.
+	// meets exactly the state a YAML-seeded database would present. 00017 and
+	// 00018 sit above 16 now, so they must be forgotten too — goose refuses to
+	// re-apply 16 while a later version is still recorded.
 	exec(t, url,
+		`DELETE FROM goose_db_version WHERE version_id = 18`,
 		`DELETE FROM goose_db_version WHERE version_id = 17`,
 		`DELETE FROM goose_db_version WHERE version_id = 16`)
 	if err := postgres.Migrate(context.Background(), url); err != nil {

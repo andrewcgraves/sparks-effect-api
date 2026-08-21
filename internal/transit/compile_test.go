@@ -275,6 +275,104 @@ func TestCompile_unknownStationSlugInSegments(t *testing.T) {
 	}
 }
 
+func compileABEdges(t *testing.T, segments TravelTimes) map[string]Edge {
+	t.Helper()
+	sc := Scenario{ID: "sc-1", Slug: "test"}
+	services := []Service{{
+		ID:            "svc-local",
+		Active:        true,
+		VehicleTypeID: "vt-1",
+		Stops: []ServiceStop{
+			{StationID: "st-a", Sequence: 1},
+			{StationID: "st-b", Sequence: 2},
+		},
+	}}
+	g, err := Compile(sc, nil, testStations(), services, []VehicleType{testVehicle()}, segments, DefaultBoardingWaitPolicy())
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	byKey := map[string]Edge{}
+	for _, e := range g.Services[0].Edges {
+		byKey[e.FromSlug+"→"+e.ToSlug] = e
+	}
+	return byKey
+}
+
+func TestCompile_reverseOverrideProducesAsymmetricEdges(t *testing.T) {
+	rev := 400
+	segments := testSegments()
+	segments.Segments[0].ReverseRunSeconds = &rev
+
+	byKey := compileABEdges(t, segments)
+	fwd := byKey["a→b"]
+	revEdge := byKey["b→a"]
+	if fwd.Seconds == revEdge.Seconds {
+		t.Fatalf("a→b and b→a both %d; override should produce different durations", fwd.Seconds)
+	}
+	if fwd.Seconds-fwd.DwellS != 600 {
+		t.Errorf("a→b run time: want 600, got %d (Seconds %d DwellS %d)",
+			fwd.Seconds-fwd.DwellS, fwd.Seconds, fwd.DwellS)
+	}
+	if revEdge.Seconds-revEdge.DwellS != 400 {
+		t.Errorf("b→a run time: want 400, got %d (Seconds %d DwellS %d)",
+			revEdge.Seconds-revEdge.DwellS, revEdge.Seconds, revEdge.DwellS)
+	}
+}
+
+func TestCompile_nilReverseOverrideMirrorsForward(t *testing.T) {
+	byKey := compileABEdges(t, testSegments())
+	fwd := byKey["a→b"]
+	revEdge := byKey["b→a"]
+	if fwd.Seconds != revEdge.Seconds {
+		t.Errorf("nil override: a→b %d, b→a %d, want identical durations", fwd.Seconds, revEdge.Seconds)
+	}
+}
+
+func TestCompile_reverseOverrideDifferenceIsRunTimeNotDwell(t *testing.T) {
+	rev := 400
+	segments := testSegments()
+	segments.Segments[0].ReverseRunSeconds = &rev
+
+	byKey := compileABEdges(t, segments)
+	fwd := byKey["a→b"]
+	revEdge := byKey["b→a"]
+	if fwd.DwellS != revEdge.DwellS {
+		t.Fatalf("dwell should match both ways, got a→b %d and b→a %d", fwd.DwellS, revEdge.DwellS)
+	}
+	if (fwd.Seconds-fwd.DwellS)-(revEdge.Seconds-revEdge.DwellS) != 200 {
+		t.Errorf("run-time delta: want 200 (600−400), got fwd run %d rev run %d",
+			fwd.Seconds-fwd.DwellS, revEdge.Seconds-revEdge.DwellS)
+	}
+}
+
+func TestCompile_nonPositiveReverseOverrideFails(t *testing.T) {
+	sc := Scenario{ID: "sc-1", Slug: "test"}
+	for _, rev := range []int{0, -1} {
+		tt := testSegments()
+		tt.Segments[0].ReverseRunSeconds = &rev
+		_, err := Compile(sc, nil, testStations(), nil, nil, tt, DefaultBoardingWaitPolicy())
+		if err == nil {
+			t.Fatalf("reverse_run_seconds=%d: expected error", rev)
+		}
+		if !strings.Contains(err.Error(), "a") || !strings.Contains(err.Error(), "b") {
+			t.Errorf("reverse_run_seconds=%d: error should name the segment, got: %v", rev, err)
+		}
+	}
+}
+
+func TestCompile_reverseEqualToForwardCompiles(t *testing.T) {
+	rev := 600
+	segments := testSegments()
+	segments.Segments[0].ReverseRunSeconds = &rev
+
+	byKey := compileABEdges(t, segments)
+	fwd := byKey["a→b"]
+	revEdge := byKey["b→a"]
+	if fwd.Seconds != revEdge.Seconds {
+		t.Errorf("equal override: a→b %d, b→a %d, want identical durations", fwd.Seconds, revEdge.Seconds)
+	}
+}
+
 func TestCompile_unknownServiceStopStation(t *testing.T) {
 	sc := Scenario{ID: "sc-1", Slug: "test"}
 	services := []Service{{

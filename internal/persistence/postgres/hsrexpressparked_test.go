@@ -14,15 +14,16 @@ import (
 // fresh one, where the seed writes the parked service moments later.
 const hsrExpressID = "00000000-0000-4004-8001-000000000001"
 
-// rewindHSRExpressParkedMigration unwinds 00017 and is the current tail of the
-// rewind chain that starts in snapmigration_test.go — 00017 is the highest
-// migration today, so nothing needs unwinding above it the way every other
-// link in the chain unwinds the one above.
+// rewindHSRExpressParkedMigration unwinds 00017. It is no longer the tail of
+// the rewind chain that starts in snapmigration_test.go — 00018 sits above it
+// now, so this must unwind that first, the same reason every other link in the
+// chain unwinds the migration above it before its own.
 //
 // 00017 only UPDATEs an existing row — it creates no tables and no columns —
 // so unwinding it is just unrecording the version.
 func rewindHSRExpressParkedMigration(t *testing.T, url string) {
 	t.Helper()
+	rewindSegmentReverseRunSecondsMigration(t, url)
 	exec(t, url, `DELETE FROM goose_db_version WHERE version_id = 17`)
 }
 
@@ -85,8 +86,12 @@ func TestHSRExpressParkedMigrationIsSafeToReRun(t *testing.T) {
 	}
 
 	// Forget that it ran while keeping the data it wrote, so the second pass
-	// meets exactly the state a YAML-seeded database would present.
-	exec(t, url, `DELETE FROM goose_db_version WHERE version_id = 17`)
+	// meets exactly the state a YAML-seeded database would present. 00018 sits
+	// above 17 now, so it must be forgotten too — goose refuses to re-apply 17
+	// while a later version is still recorded.
+	exec(t, url,
+		`DELETE FROM goose_db_version WHERE version_id = 18`,
+		`DELETE FROM goose_db_version WHERE version_id = 17`)
 	if err := postgres.Migrate(context.Background(), url); err != nil {
 		t.Fatalf("migration re-run over the data it already wrote: %v", err)
 	}

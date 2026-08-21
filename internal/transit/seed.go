@@ -128,6 +128,11 @@ func validateSegmentRoutes(routes []Route, tt TravelTimes) error {
 				"transit: segment %s→%s names route %q, which is not a route of scenario %q",
 				seg.FromSlug, seg.ToSlug, seg.RouteID, tt.ScenarioSlug)
 		}
+		if seg.ReverseRunSeconds != nil && *seg.ReverseRunSeconds <= 0 {
+			return fmt.Errorf(
+				"transit: segment %s→%s has non-positive reverse_run_seconds",
+				seg.FromSlug, seg.ToSlug)
+		}
 	}
 	return nil
 }

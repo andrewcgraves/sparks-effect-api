@@ -306,7 +306,25 @@ func TestTravelTimeBetween(t *testing.T) {
 		t.Fatal("TravelTimeBetween: san-jose→sf (reverse) not found")
 	}
 	if got != 3050 {
-		t.Errorf("san-jose→sf (reverse): want 3050 (symmetry), got %d", got)
+		t.Errorf("san-jose→sf: want 3050 (these hops are symmetric), got %d", got)
+	}
+
+	gotGilroy, _, _, ok := store.TravelTimeBetween("ca-hsr", "gilroy", "merced")
+	if !ok {
+		t.Fatal("TravelTimeBetween: gilroy→merced not found")
+	}
+	gotMerced, _, _, ok := store.TravelTimeBetween("ca-hsr", "merced", "gilroy")
+	if !ok {
+		t.Fatal("TravelTimeBetween: merced→gilroy not found")
+	}
+	if gotGilroy == gotMerced {
+		t.Errorf("gilroy↔merced: want different durations, both %d — not every hop is symmetric", gotGilroy)
+	}
+	if gotGilroy != 3140 {
+		t.Errorf("gilroy→merced: want 3140 (run_seconds 3050 + dwell 90), got %d", gotGilroy)
+	}
+	if gotMerced != 3030 {
+		t.Errorf("merced→gilroy: want 3030 (run_seconds 2940 + dwell 90), got %d", gotMerced)
 	}
 
 	got, _, _, ok = store.TravelTimeBetween("ca-hsr", "sf", "sf")
@@ -357,6 +375,48 @@ func sumStopToStop(t *testing.T, adj map[string]int, name string, stops []string
 		total += secs
 	}
 	return total
+}
+
+func TestTravelTimeBetween_caHSRCorridorDirectionsDiffer(t *testing.T) {
+	store := mustNewStore(t)
+
+	got, _, _, ok := store.TravelTimeBetween("ca-hsr", "sf", "anaheim")
+	if !ok {
+		t.Fatal("TravelTimeBetween: sf→anaheim not found")
+	}
+	if got != 18360 {
+		t.Errorf("sf→anaheim: want 18360 (run sum 17280 + 12×dwell 90), got %d", got)
+	}
+
+	got, _, _, ok = store.TravelTimeBetween("ca-hsr", "anaheim", "sf")
+	if !ok {
+		t.Fatal("TravelTimeBetween: anaheim→sf not found")
+	}
+	if got != 18080 {
+		t.Errorf("anaheim→sf: want 18080 (run sum 17000 + 12×dwell 90), got %d", got)
+	}
+}
+
+func TestTravelTimeBetween_brightlineWestRemainsSymmetric(t *testing.T) {
+	store := mustNewStore(t)
+	pairs := [][2]string{
+		{"palmdale", "victor-valley"},
+		{"victor-valley", "las-vegas"},
+		{"palmdale", "las-vegas"},
+	}
+	for _, p := range pairs {
+		fwd, _, _, ok := store.TravelTimeBetween("ca-hsr", p[0], p[1])
+		if !ok {
+			t.Fatalf("TravelTimeBetween: %s→%s not found", p[0], p[1])
+		}
+		rev, _, _, ok := store.TravelTimeBetween("ca-hsr", p[1], p[0])
+		if !ok {
+			t.Fatalf("TravelTimeBetween: %s→%s not found", p[1], p[0])
+		}
+		if fwd != rev {
+			t.Errorf("%s↔%s: Brightline West should stay symmetric, got %d and %d", p[0], p[1], fwd, rev)
+		}
+	}
 }
 
 func TestLocalSFToAnaheim_compiledTime_approx306min(t *testing.T) {

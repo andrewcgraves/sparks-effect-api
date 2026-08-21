@@ -173,9 +173,9 @@ func (s *Service) ResolveBoardingWait(policy BoardingWaitPolicy) error {
 // SegmentTime is the run-time-only seconds for one adjacent station pair along a service.
 // Values are run time only (train in motion); dwell is added at compile time.
 // Segments are stored in service direction (northernmost terminus first for Phase 1).
-// For bidirectional services the reverse direction uses the same time.
-// Multi-hop origin–destination times are derived by summing consecutive segments;
-// see Store.TravelTimeBetween.
+// ReverseRunSeconds, when nil, means the reverse direction reuses RunSeconds; when
+// present, it is the reverse-direction run time. Multi-hop origin–destination
+// times are derived by summing consecutive segments; see Store.TravelTimeBetween.
 //
 // RouteID names the route this span is track of, not the service that runs over
 // it: several services share one corridor (CA HSR Express and Local both run
@@ -185,10 +185,11 @@ func (s *Service) ResolveBoardingWait(policy BoardingWaitPolicy) error {
 // every segment as one physical graph, so services can path across corridors
 // that meet at a shared station.
 type SegmentTime struct {
-	FromSlug   string `yaml:"from"        json:"from"`
-	ToSlug     string `yaml:"to"          json:"to"`
-	RunSeconds int    `yaml:"run_seconds" json:"run_seconds"`
-	RouteID    string `yaml:"route_id"    json:"route_id"`
+	FromSlug          string `yaml:"from"                          json:"from"`
+	ToSlug            string `yaml:"to"                            json:"to"`
+	RunSeconds        int    `yaml:"run_seconds"                   json:"run_seconds"`
+	ReverseRunSeconds *int   `yaml:"reverse_run_seconds,omitempty" json:"reverse_run_seconds,omitempty"`
+	RouteID           string `yaml:"route_id"                      json:"route_id"`
 }
 
 // TravelTimes holds adjacent segment run times for a scenario.
