@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -329,5 +330,61 @@ func TestIsochroneCacheSchema(t *testing.T) {
 		(compile_job_id, station_slug, mode, contour_mins, geometry)
 		VALUES ($1, 'sf-transbay', 'bike', 30, $2)`, routingCompileJobID, geometry); err != nil {
 		t.Fatalf("insert cache row without a tileset timestamp: %v", err)
+	}
+}
+
+// CountInFlightRoutingJobs is the signal the enqueue cap decides on (SPA-219),
+// so what it counts is the whole behaviour: only work a worker could still be
+// doing — queued or running, and young enough to believe in.
+func TestCountInFlightRoutingJobs(t *testing.T) {
+	ctx := context.Background()
+	repo, url := freshRepo(t)
+	seedCompileJob(t, repo, routingCompileJobID)
+
+	create := func(id, status string) {
+		t.Helper()
+		j := transit.RoutingJob{
+			ID: id, Status: status, CompileJobID: routingCompileJobID,
+			Mode: transit.TravelModeWalk, BudgetMins: 30,
+		}
+		if err := repo.CreateRoutingJob(ctx, &j); err != nil {
+			t.Fatalf("CreateRoutingJob %s: %v", id, err)
+		}
+	}
+	count := func(within time.Duration) int {
+		t.Helper()
+		n, err := repo.CountInFlightRoutingJobs(ctx, within)
+		if err != nil {
+			t.Fatalf("CountInFlightRoutingJobs: %v", err)
+		}
+		return n
+	}
+
+	if n := count(time.Hour); n != 0 {
+		t.Fatalf("empty table counted %d in flight, want 0", n)
+	}
+
+	create("00000000-0000-400b-8002-00000000000a", transit.JobStatusQueued)
+	create("00000000-0000-400b-8002-00000000000b", transit.JobStatusRunning)
+	// A finished job is not backlog, however recently it finished — this is
+	// what makes the cap recover on its own as the worker drains the queue.
+	create("00000000-0000-400b-8002-00000000000c", transit.JobStatusSucceeded)
+	create("00000000-0000-400b-8002-00000000000d", transit.JobStatusFailed)
+
+	if n := count(time.Hour); n != 2 {
+		t.Errorf("in flight = %d, want 2 (the queued and running jobs only)", n)
+	}
+
+	// Backdating past the window is how an abandoned job stops counting. Without
+	// it a worker outage would leave rows queued forever and the cap tripped
+	// forever with it, refusing work nothing is actually doing.
+	execSQL(t, url, `UPDATE routing_jobs SET created_at = now() - interval '10 minutes'
+		WHERE id = $1`, "00000000-0000-400b-8002-00000000000a")
+
+	if n := count(5 * time.Minute); n != 1 {
+		t.Errorf("in flight within 5m = %d, want 1: the backdated job should have aged out", n)
+	}
+	if n := count(time.Hour); n != 2 {
+		t.Errorf("in flight within 1h = %d, want 2: the backdated job is still inside this window", n)
 	}
 }

@@ -187,3 +187,41 @@ func TestLoad_boardingWait_unknownFallsBackToNone(t *testing.T) {
 		t.Errorf("BoardingWait.Kind: want %q (default), got %q", transit.BoardingWaitNone, cfg.BoardingWait.Kind)
 	}
 }
+
+func TestLoad_maxInFlightIsochrones_defaults(t *testing.T) {
+	t.Setenv("MAX_INFLIGHT_ISOCHRONES", "")
+
+	if got := Load().MaxInFlightIsochrones; got != defaultMaxInFlightIsochrones {
+		t.Errorf("MaxInFlightIsochrones: want %d, got %d", defaultMaxInFlightIsochrones, got)
+	}
+}
+
+func TestLoad_maxInFlightIsochrones_fromEnv(t *testing.T) {
+	t.Setenv("MAX_INFLIGHT_ISOCHRONES", "7")
+
+	if got := Load().MaxInFlightIsochrones; got != 7 {
+		t.Errorf("MaxInFlightIsochrones: want 7, got %d", got)
+	}
+}
+
+// Zero is the documented off switch, so it has to survive being read rather
+// than reading as "unset" and collecting the default.
+func TestLoad_maxInFlightIsochrones_zeroDisablesTheCap(t *testing.T) {
+	t.Setenv("MAX_INFLIGHT_ISOCHRONES", "0")
+
+	if got := Load().MaxInFlightIsochrones; got != 0 {
+		t.Errorf("MaxInFlightIsochrones: want 0, got %d", got)
+	}
+}
+
+// A typo falls back to the default rather than to "disabled": an accidentally
+// uncapped queue is the failure nobody notices until a flood.
+func TestLoad_maxInFlightIsochrones_malformedKeepsTheDefault(t *testing.T) {
+	for _, v := range []string{"lots", "-1", "3.5"} {
+		t.Setenv("MAX_INFLIGHT_ISOCHRONES", v)
+
+		if got := Load().MaxInFlightIsochrones; got != defaultMaxInFlightIsochrones {
+			t.Errorf("MAX_INFLIGHT_ISOCHRONES=%q: want %d, got %d", v, defaultMaxInFlightIsochrones, got)
+		}
+	}
+}

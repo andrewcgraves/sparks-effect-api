@@ -52,6 +52,11 @@ type Config struct {
 	// admin is established.
 	BootstrapAdminEmail    string
 	BootstrapAdminPassword string
+	// MaxInFlightIsochrones caps how many routing jobs may be queued or running
+	// before POST /api/isochrone and the two authored isochrone endpoints start
+	// refusing with 429 (SPA-219). Set MAX_INFLIGHT_ISOCHRONES to override the
+	// default; 0 disables the cap.
+	MaxInFlightIsochrones int
 	// BoardingWait is the global boarding-wait policy compiled into every
 	// ServiceGraph.WaitSecs (SPA-236). Set BOARDING_WAIT_POLICY to none (the
 	// default), half_headway, full_headway, or fixed. fixed also requires
@@ -71,6 +76,19 @@ const defaultSessionTTL = 24 * time.Hour
 // consumes — so the two repositories agreeing by default is worth more than
 // forcing the operator to set it.
 const defaultRoutingQueue = "routing.jobs"
+
+// defaultMaxInFlightIsochrones is the ceiling on queued-or-running routing jobs
+// applied when MAX_INFLIGHT_ISOCHRONES is unset.
+//
+// Derived from what the backlog can actually drain rather than picked round.
+// The routing worker plots one chain at a time (broker prefetch is 1) and a
+// chain over a warm scenario takes a few seconds, so the 90 seconds after which
+// handler.RoutingJobStaleAfter gives up on a job clears something in the region
+// of twenty of them. A cap there means a full backlog is still one a live
+// worker works through inside the window a client is prepared to wait — while a
+// caller enqueueing at HTTP speed hits it almost immediately and is refused
+// from then on.
+const defaultMaxInFlightIsochrones = 20
 
 // Load reads configuration from environment variables, applying defaults
 // for anything unset.
@@ -104,6 +122,7 @@ func Load() Config {
 		SessionTTL:             sessionTTL,
 		BootstrapAdminEmail:    os.Getenv("BOOTSTRAP_ADMIN_EMAIL"),
 		BootstrapAdminPassword: os.Getenv("BOOTSTRAP_ADMIN_PASSWORD"),
+		MaxInFlightIsochrones:  loadMaxInFlightIsochrones(),
 		BoardingWait:           loadBoardingWait(),
 	}
 }
@@ -136,6 +155,28 @@ func loadBoardingWait() transit.BoardingWaitPolicy {
 		return transit.DefaultBoardingWaitPolicy()
 	}
 	return p
+}
+
+// loadMaxInFlightIsochrones reads MAX_INFLIGHT_ISOCHRONES. Unset falls back to
+// the default; an explicit 0 disables the cap, which is why this cannot reuse
+// the `n > 0` shape the other integer settings share.
+//
+// A malformed or negative value falls back to the default rather than to
+// "disabled", and says so. Getting this wrong in the direction of no cap is the
+// failure that is invisible until an actual flood, so a typo lands on the safe
+// side and the operator still sees why.
+func loadMaxInFlightIsochrones() int {
+	v := os.Getenv("MAX_INFLIGHT_ISOCHRONES")
+	if v == "" {
+		return defaultMaxInFlightIsochrones
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		slog.Warn("config: MAX_INFLIGHT_ISOCHRONES ignored, keeping the default cap",
+			"max_inflight_isochrones", v, "default", defaultMaxInFlightIsochrones)
+		return defaultMaxInFlightIsochrones
+	}
+	return n
 }
 
 func getEnv(key, fallback string) string {
