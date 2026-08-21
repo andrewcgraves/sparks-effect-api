@@ -148,6 +148,11 @@ editor:
 CA HSR seed services are calibrated (Business Plan matrix). The field is wired
 via the scenario API as that contract lands.
 
+## Branching and releases
+
+One trunk: `main`. Branch from it, PR into it. Production runs an image promoted
+from the Actions tab — see [`docs/releases.md`](docs/releases.md).
+
 ## Requirements
 
 - [Go](https://go.dev/dl/) 1.25+
@@ -389,8 +394,12 @@ internal/routing/            queue message contract + confirm-mode AMQP publishe
 
 ## CI
 
-GitHub Actions runs `test`, `vet`, and `lint` on every push and pull request,
-then builds the binary and uploads it as a workflow artifact. On pushes to
-`main`, it also builds the Docker image and publishes it to the GitHub
-Container Registry at `ghcr.io/andrewcgraves/sparks-effect-api`, tagged with
-`latest` and the commit SHA.
+GitHub Actions runs `test`, `vet`, and `lint` on every pull request and on
+pushes to `main`, then builds the binary and uploads it as a workflow artifact.
+A push to `main` also builds the Docker image and publishes it to the GitHub
+Container Registry at `ghcr.io/andrewcgraves/sparks-effect-api`, tagged
+`sha-<commit>` (immutable) and `staging` (moving).
+
+Promoting from the Actions tab re-tags that same image as `prd` without
+rebuilding it, so production runs the bytes staging ran. There is no `latest`.
+See [`docs/releases.md`](docs/releases.md).
