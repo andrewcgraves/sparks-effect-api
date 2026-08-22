@@ -49,6 +49,13 @@ type Repository interface {
 	// exposes, independent of ownership.
 	AddServiceToScenario(ctx context.Context, scenarioID, serviceID string) error
 	ListServiceIDsByScenario(ctx context.Context, scenarioID string) ([]string, error)
+	// ListServiceMembershipByScenario is that same membership plus each
+	// member's updated_at — the two facts staleness compares (MembershipStale).
+	// It is a read of its own rather than a use of ListServicesByScenario
+	// because Service is a domain value with no updated_at on it, and hydrating
+	// every member's stops and frequency windows to reach a timestamp would be
+	// most of a scenario's rows for a comparison that reads none of them.
+	ListServiceMembershipByScenario(ctx context.Context, scenarioID string) ([]ServiceMembership, error)
 
 	// UserServices are user-authored services: self-contained aggregates with
 	// embedded stops and inline vehicle params, written and read whole.
@@ -141,4 +148,18 @@ type Repository interface {
 	CreateRoutingJob(ctx context.Context, j *RoutingJob) error
 	GetRoutingJobByID(ctx context.Context, id string) (RoutingJob, bool, error)
 	FailRoutingJob(ctx context.Context, id, errMsg string) error
+
+	// PrerenderedIsochrones are curated, already-computed isochrone payloads a
+	// scenario ships with (see PrerenderedIsochrone).
+	//
+	// The list read deliberately does not carry Result: payloads run 300-500KB
+	// and a scenario's page lists a handful of them to choose between, so the
+	// split between "what there is" and "one of them, in full" is a split
+	// between two queries rather than a field a caller may forget to drop.
+	//
+	// CreatePrerenderedIsochrone takes a pointer for CreateRoutingJob's reason:
+	// it fills in the database-assigned timestamps, which the 201 carries back.
+	ListPrerenderedIsochronesByScenario(ctx context.Context, scenarioSlug string) ([]PrerenderedIsochrone, error)
+	GetPrerenderedIsochrone(ctx context.Context, id string) (PrerenderedIsochrone, bool, error)
+	CreatePrerenderedIsochrone(ctx context.Context, p *PrerenderedIsochrone) error
 }

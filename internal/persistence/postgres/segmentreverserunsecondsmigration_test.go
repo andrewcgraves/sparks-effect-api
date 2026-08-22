@@ -17,10 +17,11 @@ import (
 // all to a fresh one, where the seed writes the overrides from YAML moments
 // later.
 
-// rewindSegmentReverseRunSecondsMigration unwinds 00018 and is the current
-// tail of the rewind chain that starts in snapmigration_test.go — 00018 is the
-// highest migration today, so nothing needs unwinding above it the way every
-// other link in the chain unwinds the one above.
+// rewindSegmentReverseRunSecondsMigration unwinds 00018, and 00019 above it —
+// goose refuses to re-apply a migration older than the highest version already
+// recorded, so a test rewinding to before 00018 must unrecord everything after
+// it too. That is the same rule every other link in this chain follows; the
+// tail is now rewindPrerenderedIsochronesMigration (prerendered_test.go).
 //
 // 00018 adds a column and then UPDATEs it, so unwinding it both drops the
 // column (undoing the ALTER) and unrecords the version — a plain DELETE from
@@ -31,6 +32,7 @@ func rewindSegmentReverseRunSecondsMigration(t *testing.T, url string) {
 	exec(t, url,
 		`ALTER TABLE segments DROP COLUMN IF EXISTS reverse_run_seconds`,
 		`DELETE FROM goose_db_version WHERE version_id = 18`)
+	rewindPrerenderedIsochronesMigration(t, url)
 }
 
 // insertPreFixAsymmetricSegments stages ca-hsr as a deployed database held it
@@ -198,7 +200,11 @@ func TestSegmentReverseRunSecondsMigrationIsSafeToReRun(t *testing.T) {
 	}
 
 	// Forget that it ran while keeping the data it wrote, so the second pass
-	// meets exactly the state a YAML-seeded database would present.
+	// meets exactly the state a YAML-seeded database would present. 00019 sits
+	// above 18 now, so it must be unwound too — goose refuses to re-apply 18
+	// while a later version is still recorded, and 00019 creates a table, so
+	// leaving it behind would fail the re-migrate on CREATE TABLE.
+	rewindPrerenderedIsochronesMigration(t, url)
 	exec(t, url, `DELETE FROM goose_db_version WHERE version_id = 18`)
 	if err := postgres.Migrate(context.Background(), url); err != nil {
 		t.Fatalf("migration re-run over the data it already wrote: %v", err)

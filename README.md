@@ -291,9 +291,14 @@ auth endpoints answer `503` rather than pretending to work.
 | `GET /api/me/scenarios` | authenticated | Scenarios the caller owns |
 | `GET /api/me/services` | authenticated | Services the caller owns |
 | `POST /api/admin/users` | admin | Provision an account |
+| `POST /api/scenarios/{slug}/prerendered-isochrones` | admin | Curate a ready-to-display isochrone for a scenario |
 
 The existing `GET /api/scenarios/...` reads stay public — they serve curated
-data and are unauthenticated by design.
+data and are unauthenticated by design. That includes the two prerendered
+isochrone reads, `GET /api/scenarios/{slug}/prerendered-isochrones` (metadata
+only) and `GET /api/prerendered-isochrones/{id}` (with its payload); only the
+write above is gated, which is why it appears in the table despite not living
+under `/api/admin/`.
 
 ### Bootstrapping the first admin
 

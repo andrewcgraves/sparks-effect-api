@@ -152,6 +152,17 @@ func loadStore(ctx context.Context, cfg config.Config, lg *slog.Logger) (*transi
 		lg.Info("compiled seeded scenarios", "count", compiled)
 	}
 
+	// Curated isochrones ship as repo seed data, so every environment has them
+	// with no manual post-deploy step. This runs unconditionally rather than
+	// under SeedIfEmpty, which returns early on any populated database and so
+	// would never reach a deployed one; idempotency comes from the stable id in
+	// each seed file instead. It must run after the compile above, so the
+	// service membership it snapshots is the scenario's settled one.
+	if err := transit.SeedPrerenderedIsochronesFromEmbedded(ctx, repo); err != nil {
+		repo.Close()
+		return nil, nil, noop, err
+	}
+
 	store, err := transit.LoadStore(ctx, repo, cfg.BoardingWait)
 	if err != nil {
 		repo.Close()

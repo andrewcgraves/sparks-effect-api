@@ -144,9 +144,12 @@ func TestLasVegasRoutingLocationMigrationIsSafeToReRun(t *testing.T) {
 	}
 
 	// Forget that it ran while keeping the data it wrote, so the second pass
-	// meets exactly the state a YAML-seeded database would present. 00017 and
-	// 00018 sit above 16 now, so they must be forgotten too — goose refuses to
-	// re-apply 16 while a later version is still recorded.
+	// meets exactly the state a YAML-seeded database would present. 00017,
+	// 00018 and 00019 sit above 16 now, so they must be forgotten too — goose
+	// refuses to re-apply 16 while a later version is still recorded. 00019
+	// goes through its rewind rather than a bare DELETE: it creates a table,
+	// and leaving the table behind would fail the re-migrate on CREATE TABLE.
+	rewindPrerenderedIsochronesMigration(t, url)
 	exec(t, url,
 		`DELETE FROM goose_db_version WHERE version_id = 18`,
 		`DELETE FROM goose_db_version WHERE version_id = 17`,

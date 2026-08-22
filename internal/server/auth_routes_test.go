@@ -155,6 +155,26 @@ func (s *stubAuthDeps) CountInFlightRoutingJobs(context.Context, time.Duration) 
 	return s.inFlight, nil
 }
 
+// Prerendered isochrones: stubbed so route registration can be exercised. The
+// scenario lookup above reports not-found, so every one of these paths answers
+// 404 — enough to prove the route exists and which gate it sits behind, which
+// is all this file tests.
+func (s *stubAuthDeps) ListServiceMembershipByScenario(context.Context, string) ([]transit.ServiceMembership, error) {
+	return nil, nil
+}
+
+func (s *stubAuthDeps) ListPrerenderedIsochronesByScenario(context.Context, string) ([]transit.PrerenderedIsochrone, error) {
+	return nil, nil
+}
+
+func (s *stubAuthDeps) GetPrerenderedIsochrone(context.Context, string) (transit.PrerenderedIsochrone, bool, error) {
+	return transit.PrerenderedIsochrone{}, false, nil
+}
+
+func (s *stubAuthDeps) CreatePrerenderedIsochrone(context.Context, *transit.PrerenderedIsochrone) error {
+	return nil
+}
+
 const (
 	adminToken = "admin-token"
 	userToken  = "user-token"
@@ -220,6 +240,10 @@ func TestProtectedRoutesRejectAnonymousCallers(t *testing.T) {
 		{http.MethodDelete, "/api/user-scenarios/some-slug"},
 		{http.MethodPost, "/api/user-scenarios/some-slug/compile"},
 		{http.MethodGet, "/api/user-scenarios/some-slug/graph"},
+		// Curating a prerendered isochrone is admin-only even though it hangs
+		// off the public /api/scenarios path, so an anonymous caller must be
+		// stopped at the gate rather than reaching the handler.
+		{http.MethodPost, "/api/scenarios/ca-hsr/prerendered-isochrones"},
 	}
 
 	for _, p := range protected {
@@ -237,7 +261,13 @@ func TestProtectedRoutesRejectAnonymousCallers(t *testing.T) {
 func TestAdminRoutesRejectNonAdmins(t *testing.T) {
 	h := newTestServer(t, newStubDeps())
 
-	for _, path := range []string{"/api/admin/users", "/api/admin/routes"} {
+	for _, path := range []string{
+		"/api/admin/users",
+		"/api/admin/routes",
+		// Not under /api/admin/, so nothing about its path says it is gated —
+		// which is exactly why it is asserted here.
+		"/api/scenarios/ca-hsr/prerendered-isochrones",
+	} {
 		t.Run(path, func(t *testing.T) {
 			rec := request(t, h, http.MethodPost, path, userToken)
 			if rec.Code != http.StatusForbidden {
@@ -399,6 +429,36 @@ func TestGraphEndpointStaysOpenWithoutAToken(t *testing.T) {
 	}
 }
 
+// The prerendered isochrone reads are public: they are the illustrations a
+// scenario's page shows before anyone has signed in, so neither may require a
+// token — and the admin POST registered at the same collection path must not
+// drag the GET beside it behind the admin gate.
+//
+// This is the public-read counterpart to TestAdminRoutesRejectNonAdmins above,
+// written as its own test for the same reason the route-read, snap-stops and
+// graph reads have theirs: stubAuthDeps holds no data, so these answer the
+// ordinary 404 rather than the 200 TestPublicReadRoutesStayOpen asserts.
+func TestPrerenderedIsochroneReadsStayOpenWithoutAToken(t *testing.T) {
+	h := newTestServer(t, newStubDeps())
+
+	for _, path := range []string{
+		"/api/scenarios/ca-hsr/prerendered-isochrones",
+		"/api/prerendered-isochrones/some-id",
+	} {
+		t.Run(path, func(t *testing.T) {
+			rec := request(t, h, http.MethodGet, path, "")
+			if rec.Code == http.StatusUnauthorized || rec.Code == http.StatusForbidden {
+				t.Errorf("status = %d, the prerendered isochrone reads must not require auth", rec.Code)
+			}
+			// stubAuthDeps knows no scenarios and no entries, so an anonymous
+			// caller should see a plain not-found rather than an auth rejection.
+			if rec.Code != http.StatusNotFound {
+				t.Errorf("status = %d, want 404 with nothing stored", rec.Code)
+			}
+		})
+	}
+}
+
 // With no database there is no user or session store, so the auth endpoints
 // must say so plainly rather than 404 or panic.
 func TestAuthRoutesReportUnavailableWithoutADatabase(t *testing.T) {
@@ -456,5 +516,20 @@ func TestAuthRoutesReportUnavailableWithoutADatabase(t *testing.T) {
 	// above.
 	if rec := request(t, h, http.MethodGet, "/api/scenarios/ca-hsr/graph", ""); rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("graph read status = %d, want 503 with no database configured", rec.Code)
+	}
+
+	// Prerendered isochrones live only in Postgres. Their database-less
+	// patterns are registered without a method, so the admin POST at the
+	// collection path is covered by the same entry as the GET — asserted
+	// rather than assumed, since the failure mode is a silent 404.
+	for _, p := range []struct{ method, path string }{
+		{http.MethodGet, "/api/scenarios/ca-hsr/prerendered-isochrones"},
+		{http.MethodPost, "/api/scenarios/ca-hsr/prerendered-isochrones"},
+		{http.MethodGet, "/api/prerendered-isochrones/some-id"},
+	} {
+		if rec := request(t, h, p.method, p.path, adminToken); rec.Code != http.StatusServiceUnavailable {
+			t.Errorf("%s %s status = %d, want 503 with no database configured",
+				p.method, p.path, rec.Code)
+		}
 	}
 }
