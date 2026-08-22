@@ -166,11 +166,18 @@ func Compile(
 			if pathErr != nil {
 				return nil, fmt.Errorf("compile: service %q: %w", svc.ID, pathErr)
 			}
+			// Reverse run time is the same physical path walked backwards, not
+			// a second search: on a diamond the two BFS traversals can pick
+			// different equal-hop routes because adjacency-list order is not
+			// symmetric. The adjacency is built bidirectionally per segment,
+			// so a path the forward search found is always walkable in reverse.
+			revPath := reversePath(path)
+			revRunSecs := pathRunSeconds(adj, revPath)
 			fwdDwell := pathDwellSecs(path, stationsBySlug, stopByStationID, vt)
-			revDwell := pathDwellSecs(reversePath(path), stationsBySlug, stopByStationID, vt)
+			revDwell := pathDwellSecs(revPath, stationsBySlug, stopByStationID, vt)
 			sg.Edges = append(sg.Edges,
 				Edge{FromSlug: fromSlug, ToSlug: toSlug, Seconds: runSecs + fwdDwell, DwellS: fwdDwell},
-				Edge{FromSlug: toSlug, ToSlug: fromSlug, Seconds: runSecs + revDwell, DwellS: revDwell},
+				Edge{FromSlug: toSlug, ToSlug: fromSlug, Seconds: revRunSecs + revDwell, DwellS: revDwell},
 			)
 		}
 		graph.Services = append(graph.Services, sg)
@@ -256,8 +263,16 @@ func buildSegmentAdj(tt TravelTimes, stationsBySlug map[string]Station) (map[str
 			return nil, nil, fmt.Errorf("compile: unknown station slug %q in segment times", seg.ToSlug)
 		}
 		secs := seg.RunSeconds
+		revSecs := secs
+		if seg.ReverseRunSeconds != nil {
+			if *seg.ReverseRunSeconds <= 0 {
+				return nil, nil, fmt.Errorf("compile: non-positive reverse_run_seconds on segment %s→%s",
+					seg.FromSlug, seg.ToSlug)
+			}
+			revSecs = *seg.ReverseRunSeconds
+		}
 		adj[seg.FromSlug] = append(adj[seg.FromSlug], segEdge{seg.ToSlug, secs})
-		adj[seg.ToSlug] = append(adj[seg.ToSlug], segEdge{seg.FromSlug, secs})
+		adj[seg.ToSlug] = append(adj[seg.ToSlug], segEdge{seg.FromSlug, revSecs})
 		onPath[seg.FromSlug] = true
 		onPath[seg.ToSlug] = true
 	}
@@ -307,6 +322,20 @@ func segmentPathSeconds(adj map[string][]segEdge, from, to string) (int, []strin
 		path[i], path[j] = path[j], path[i]
 	}
 	return total, path, nil
+}
+
+func pathRunSeconds(adj map[string][]segEdge, path []string) int {
+	secs := 0
+	for i := 0; i+1 < len(path); i++ {
+		from, to := path[i], path[i+1]
+		for _, e := range adj[from] {
+			if e.to == to {
+				secs += e.seconds
+				break
+			}
+		}
+	}
+	return secs
 }
 
 func pathDwellSecs(path []string, stationsBySlug map[string]Station, stopByStationID map[string]ServiceStop, vt VehicleType) int {

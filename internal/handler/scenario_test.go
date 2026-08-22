@@ -401,6 +401,59 @@ func TestScenarioTravelTimes_found(t *testing.T) {
 	}
 }
 
+func TestScenarioTravelTimes_reverseRunSecondsOmitempty(t *testing.T) {
+	store := mustNewStore(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/scenarios/ca-hsr/travel-times", nil)
+	req.SetPathValue("slug", "ca-hsr")
+	rec := httptest.NewRecorder()
+
+	ScenarioTravelTimes(store)(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	segments, ok := body["segments"].([]any)
+	if !ok || len(segments) == 0 {
+		t.Fatal("expected non-empty segments")
+	}
+
+	var seenOverride, seenOmitted bool
+	for i, raw := range segments {
+		seg, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("segment %d: want object, got %T", i, raw)
+		}
+		_, has := seg["reverse_run_seconds"]
+		from, _ := seg["from"].(string)
+		to, _ := seg["to"].(string)
+		if from == "gilroy" && to == "merced" {
+			seenOverride = true
+			if !has {
+				t.Error("gilroy→merced: reverse_run_seconds missing from JSON")
+			} else if seg["reverse_run_seconds"] != float64(2940) {
+				t.Errorf("gilroy→merced reverse_run_seconds: want 2940, got %v", seg["reverse_run_seconds"])
+			}
+		}
+		if from == "sf" && to == "millbrae" {
+			seenOmitted = true
+			if has {
+				t.Errorf("sf→millbrae: reverse_run_seconds should be omitted, got %v", seg["reverse_run_seconds"])
+			}
+		}
+	}
+	if !seenOverride {
+		t.Error("gilroy→merced segment not found")
+	}
+	if !seenOmitted {
+		t.Error("sf→millbrae segment not found")
+	}
+}
+
 func TestScenarioTravelTimes_notFound(t *testing.T) {
 	store := mustNewStore(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/scenarios/nope/travel-times", nil)

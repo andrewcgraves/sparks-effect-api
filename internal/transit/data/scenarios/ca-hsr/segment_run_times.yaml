@@ -1,10 +1,30 @@
 # Adjacent segment run times (train in motion only — dwell is added at compile time).
 # Source: CA HSR 2026 Business Plan travel-time matrix (https://hsr.ca.gov/communications-outreach/reports/business-plans/2026-business-plan/).
 #
-# Values are run-time only. Compiled Local SF→Anaheim ≈ 306 min = run sum 288 min
-# (17280 s) + 12×90 s resolved dwell. Derived by stripping ~90 s schedule dwell
-# per non-terminus segment from the 2026 Business Plan minute matrix, then
-# proportionally recalibrating to the published 306-min all-stop figure.
+# Values are run-time only. Compiled Local SF→Anaheim = 18360 s (306 min) =
+# run sum 17280 s + 12×90 s resolved dwell. Derived by stripping ~90 s schedule
+# dwell per non-terminus segment from the 2026 Business Plan minute matrix, then
+# proportionally recalibrating to the published 306-min all-stop figure
+# (scale 16/17).
+#
+# Two mountain hops carry reverse_run_seconds: Gilroy↔Merced (Pacheco Pass) and
+# Bakersfield↔Palmdale (Tehachapi). The reverse values use the same treatment as
+# the forward ones — strip ~90 s dwell, scale 16/17 — applied to the published
+# northbound deltas. Compiled Local Anaheim→SF is therefore 18080 s (301 min
+# 20 s). That deliberately disagrees with the published 306-minute
+# origin–destination figure in both directions: adjacent hops are the source of
+# truth, and the published matrix is internally inconsistent (faster northbound
+# hops but the same 306-minute total both ways). Do not "correct" the northbound
+# total back to 306.
+#
+# The Gilroy–Merced 2-minute delta may not be grade. Merced sits on a stub off
+# the Central Valley Wye; a train calling there reverses and retraces. If the
+# difference is that turnaround, it belongs to the stop, not the span — recorded
+# here so a future ticket can consider a per-station reversal penalty.
+#
+# Arrival isochrones ("everywhere that can reach here") are no longer equivalent
+# to departure isochrones ("everywhere reachable from here"). Do not reuse the
+# departure computation from the destination.
 #
 # Segments are ordered in the primary service direction (SF → Anaheim for Phase 1,
 # Palmdale → Las Vegas for the Brightline West spur, which branches at Palmdale).
@@ -37,6 +57,7 @@ segments:
   - from: gilroy
     to: merced
     run_seconds: 3050
+    reverse_run_seconds: 2940
     route_id: "00000000-0000-4002-8001-000000000001"
   - from: merced
     to: madera
@@ -57,6 +78,7 @@ segments:
   - from: bakersfield
     to: palmdale
     run_seconds: 1660
+    reverse_run_seconds: 1490
     route_id: "00000000-0000-4002-8001-000000000001"
   - from: palmdale
     to: burbank-airport

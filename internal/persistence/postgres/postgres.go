@@ -535,9 +535,9 @@ func (r *Repo) UpsertTravelTimes(ctx context.Context, tt transit.TravelTimes) er
 	}
 	for _, seg := range tt.Segments {
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO segments (scenario_id, from_slug, to_slug, run_seconds, route_id)
-			 VALUES ($1, $2, $3, $4, $5)`,
-			scenarioID, seg.FromSlug, seg.ToSlug, seg.RunSeconds, seg.RouteID); err != nil {
+			`INSERT INTO segments (scenario_id, from_slug, to_slug, run_seconds, reverse_run_seconds, route_id)
+			 VALUES ($1, $2, $3, $4, $5, $6)`,
+			scenarioID, seg.FromSlug, seg.ToSlug, seg.RunSeconds, seg.ReverseRunSeconds, seg.RouteID); err != nil {
 			return wrap("UpsertTravelTimes insert segment", err)
 		}
 	}
@@ -567,7 +567,7 @@ func (r *Repo) GetTravelTimes(ctx context.Context, scenarioSlug string) (transit
 	}
 
 	rows, err := r.pool.Query(ctx,
-		`SELECT from_slug, to_slug, run_seconds, route_id FROM segments WHERE scenario_id = $1 ORDER BY id`, scenarioID)
+		`SELECT from_slug, to_slug, run_seconds, reverse_run_seconds, route_id FROM segments WHERE scenario_id = $1 ORDER BY id`, scenarioID)
 	if err != nil {
 		return transit.TravelTimes{}, false, wrap("GetTravelTimes segments", err)
 	}
@@ -575,7 +575,7 @@ func (r *Repo) GetTravelTimes(ctx context.Context, scenarioSlug string) (transit
 
 	for rows.Next() {
 		var seg transit.SegmentTime
-		if err := rows.Scan(&seg.FromSlug, &seg.ToSlug, &seg.RunSeconds, &seg.RouteID); err != nil {
+		if err := rows.Scan(&seg.FromSlug, &seg.ToSlug, &seg.RunSeconds, &seg.ReverseRunSeconds, &seg.RouteID); err != nil {
 			return transit.TravelTimes{}, false, wrap("GetTravelTimes segments scan", err)
 		}
 		tt.Segments = append(tt.Segments, seg)

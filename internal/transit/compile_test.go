@@ -275,6 +275,151 @@ func TestCompile_unknownStationSlugInSegments(t *testing.T) {
 	}
 }
 
+func compileABEdges(t *testing.T, segments TravelTimes) map[string]Edge {
+	t.Helper()
+	sc := Scenario{ID: "sc-1", Slug: "test"}
+	services := []Service{{
+		ID:            "svc-local",
+		Active:        true,
+		VehicleTypeID: "vt-1",
+		Stops: []ServiceStop{
+			{StationID: "st-a", Sequence: 1},
+			{StationID: "st-b", Sequence: 2},
+		},
+	}}
+	g, err := Compile(sc, nil, testStations(), services, []VehicleType{testVehicle()}, segments, DefaultBoardingWaitPolicy())
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	byKey := map[string]Edge{}
+	for _, e := range g.Services[0].Edges {
+		byKey[e.FromSlug+"→"+e.ToSlug] = e
+	}
+	return byKey
+}
+
+func TestCompile_reverseOverrideProducesAsymmetricEdges(t *testing.T) {
+	rev := 400
+	segments := testSegments()
+	segments.Segments[0].ReverseRunSeconds = &rev
+
+	byKey := compileABEdges(t, segments)
+	fwd := byKey["a→b"]
+	revEdge := byKey["b→a"]
+	if fwd.Seconds == revEdge.Seconds {
+		t.Fatalf("a→b and b→a both %d; override should produce different durations", fwd.Seconds)
+	}
+	if fwd.Seconds-fwd.DwellS != 600 {
+		t.Errorf("a→b run time: want 600, got %d (Seconds %d DwellS %d)",
+			fwd.Seconds-fwd.DwellS, fwd.Seconds, fwd.DwellS)
+	}
+	if revEdge.Seconds-revEdge.DwellS != 400 {
+		t.Errorf("b→a run time: want 400, got %d (Seconds %d DwellS %d)",
+			revEdge.Seconds-revEdge.DwellS, revEdge.Seconds, revEdge.DwellS)
+	}
+}
+
+func TestCompile_nilReverseOverrideMirrorsForward(t *testing.T) {
+	byKey := compileABEdges(t, testSegments())
+	fwd := byKey["a→b"]
+	revEdge := byKey["b→a"]
+	if fwd.Seconds != revEdge.Seconds {
+		t.Errorf("nil override: a→b %d, b→a %d, want identical durations", fwd.Seconds, revEdge.Seconds)
+	}
+}
+
+func TestCompile_reverseOverrideDifferenceIsRunTimeNotDwell(t *testing.T) {
+	rev := 400
+	segments := testSegments()
+	segments.Segments[0].ReverseRunSeconds = &rev
+
+	byKey := compileABEdges(t, segments)
+	fwd := byKey["a→b"]
+	revEdge := byKey["b→a"]
+	if fwd.DwellS != revEdge.DwellS {
+		t.Fatalf("dwell should match both ways, got a→b %d and b→a %d", fwd.DwellS, revEdge.DwellS)
+	}
+	if (fwd.Seconds-fwd.DwellS)-(revEdge.Seconds-revEdge.DwellS) != 200 {
+		t.Errorf("run-time delta: want 200 (600−400), got fwd run %d rev run %d",
+			fwd.Seconds-fwd.DwellS, revEdge.Seconds-revEdge.DwellS)
+	}
+}
+
+func TestCompile_nonPositiveReverseOverrideFails(t *testing.T) {
+	sc := Scenario{ID: "sc-1", Slug: "test"}
+	for _, rev := range []int{0, -1} {
+		tt := testSegments()
+		tt.Segments[0].ReverseRunSeconds = &rev
+		_, err := Compile(sc, nil, testStations(), nil, nil, tt, DefaultBoardingWaitPolicy())
+		if err == nil {
+			t.Fatalf("reverse_run_seconds=%d: expected error", rev)
+		}
+		if !strings.Contains(err.Error(), "a→b") {
+			t.Errorf("reverse_run_seconds=%d: error should name the segment a→b, got: %v", rev, err)
+		}
+	}
+}
+
+// A wholly symmetric diamond must compile to the same duration both ways.
+// Two equal-hop routes (a-c-d at 600 s and a-b-d at 200 s) make an independent
+// reverse BFS pick the other route, because adjacency-list order is not
+// symmetric — so run time and dwell would come from different physical paths.
+func TestCompile_symmetricDiamondKeepsBothDirectionsOnTheForwardPath(t *testing.T) {
+	sc := Scenario{ID: "sc-1", Slug: "test"}
+	stations := []Station{
+		{ID: "st-a", Slug: "a", Name: "A", Location: GeoPoint{Coordinates: []float64{-122.4, 37.7}}},
+		{ID: "st-b", Slug: "b", Name: "B", Location: GeoPoint{Coordinates: []float64{-122.5, 37.8}}},
+		{ID: "st-c", Slug: "c", Name: "C", Location: GeoPoint{Coordinates: []float64{-122.6, 37.9}}},
+		{ID: "st-d", Slug: "d", Name: "D", Location: GeoPoint{Coordinates: []float64{-122.7, 38.0}}},
+	}
+	segments := TravelTimes{Segments: []SegmentTime{
+		{FromSlug: "a", ToSlug: "c", RunSeconds: 300},
+		{FromSlug: "a", ToSlug: "b", RunSeconds: 100},
+		{FromSlug: "b", ToSlug: "d", RunSeconds: 100},
+		{FromSlug: "c", ToSlug: "d", RunSeconds: 300},
+	}}
+	services := []Service{{
+		ID:            "svc-ad",
+		Active:        true,
+		VehicleTypeID: "vt-1",
+		Stops: []ServiceStop{
+			{StationID: "st-a", Sequence: 1},
+			{StationID: "st-d", Sequence: 2},
+		},
+	}}
+
+	g, err := Compile(sc, nil, stations, services, []VehicleType{testVehicle()}, segments, DefaultBoardingWaitPolicy())
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	byKey := map[string]Edge{}
+	for _, e := range g.Services[0].Edges {
+		byKey[e.FromSlug+"→"+e.ToSlug] = e
+	}
+	fwd := byKey["a→d"]
+	rev := byKey["d→a"]
+	const want = 780 // a-c-d run 600 + arrival dwell 180; reverse of the same path
+	if fwd.Seconds != want || rev.Seconds != want {
+		t.Errorf("a→d %d, d→a %d, want %d both ways (same physical route)", fwd.Seconds, rev.Seconds, want)
+	}
+	if fwd.DwellS != 180 || rev.DwellS != 180 {
+		t.Errorf("DwellS: a→d %d, d→a %d, want 180 both ways from the c-route", fwd.DwellS, rev.DwellS)
+	}
+}
+
+func TestCompile_reverseEqualToForwardCompiles(t *testing.T) {
+	rev := 600
+	segments := testSegments()
+	segments.Segments[0].ReverseRunSeconds = &rev
+
+	byKey := compileABEdges(t, segments)
+	fwd := byKey["a→b"]
+	revEdge := byKey["b→a"]
+	if fwd.Seconds != revEdge.Seconds {
+		t.Errorf("equal override: a→b %d, b→a %d, want identical durations", fwd.Seconds, revEdge.Seconds)
+	}
+}
+
 func TestCompile_unknownServiceStopStation(t *testing.T) {
 	sc := Scenario{ID: "sc-1", Slug: "test"}
 	services := []Service{{
@@ -506,5 +651,72 @@ func TestCompile_rejectsStationWithMalformedRoutingLocation(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "b") {
 		t.Errorf("error = %v, want it to name the offending station", err)
+	}
+}
+
+// The reverse edge is priced by walking the forward path backwards through the
+// adjacency, and that adjacency is where reverse_run_seconds lives:
+// buildSegmentAdj stores the override on the reverse entry of its own segment.
+// This checks the override survives that walk on a leg spanning more than one
+// segment — the service skips b, so the compiler paths a→b→c and has to pick
+// the override up mid-route rather than as the whole hop.
+//
+// It complements TestCompile_symmetricDiamondKeepsBothDirectionsOnTheForwardPath:
+// that one proves symmetric input compiles symmetrically, this one proves the
+// same code path still produces the asymmetry SPA-245 asked for.
+func TestCompile_reverseOverrideHonouredAcrossMultiHopLeg(t *testing.T) {
+	sc := Scenario{ID: "sc-1", Slug: "test"}
+	rev := 400
+	segments := testSegments() // a→b 600, b→c 1200
+	segments.Segments[0].ReverseRunSeconds = &rev
+
+	// Stops at the two ends only — a (seq 1) and c (seq 2), skipping b.
+	services := []Service{{
+		ID:            "svc-express",
+		Active:        true,
+		VehicleTypeID: "vt-1",
+		Stops: []ServiceStop{
+			{StationID: "st-a", Sequence: 1},
+			{StationID: "st-c", Sequence: 2},
+		},
+	}}
+
+	// Platform heights match testVehicle's floor height, so every dwell is
+	// DwellLevelS (90) and the arithmetic below stays readable.
+	g, err := Compile(sc, nil, platformStations("high", "high", "high"), services,
+		[]VehicleType{testVehicle()}, segments, DefaultBoardingWaitPolicy())
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	byKey := map[string]Edge{}
+	for _, e := range g.Services[0].Edges {
+		byKey[e.FromSlug+"→"+e.ToSlug] = e
+	}
+	fwd, ok := byKey["a→c"]
+	if !ok {
+		t.Fatalf("no a→c edge compiled, got %v", g.Services[0].Edges)
+	}
+	revEdge, ok := byKey["c→a"]
+	if !ok {
+		t.Fatalf("no c→a edge compiled, got %v", g.Services[0].Edges)
+	}
+	// Forward: both segments at their declared run time, plus one dwell at c —
+	// b is passed through, not called at.
+	if run := fwd.Seconds - fwd.DwellS; run != 1800 {
+		t.Errorf("a→c run time: want 1800 (600+1200), got %d (Seconds %d DwellS %d)", run, fwd.Seconds, fwd.DwellS)
+	}
+	// Reverse: 1200 for c→b, which carries no override, plus the overridden 400
+	// for b→a. The override applies to its own segment only, not the whole leg.
+	if run := revEdge.Seconds - revEdge.DwellS; run != 1600 {
+		t.Errorf("c→a run time: want 1600 (1200 + 400 override), got %d (Seconds %d DwellS %d)",
+			run, revEdge.Seconds, revEdge.DwellS)
+	}
+	// The asymmetry belongs entirely to the run time: the same single stop is
+	// served on arrival either way, so dwell must not move with it.
+	if fwd.DwellS != revEdge.DwellS {
+		t.Fatalf("dwell should match both ways, got a→c %d and c→a %d", fwd.DwellS, revEdge.DwellS)
+	}
+	if fwd.DwellS != 90 {
+		t.Errorf("a→c dwell: want 90 (one called stop at 90), got %d", fwd.DwellS)
 	}
 }
