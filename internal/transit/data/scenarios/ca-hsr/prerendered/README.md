@@ -40,22 +40,25 @@ repo-authored data, so a mistake in it is worth failing loudly on.
 Payloads run roughly 300–500 KB each. That is expected and is why the list
 endpoint never selects the column.
 
-## Expected entries
+## What ships here
 
-The two real CA HSR sample payloads belong here. They are attached to the
-Linear ticket and were **not** reproducible from this session (the attachment
-host is outside the session's egress policy), so they are deliberately absent
-rather than approximated — invented geometry would be indistinguishable from
-real CAHSR output to anyone reading it later.
+Both CA HSR sample payloads are present. Each was captured from a real
+succeeded routing job against the seeded `ca-hsr` graph; the envelope's
+`lat`/`lng`/`budget_mins`/`mode` are that job's own, and `result` is its
+payload byte for byte.
 
 | filename | label | origin | budget | mode |
 | --- | --- | --- | --- | --- |
-| `isochrone-sj-240-bike.json` | San Jose, 240-minute bike reach | San Jose Diridon | 240 | `bike` |
-| `isochrone-burbank-walk.json` | Burbank walk reach | Burbank Airport | *(from the payload)* | `walk` |
+| `isochrone-sj-240-bike.json` | San Jose - 240 min by bike | San Jose (`san-jose`) | 240 | `bike` |
+| `isochrone-burbank-walk.json` | Burbank Airport - 240 min on foot | Burbank Airport (`burbank-airport`) | 240 | `walk` |
 
-To land them: download both attachments, wrap each payload in the envelope
-above with a freshly generated UUID for `id`, and commit the files here. The
-next boot picks them up.
+Their ids follow this scenario's hand-written UUID convention, where the third
+group names the kind: `4006` for a prerendered isochrone, as `4005` is a
+station and `4004` a service.
+
+To add another, capture a succeeded routing job for this scenario, wrap its
+payload in the envelope above under a fresh `4006` id, and commit it here. The
+next boot picks it up.
 
 ## Endpoints they surface on
 
