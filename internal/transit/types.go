@@ -343,3 +343,50 @@ type RoutingJob struct {
 	CreatedAt time.Time       `json:"created_at"`
 	UpdatedAt time.Time       `json:"updated_at"`
 }
+
+// ServiceMembership is one member of a scenario's curated service set: the
+// service's id, and when that service last changed.
+//
+// It exists because staleness needs exactly those two facts and nothing else
+// (see MembershipStale). Loading whole Service aggregates to reach them would
+// pull every stop and frequency window of every member through the database
+// for a comparison that looks at neither, and Service carries no updated_at
+// of its own — it is a domain value, not a row.
+type ServiceMembership struct {
+	ServiceID string
+	UpdatedAt time.Time
+}
+
+// PrerenderedIsochrone is a curated, already-computed isochrone a scenario
+// ships with: authored once and served as-is, rather than resolved to a
+// compiled graph and handed to the routing worker the way a dropped pin is
+// (see RoutingJob).
+//
+// It is keyed on ScenarioSlug rather than a scenario id because the public
+// isochrone surface already addresses a scenario that way, and scenarios.slug
+// is unique — so the storage key and the request key are the same string.
+//
+// Result is the payload, held as raw JSON for RoutingJob.Result's reason: this
+// repository neither produces nor interprets an isochrone, so a Go type here
+// would be a second copy of someone else's output contract with no compiler
+// able to check the two still agree. It is omitted from every list read, since
+// payloads run 300-500KB.
+//
+// CompiledServiceIDs is the service-membership snapshot taken when the entry
+// was curated, the same thing Job.CompiledServiceIDs records for a compiled
+// graph. Comparing it against the scenario's live membership is what makes an
+// entry "outdated" on read; nothing about that is persisted.
+type PrerenderedIsochrone struct {
+	ID           string     `json:"id"`
+	ScenarioSlug string     `json:"scenario_slug"`
+	Label        string     `json:"label"`
+	Lat          float64    `json:"lat"`
+	Lng          float64    `json:"lng"`
+	BudgetMins   int        `json:"budget_mins"`
+	Mode         TravelMode `json:"mode"`
+	// Result is absent from a list read, which never selects the column.
+	Result             json.RawMessage `json:"result,omitempty"`
+	CompiledServiceIDs []string        `json:"compiled_service_ids,omitempty"`
+	CreatedAt          time.Time       `json:"created_at"`
+	UpdatedAt          time.Time       `json:"updated_at"`
+}

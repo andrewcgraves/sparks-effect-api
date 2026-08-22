@@ -41,6 +41,9 @@ type AuthDeps interface {
 	// RoutingBacklogStore backs the enqueue cap that refuses isochrones once
 	// too much routing work is already outstanding (SPA-219).
 	handler.RoutingBacklogStore
+	// PrerenderedStore backs the curated isochrone surface: two public reads
+	// and the admin write that curates one.
+	handler.PrerenderedStore
 	// GetSessionUser backs the middleware's auth.SessionLookup.
 	GetSessionUser(ctx context.Context, tokenHash string) (transit.User, bool, error)
 }
@@ -84,6 +87,7 @@ func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routi
 
 	registerRouteRoutes(mux, deps)
 	registerCompileRoutes(mux, deps, publisher, capBacklog, lg)
+	registerPrerenderedRoutes(mux, deps)
 	registerAuthRoutes(mux, cfg, deps, publisher, capBacklog, lg)
 
 	h := cors(mux, cfg.AllowLocalhostCORS)
@@ -152,6 +156,26 @@ func registerCompileRoutes(mux *http.ServeMux, deps AuthDeps, publisher routing.
 		requirePublisher(publisher, capBacklog(handler.Isochrone(deps, publisher, lg))))
 	mux.Handle("GET /api/routing-jobs/{id}",
 		auth.OptionalAuth(deps.GetSessionUser)(handler.RoutingJobStatus(deps)))
+}
+
+// registerPrerenderedRoutes wires the public half of the curated isochrone
+// surface: a scenario's entries, and one of them in full. The admin write that
+// creates one is registered in registerAuthRoutes instead, beside the other
+// adminOnly routes.
+//
+// The entries live in Postgres, so with no database configured these answer
+// 503 rather than 404. Both database-less patterns are registered without a
+// method, which is what also covers the admin POST at the collection path —
+// registerAuthRoutes' own 503 list therefore needs no entry for it.
+func registerPrerenderedRoutes(mux *http.ServeMux, deps AuthDeps) {
+	const unavailable = "prerendered isochrone storage is unavailable"
+	if deps == nil {
+		mux.HandleFunc("/api/scenarios/{slug}/prerendered-isochrones", noDatabase(unavailable))
+		mux.HandleFunc("/api/prerendered-isochrones/{id}", noDatabase(unavailable))
+		return
+	}
+	mux.HandleFunc("GET /api/scenarios/{slug}/prerendered-isochrones", handler.PrerenderedIsochrones(deps))
+	mux.HandleFunc("GET /api/prerendered-isochrones/{id}", handler.PrerenderedIsochrone(deps))
 }
 
 // passThrough is the identity middleware, used for the enqueue cap in a build
@@ -265,6 +289,13 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 	// Admin-only.
 	mux.Handle("POST /api/admin/users", adminOnly(handler.CreateUser(deps)))
 	mux.Handle("POST /api/admin/routes", adminOnly(handler.CreateRoute(deps)))
+	// Curating a prerendered isochrone is editorial content on a public page,
+	// so it sits behind the same admin gate — even though it hangs off the
+	// public /api/scenarios path rather than /api/admin. Its two sibling reads
+	// are registered in registerPrerenderedRoutes; the database-less 503 for
+	// this path comes from there too, so the list above needs no entry.
+	mux.Handle("POST /api/scenarios/{slug}/prerendered-isochrones",
+		adminOnly(handler.CreatePrerenderedIsochrone(deps)))
 }
 
 // noDatabase answers 503 for a route whose backing store is Postgres when no
