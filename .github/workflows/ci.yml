@@ -1,15 +1,12 @@
 name: CI
 
+# Tags are deliberately not a trigger here: a release promotes an image this
+# workflow already built and tested on `main`, and rebuilding it would defeat
+# that. See `release.yml`.
 on:
   push:
     branches: [main]
   pull_request:
-  workflow_dispatch:
-    inputs:
-      commit:
-        description: "Commit to promote to production. Blank promotes the head of main; pass an older SHA to roll back."
-        required: false
-        type: string
 
 env:
   GO_VERSION: "1.25"
@@ -17,11 +14,6 @@ env:
 jobs:
   check:
     name: Test, lint, vet
-    # A promotion re-tags an image built from a commit that already passed this
-    # on its way into `main`. Re-running it would reintroduce flake risk into the
-    # promotion path for no new information. `build` and `publish` skip with it
-    # via `needs`.
-    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -95,10 +87,11 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}
-          # `sha-<commit>` is the promotable artifact: immutable, and what the
-          # `promote` job below re-tags. `staging` is a moving tag for whatever
-          # the trunk last built. No `latest` — a moving tag something deploys
-          # from is how production drifts with nobody choosing to move it.
+          # `sha-<commit>` is the promotable artifact: immutable, and what
+          # `release.yml` re-tags as `:prd` when a release tag names this
+          # commit. `staging` is a moving tag for whatever the trunk last
+          # built. No `latest` — a moving tag something deploys from is how
+          # production drifts with nobody choosing to move it.
           tags: |
             type=sha
             type=raw,value=staging
@@ -110,54 +103,3 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-
-  # Promotion re-tags an image that `main` already built and staging already ran
-  # — it never rebuilds. Only `main` publishes, so an image existing under a
-  # `sha-` tag is itself the proof that the commit went through the trunk; that
-  # is what the inspect below checks, and it is why no branch is needed to
-  # record what production runs.
-  promote:
-    name: Promote image to production
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Resolve the commit to promote
-        id: target
-        env:
-          REQUESTED: ${{ inputs.commit }}
-          DEFAULT: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          sha="${REQUESTED:-$DEFAULT}"
-          if [[ ! "$sha" =~ ^[0-9a-f]{7,40}$ ]]; then
-            echo "::error::'$sha' is not a commit SHA"
-            exit 1
-          fi
-          echo "short=${sha:0:7}" >> "$GITHUB_OUTPUT"
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Re-tag that image as prd
-        env:
-          IMAGE: ghcr.io/${{ github.repository }}
-          SHORT: ${{ steps.target.outputs.short }}
-        run: |
-          set -euo pipefail
-          src="$IMAGE:sha-$SHORT"
-
-          # Fails loudly rather than promoting nothing. The only way this tag is
-          # missing is a commit that never went through `main`, which is exactly
-          # what promotion must refuse.
-          echo "Promoting $src"
-          docker buildx imagetools inspect "$src" > /dev/null
-
-          docker buildx imagetools create --tag "$IMAGE:prd" "$src"
-          docker buildx imagetools inspect "$IMAGE:prd"

@@ -1,0 +1,144 @@
+name: Release
+
+# Production is reached by tagging a commit, and by nothing else.
+#
+# The tag names a commit that is already on `main` and whose image `main`
+# already built and staging already ran. This workflow never builds: it re-tags
+# that image as `:prd` (and as the release tag itself) and asks Railway to pull
+# it. A tag that does not point into `main`'s history is refused, so a feature
+# branch has no path to production even if someone tags it.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to promote, e.g. v1.4.2. Pass an older tag to roll back."
+        required: true
+        type: string
+
+# Two promotions racing would leave `:prd` pointing at whichever re-tag landed
+# last rather than whichever was asked for last.
+concurrency:
+  group: release-production
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    name: Promote image to production
+    runs-on: ubuntu-latest
+    # Scopes the Railway credential to production and gives the repo one place
+    # to require an approval before prd moves.
+    environment: production
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The ancestry check below is what keeps a tag on a feature branch out
+          # of production, and it needs the full history to answer.
+          fetch-depth: 0
+
+      - name: Resolve the tag and the commit it points at
+        id: target
+        env:
+          # Empty on a tag push, in which case the pushed tag is the target.
+          REQUESTED_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          tag="${REQUESTED_TAG:-$GITHUB_REF_NAME}"
+
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::'$tag' is not a release tag (expected vMAJOR.MINOR.PATCH)"
+            exit 1
+          fi
+
+          if ! git fetch --force origin "refs/tags/$tag:refs/tags/$tag"; then
+            echo "::error::tag '$tag' does not exist"
+            exit 1
+          fi
+
+          # rev-list dereferences an annotated tag to the commit it wraps; using
+          # the ref directly would hand the tag object's own SHA to the checks.
+          sha="$(git rev-list -n 1 "refs/tags/$tag")"
+
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$sha" origin/main; then
+            echo "::error::$tag points at $sha, which is not on main — refusing to promote"
+            exit 1
+          fi
+
+          {
+            echo "tag=$tag"
+            echo "sha=$sha"
+            echo "short=${sha:0:7}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Re-tag that commit's image as prd
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}
+          TAG: ${{ steps.target.outputs.tag }}
+          SHORT: ${{ steps.target.outputs.short }}
+        run: |
+          set -euo pipefail
+          src="$IMAGE:sha-$SHORT"
+
+          # Only `main` publishes, and it publishes only after the test, vet,
+          # lint and build jobs pass — so this tag existing is the proof that
+          # the commit went through the trunk green. Missing means it did not,
+          # which is exactly what promotion must refuse.
+          echo "Promoting $src as $TAG"
+          docker buildx imagetools inspect "$src" > /dev/null
+
+          # `:prd` is what Railway deploys; `:$TAG` is an immutable record of
+          # what each release was, and what a rollback re-promotes.
+          docker buildx imagetools create --tag "$IMAGE:prd" --tag "$IMAGE:$TAG" "$src"
+          docker buildx imagetools inspect "$IMAGE:prd"
+
+      # Moving the `:prd` tag does not by itself make Railway pull it, so the
+      # promotion would sit unshipped until someone clicked redeploy. Skipped
+      # with a notice when the credential is not set, rather than failing a
+      # promotion that did in fact re-tag the image.
+      - name: Redeploy the production Railway service
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_SERVICE: ${{ vars.RAILWAY_SERVICE }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${RAILWAY_TOKEN:-}" ]]; then
+            echo "::notice::RAILWAY_TOKEN is not set — image is tagged :prd, redeploy Railway by hand"
+            exit 0
+          fi
+
+          npm install --global @railway/cli
+
+          # A Railway project token is scoped to one environment, so the token
+          # itself decides that this touches production and nothing else.
+          if [[ -n "${RAILWAY_SERVICE:-}" ]]; then
+            railway redeploy --service "$RAILWAY_SERVICE" --yes
+          else
+            railway redeploy --yes
+          fi
+
+      - name: Summarise
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}
+          TAG: ${{ steps.target.outputs.tag }}
+          SHA: ${{ steps.target.outputs.sha }}
+          SHORT: ${{ steps.target.outputs.short }}
+        run: |
+          {
+            echo "### Promoted \`$TAG\` to production"
+            echo
+            echo "- commit: \`$SHA\`"
+            echo "- image: \`$IMAGE:sha-$SHORT\`"
+            echo "- now also tagged: \`:prd\`, \`:$TAG\`"
+          } >> "$GITHUB_STEP_SUMMARY"
