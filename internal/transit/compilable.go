@@ -26,6 +26,13 @@ type CompilableService struct {
 	Vehicle Kinematics
 	Stops   []CompilableStop
 	Windows []FrequencyWindow
+	// BoardingWait is this service's stored override; nil means inherit.
+	BoardingWait *BoardingWaitOverride
+	// ScenarioBoardingWait is the owning scenario's override, applied to
+	// every member that has no override of its own. Nil when compiling a
+	// service alone or a seeded scenario (which has no scenario-level
+	// override).
+	ScenarioBoardingWait *BoardingWaitOverride
 }
 
 // Kinematics is the whole of what the compiler asks of a vehicle: how fast it
@@ -133,8 +140,9 @@ func CompilableFromService(route Route, stations []Station, svc Service, vt Vehi
 			AccelerationMS2: vt.AccelerationMS2,
 			DecelerationMS2: vt.DecelerationMS2,
 		},
-		Stops:   compiled,
-		Windows: svc.FrequencyWindows,
+		Stops:        compiled,
+		Windows:      svc.FrequencyWindows,
+		BoardingWait: svc.BoardingWait,
 	}, nil
 }
 
@@ -197,8 +205,9 @@ func CompilableFromUserService(route Route, svc UserService) (CompilableService,
 			AccelerationMS2: svc.Vehicle.AccelerationMS2,
 			DecelerationMS2: svc.Vehicle.DecelerationMS2,
 		},
-		Stops:   compiled,
-		Windows: svc.FrequencyWindows,
+		Stops:        compiled,
+		Windows:      svc.FrequencyWindows,
+		BoardingWait: svc.BoardingWait,
 	}, nil
 }
 

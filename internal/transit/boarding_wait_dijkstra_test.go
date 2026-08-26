@@ -122,6 +122,60 @@ func TestGraphDijkstra_palmdaleInterchangeChargesNoTransferWait(t *testing.T) {
 	}
 }
 
+func TestGraphDijkstra_palmdaleInterchangeNoTransferWaitUnderOverrides(t *testing.T) {
+	store := mustNewStore(t)
+	sc, ok := store.GetScenarioBySlug("ca-hsr")
+	if !ok {
+		t.Fatal("ca-hsr not found")
+	}
+
+	services := store.GetServicesByScenario(sc.ID)
+	const (
+		localID      = "00000000-0000-4004-8001-000000000002"
+		brightlineID = "00000000-0000-4004-8001-000000000003"
+	)
+	for i := range services {
+		switch services[i].ID {
+		case localID:
+			services[i].BoardingWait = &BoardingWaitOverride{Policy: BoardingWaitHalfHeadway}
+		case brightlineID:
+			services[i].BoardingWait = &BoardingWaitOverride{Policy: BoardingWaitFixed, Secs: intPtr(60)}
+		}
+	}
+
+	g, err := Compile(
+		sc,
+		store.GetRoutesByScenario(sc.ID),
+		store.GetStationsByScenario(sc.ID),
+		services,
+		append([]VehicleType(nil), store.vehicleTypes...),
+		mustTravelTimes(t, store, "ca-hsr"),
+		BoardingWaitPolicy{Kind: BoardingWaitFullHeadway},
+	)
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+
+	_, originWait, originSvc, ok := graphDijkstra(g, "sf", "palmdale")
+	if !ok {
+		t.Fatal("sf→palmdale unreachable")
+	}
+	if originSvc != localID {
+		t.Fatalf("sf→palmdale boarded %s, want HSR Local", originSvc)
+	}
+	if originWait != 1800 {
+		t.Fatalf("sf→palmdale wait: want Local half_headway 1800, got %d", originWait)
+	}
+
+	_, wait, _, ok := graphDijkstra(g, "sf", "las-vegas")
+	if !ok {
+		t.Fatal("sf→las-vegas unreachable via Palmdale")
+	}
+	if wait != originWait {
+		t.Errorf("sf→las-vegas wait: want origin-only %d, got %d (transfer wait leaked under mixed overrides)", originWait, wait)
+	}
+}
+
 func serviceWindows(t *testing.T, store *Store, scenarioID, serviceID string) []FrequencyWindow {
 	t.Helper()
 	for _, svc := range store.GetServicesByScenario(scenarioID) {

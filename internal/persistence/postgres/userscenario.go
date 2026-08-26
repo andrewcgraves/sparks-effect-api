@@ -13,7 +13,8 @@ import (
 
 // --- User scenarios (curated membership over user_services) ---
 
-const userScenarioColumns = `id, slug, owner_id, name, description, interchange_pairs, created_at, updated_at`
+const userScenarioColumns = `id, slug, owner_id, name, description, interchange_pairs,
+	boarding_wait_policy, boarding_wait_fixed_secs, created_at, updated_at`
 
 func (r *Repo) CreateUserScenario(ctx context.Context, sc transit.UserScenario) error {
 	pairs, err := marshalInterchangePairs(sc)
@@ -27,10 +28,12 @@ func (r *Repo) CreateUserScenario(ctx context.Context, sc transit.UserScenario) 
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // rollback after commit is a no-op
 
+	kind, secs := boardingWaitArgs(sc.BoardingWait)
 	if _, err := tx.Exec(ctx,
-		`INSERT INTO user_scenarios (id, slug, owner_id, name, description, interchange_pairs)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
-		sc.ID, sc.Slug, sc.OwnerID, sc.Name, sc.Description, pairs); err != nil {
+		`INSERT INTO user_scenarios (id, slug, owner_id, name, description, interchange_pairs,
+		                             boarding_wait_policy, boarding_wait_fixed_secs)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		sc.ID, sc.Slug, sc.OwnerID, sc.Name, sc.Description, pairs, kind, secs); err != nil {
 		return wrap("CreateUserScenario", err)
 	}
 	if err := insertUserScenarioMembership(ctx, tx, sc.ID, sc.ServiceIDs); err != nil {
@@ -53,9 +56,11 @@ func (r *Repo) UpdateUserScenario(ctx context.Context, sc transit.UserScenario) 
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // rollback after commit is a no-op
 
+	kind, secs := boardingWaitArgs(sc.BoardingWait)
 	tag, err := tx.Exec(ctx,
-		`UPDATE user_scenarios SET name = $2, description = $3, interchange_pairs = $4, updated_at = now() WHERE id = $1`,
-		sc.ID, sc.Name, sc.Description, pairs)
+		`UPDATE user_scenarios SET name = $2, description = $3, interchange_pairs = $4,
+		        boarding_wait_policy = $5, boarding_wait_fixed_secs = $6, updated_at = now() WHERE id = $1`,
+		sc.ID, sc.Name, sc.Description, pairs, kind, secs)
 	if err != nil {
 		return wrap("UpdateUserScenario", err)
 	}
@@ -240,10 +245,14 @@ func scanUserScenario(row pgx.Row) (transit.UserScenario, error) {
 	var (
 		sc    transit.UserScenario
 		pairs []byte
+		kind  *string
+		secs  *int
 	)
-	if err := row.Scan(&sc.ID, &sc.Slug, &sc.OwnerID, &sc.Name, &sc.Description, &pairs, &sc.CreatedAt, &sc.UpdatedAt); err != nil {
+	if err := row.Scan(&sc.ID, &sc.Slug, &sc.OwnerID, &sc.Name, &sc.Description, &pairs,
+		&kind, &secs, &sc.CreatedAt, &sc.UpdatedAt); err != nil {
 		return transit.UserScenario{}, err
 	}
+	sc.BoardingWait = scanBoardingWait(kind, secs)
 	if err := json.Unmarshal(pairs, &sc.InterchangePairs); err != nil {
 		return transit.UserScenario{}, fmt.Errorf("decoding interchange pairs for scenario %q: %w", sc.ID, err)
 	}

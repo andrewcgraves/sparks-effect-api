@@ -50,6 +50,7 @@ type serviceRequest struct {
 	Vehicle          transit.VehicleParams      `json:"vehicle"`
 	Stops            []transit.ServiceStopPoint `json:"stops"`
 	FrequencyWindows []transit.FrequencyWindow  `json:"frequency_windows"`
+	BoardingWait     optionalBoardingWait       `json:"boarding_wait"`
 }
 
 // applyTo copies the client-writable fields onto svc, leaving ID, Slug, and
@@ -64,6 +65,9 @@ type serviceRequest struct {
 //
 // svc.Slug must already be set, since a stop identity is namespaced by its
 // service (see transit.UserService.MintStopSlugs).
+//
+// BoardingWait is the exception to full-replace: omitted leaves the stored
+// override, explicit null clears it to inherit.
 func (req serviceRequest) applyTo(svc *transit.UserService) {
 	svc.Name = req.Name
 	svc.Description = req.Description
@@ -72,6 +76,9 @@ func (req serviceRequest) applyTo(svc *transit.UserService) {
 	svc.FrequencyWindows = req.FrequencyWindows
 	svc.NormalizeStops()
 	svc.MintStopSlugs()
+	if req.BoardingWait.set {
+		svc.BoardingWait = req.BoardingWait.value
+	}
 }
 
 // CreateService persists a new user-authored service owned by the caller.
@@ -79,7 +86,7 @@ func (req serviceRequest) applyTo(svc *transit.UserService) {
 // The owner is the identity the middleware resolved from the bearer token, so
 // there is no field a client can set to create a service in someone else's
 // name.
-func CreateService(store ServiceStore) http.HandlerFunc {
+func CreateService(store ServiceStore, boardingWait transit.BoardingWaitPolicy) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := auth.UserFrom(r.Context())
 		if !ok {
@@ -127,7 +134,7 @@ func CreateService(store ServiceStore) http.HandlerFunc {
 		}
 
 		w.Header().Set("Location", "/api/services/"+svc.Slug)
-		writeJSON(w, http.StatusCreated, svc)
+		writeJSON(w, http.StatusCreated, withBoardingWait(r.Context(), svc, nil, boardingWait))
 	}
 }
 
@@ -143,7 +150,7 @@ func GetService(store ServiceStore, boardingWait transit.BoardingWaitPolicy) htt
 		if !authorizeService(w, r, svc) {
 			return
 		}
-		writeJSON(w, http.StatusOK, withBoardingWait(r.Context(), svc, boardingWait))
+		writeJSON(w, http.StatusOK, withBoardingWait(r.Context(), svc, nil, boardingWait))
 	}
 }
 
@@ -168,12 +175,12 @@ func MyUserServices(store ServiceStore, boardingWait transit.BoardingWaitPolicy)
 		if services == nil {
 			services = []transit.UserService{}
 		}
-		writeJSON(w, http.StatusOK, withBoardingWaits(r.Context(), services, boardingWait))
+		writeJSON(w, http.StatusOK, withBoardingWaits(r.Context(), services, nil, boardingWait))
 	}
 }
 
 // UpdateService replaces a service the caller owns.
-func UpdateService(store ServiceStore) http.HandlerFunc {
+func UpdateService(store ServiceStore, boardingWait transit.BoardingWaitPolicy) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		svc, ok := loadService(w, r, store)
 		if !ok {
@@ -202,7 +209,7 @@ func UpdateService(store ServiceStore) http.HandlerFunc {
 		if stored, found, err := store.GetUserServiceByID(r.Context(), svc.ID); err == nil && found {
 			svc = stored
 		}
-		writeJSON(w, http.StatusOK, svc)
+		writeJSON(w, http.StatusOK, withBoardingWait(r.Context(), svc, nil, boardingWait))
 	}
 }
 
@@ -277,6 +284,10 @@ func decodeServiceRequest(w http.ResponseWriter, r *http.Request) (serviceReques
 			return serviceRequest{}, false
 		}
 		writeError(w, http.StatusBadRequest, "request body is not valid JSON")
+		return serviceRequest{}, false
+	}
+	if err := req.BoardingWait.parse(); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
 		return serviceRequest{}, false
 	}
 	return req, true

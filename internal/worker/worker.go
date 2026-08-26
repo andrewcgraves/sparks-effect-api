@@ -132,7 +132,7 @@ func compileUserScenario(ctx context.Context, store Store, id string, boardingWa
 	if err != nil {
 		return transit.TransitGraph{}, fmt.Errorf("worker: loading member services: %w", err)
 	}
-	return compileUserServices(ctx, store, services, sc.InterchangePairs, boardingWait)
+	return compileUserServices(ctx, store, services, sc.InterchangePairs, sc.BoardingWait, boardingWait)
 }
 
 // compileUserService compiles a single user-authored service alone — the
@@ -147,17 +147,17 @@ func compileUserService(ctx context.Context, store Store, id string, boardingWai
 	if !found {
 		return transit.TransitGraph{}, fmt.Errorf("worker: user service %q not found", id)
 	}
-	return compileUserServices(ctx, store, []transit.UserService{svc}, nil, boardingWait)
+	return compileUserServices(ctx, store, []transit.UserService{svc}, nil, nil, boardingWait)
 }
 
 // compileUserServices is the shared tail of both user-authored paths: load the
 // routes the services reference and hand off to the compiler.
-func compileUserServices(ctx context.Context, store Store, services []transit.UserService, pairs []transit.InterchangePair, boardingWait transit.BoardingWaitPolicy) (transit.TransitGraph, error) {
+func compileUserServices(ctx context.Context, store Store, services []transit.UserService, pairs []transit.InterchangePair, scenarioWait *transit.BoardingWaitOverride, boardingWait transit.BoardingWaitPolicy) (transit.TransitGraph, error) {
 	routes, err := store.ListRoutesByIDs(ctx, routeIDsOf(services))
 	if err != nil {
 		return transit.TransitGraph{}, fmt.Errorf("worker: loading routes: %w", err)
 	}
-	return transit.CompileUserScenario(routes, services, pairs, boardingWait)
+	return transit.CompileUserScenario(routes, services, pairs, scenarioWait, boardingWait)
 }
 
 // routeIDsOf collects the distinct route ids the services reference, so the

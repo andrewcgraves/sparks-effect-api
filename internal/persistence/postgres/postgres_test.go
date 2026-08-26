@@ -380,6 +380,7 @@ func TestWritableDomainRoundTrip(t *testing.T) {
 	}
 
 	dwell := 45
+	waitSecs := 90
 	svc := transit.Service{
 		ID: serviceID, ScenarioID: scenarioID, RouteID: routeID, VehicleTypeID: vehicleID,
 		Name: "Test Service", Direction: "both", Active: true, Provenance: transit.ProvenanceCalibrated,
@@ -389,6 +390,10 @@ func TestWritableDomainRoundTrip(t *testing.T) {
 		},
 		FrequencyWindows: []transit.FrequencyWindow{
 			{StartTime: "06:00", EndTime: "22:00", HeadwayS: 600},
+		},
+		BoardingWait: &transit.BoardingWaitOverride{
+			Policy: transit.BoardingWaitFixed,
+			Secs:   &waitSecs,
 		},
 	}
 	if err := repo.CreateService(ctx, svc); err != nil {
@@ -420,6 +425,12 @@ func TestWritableDomainRoundTrip(t *testing.T) {
 	}
 	if len(rs.FrequencyWindows) != 1 || rs.FrequencyWindows[0].HeadwayS != 600 {
 		t.Errorf("frequency windows did not round-trip: %+v", rs.FrequencyWindows)
+	}
+	if rs.BoardingWait == nil || rs.BoardingWait.Policy != transit.BoardingWaitFixed {
+		t.Errorf("boarding wait: got %+v, want fixed", rs.BoardingWait)
+	}
+	if rs.BoardingWait == nil || rs.BoardingWait.Secs == nil || *rs.BoardingWait.Secs != 90 {
+		t.Errorf("boarding wait secs: got %v, want 90", rs.BoardingWait)
 	}
 }
 
