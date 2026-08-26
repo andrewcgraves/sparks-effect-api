@@ -28,7 +28,7 @@ func rewindBoardingWaitOverrideMigration(t *testing.T, url string) {
 }
 
 func TestBoardingWaitOverridesMigrationIsSafeToReRun(t *testing.T) {
-	repo, url, _ := userServiceFixture(t)
+	repo, _, url := userServiceFixture(t)
 
 	// A user service row that existed before 00020: after migrate it must have
 	// NULL override columns (inherit), matching SPA-237's "existing rows
