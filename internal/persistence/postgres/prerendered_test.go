@@ -38,18 +38,19 @@ func bigPayload(t *testing.T, marker string) json.RawMessage {
 	return b
 }
 
-// rewindPrerenderedIsochronesMigration unwinds 00019 and is the current tail
-// of the rewind chain that starts in snapmigration_test.go — 00019 is the
-// highest migration today, so nothing needs unwinding above it the way every
-// other link in the chain unwinds the one above. Any migration added after
-// this one must extend the chain here, or every rewinding test in this package
-// starts failing with goose's "missing migrations before current version".
+// rewindPrerenderedIsochronesMigration unwinds 00019, unwinding the migration
+// above it first the way every link in the rewind chain that starts in
+// snapmigration_test.go does. The tail of that chain is now
+// rewindOwnedDomainModelsMigration; any migration added after 00020 must extend
+// it there, or every rewinding test in this package starts failing with goose's
+// "missing migrations before current version".
 //
 // 00019 creates a table, so unwinding it drops the table as well as unrecording
 // the version: a bare DELETE from goose_db_version would leave the table behind
 // and the next Migrate call would fail on CREATE TABLE.
 func rewindPrerenderedIsochronesMigration(t *testing.T, url string) {
 	t.Helper()
+	rewindOwnedDomainModelsMigration(t, url)
 	exec(t, url,
 		`DROP TABLE IF EXISTS prerendered_isochrones`,
 		`DELETE FROM goose_db_version WHERE version_id = 19`)

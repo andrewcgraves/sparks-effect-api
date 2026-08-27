@@ -67,7 +67,7 @@ func LoadStore(ctx context.Context, repo Repository, boardingWait BoardingWaitPo
 	}
 	s.vehicleTypes = vts
 
-	scenarios, err := repo.ListScenarios(ctx)
+	scenarios, err := repo.ListCuratedScenarios(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("transit: listing scenarios: %w", err)
 	}

@@ -26,7 +26,7 @@ type SeededCompileSource interface {
 // succeeded job that identifies it.
 type SeededCompileStore interface {
 	SeededCompileSource
-	ListScenarios(ctx context.Context) ([]Scenario, error)
+	ListCuratedScenarios(ctx context.Context) ([]Scenario, error)
 	GetLatestSucceededJob(ctx context.Context, scenarioSlug, kind string) (Job, bool, error)
 	CreateJob(ctx context.Context, j Job) error
 	CompleteJob(ctx context.Context, id string, result TransitGraph, compiledServiceIDs []string) error
@@ -130,7 +130,7 @@ func CompileSeededScenario(ctx context.Context, src SeededCompileSource, sc Scen
 // account exists, and needing admin credentials to get a public graph is the
 // manual step this closes.
 func CompileSeededIfNeeded(ctx context.Context, store SeededCompileStore, boardingWait BoardingWaitPolicy) (int, error) {
-	scenarios, err := store.ListScenarios(ctx)
+	scenarios, err := store.ListCuratedScenarios(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("transit: listing scenarios to compile: %w", err)
 	}

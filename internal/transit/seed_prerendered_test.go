@@ -42,7 +42,7 @@ func newFakePrerenderedSeedStore() *fakePrerenderedSeedStore {
 	}
 }
 
-func (f *fakePrerenderedSeedStore) ListScenarios(context.Context) ([]transit.Scenario, error) {
+func (f *fakePrerenderedSeedStore) ListCuratedScenarios(context.Context) ([]transit.Scenario, error) {
 	return f.scenarios, nil
 }
 

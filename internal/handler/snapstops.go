@@ -115,7 +115,7 @@ func SnapStops(store RouteStore) http.HandlerFunc {
 			writeInternalError(r.Context(), w, "looking up route", err)
 			return
 		}
-		if !found {
+		if !found || !mayReadRoute(r.Context(), rt) {
 			writeError(w, http.StatusNotFound, "route not found")
 			return
 		}

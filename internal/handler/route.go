@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/ids"
 	"github.com/andrewcgraves/sparks-effect-api/internal/route"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
@@ -16,7 +17,7 @@ import (
 type RouteStore interface {
 	CreateRoute(ctx context.Context, r transit.Route) error
 	GetRouteBySlug(ctx context.Context, slug string) (transit.Route, bool, error)
-	ListRouteSummaries(ctx context.Context) ([]transit.RouteSummary, error)
+	ListCuratedRouteSummaries(ctx context.Context) ([]transit.RouteSummary, error)
 	GetScenarioBySlug(ctx context.Context, slug string) (transit.Scenario, bool, error)
 }
 
@@ -77,7 +78,12 @@ func CreateRoute(store RouteStore) http.HandlerFunc {
 		// A scenario is optional: an ingested route is a standalone alignment
 		// unless the caller names one. The slug is resolved to an ID here so a
 		// client can never supply an arbitrary scenario_id directly.
-		scenarioID, ok := resolveScenarioOrFail(w, r, store, in.Properties.ScenarioSlug)
+		//
+		// It must resolve to a *curated* scenario. An admin passes CanAccess on
+		// everything, so without the filter this endpoint could drop an unowned
+		// route into a user's scenario and break the ownership-uniformity
+		// invariant the curated reads depend on.
+		scenarioID, ok := resolveCuratedScenarioOrFail(w, r, store, in.Properties.ScenarioSlug)
 		if !ok {
 			return
 		}
@@ -89,23 +95,11 @@ func CreateRoute(store RouteStore) http.HandlerFunc {
 			return
 		}
 
-		// Absent bidirectional means true: a physical alignment is traversable
-		// both ways unless the author says otherwise.
-		bidirectional := true
-		if in.Properties.Bidirectional != nil {
-			bidirectional = *in.Properties.Bidirectional
-		}
-
-		rt := transit.Route{
-			ID:            id,
-			ScenarioID:    scenarioID,
-			Slug:          slug,
-			Name:          strings.TrimSpace(in.Properties.Name),
-			Mode:          in.Properties.Mode,
-			Geometry:      transit.GeoLineString{Type: in.Type, Coordinates: in.Coordinates},
-			Bidirectional: bidirectional,
-			Segments:      toRouteSegments(in.Properties.Segments),
-		}
+		// OwnerID is left nil deliberately: an admin-ingested alignment is
+		// curated platform data, not the admin's personal property. Setting it
+		// from the caller's identity would drop every ingested route out of the
+		// public picker, which is the opposite of why they are ingested.
+		rt := buildRouteFromIngest(in, id, slug, scenarioID, nil)
 		if err := store.CreateRoute(r.Context(), rt); err != nil {
 			slog.ErrorContext(r.Context(), "handler: creating route failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "internal error")
@@ -130,12 +124,31 @@ func RouteBySlug(store RouteStore) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
-		if !ok {
+		if !ok || !mayReadRoute(r.Context(), rt) {
 			writeError(w, http.StatusNotFound, "route not found")
 			return
 		}
 		writeJSON(w, http.StatusOK, rt)
 	}
+}
+
+// mayReadRoute reports whether this request may see rt. A curated route is
+// public and needs no identity; an owned one is visible only to its owner or an
+// admin.
+//
+// It reads the optional identity rather than requiring one, because the
+// endpoints it guards are public: registering them behind RequireAuth would
+// take the curated alignments away from the anonymous callers they exist for.
+// The list read needs no equivalent — ListCuratedRouteSummaries filters in SQL
+// — but a by-slug read would otherwise confirm a draft's existence to anyone
+// who guessed its name-derived slug, which is the leak SPA-80 and SPA-81
+// answered with 404s.
+func mayReadRoute(ctx context.Context, rt transit.Route) bool {
+	if rt.OwnerID == nil {
+		return true
+	}
+	user, ok := auth.UserFrom(ctx)
+	return ok && auth.CanAccess(user, rt.OwnerID)
 }
 
 // Routes returns a handler that lists routes for a picker: enough to show a
@@ -149,7 +162,7 @@ func RouteBySlug(store RouteStore) http.HandlerFunc {
 // both.
 func Routes(store RouteStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		routes, err := store.ListRouteSummaries(r.Context())
+		routes, err := store.ListCuratedRouteSummaries(r.Context())
 		if err != nil {
 			slog.ErrorContext(r.Context(), "handler: listing routes failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "internal error")
@@ -162,10 +175,15 @@ func Routes(store RouteStore) http.HandlerFunc {
 	}
 }
 
-// resolveScenarioOrFail turns an optional scenario slug into a scenario ID, writing
-// the error response itself and reporting ok=false when the caller should stop.
-// An empty slug is not an error — it yields a nil (standalone) scenario.
-func resolveScenarioOrFail(w http.ResponseWriter, r *http.Request, store RouteStore, slug string) (*string, bool) {
+// resolveCuratedScenarioOrFail turns an optional scenario slug into a scenario
+// ID, writing the error response itself and reporting ok=false when the caller
+// should stop. An empty slug is not an error — it yields a nil (standalone)
+// scenario.
+//
+// A scenario someone owns is reported as unknown rather than refused: this is
+// the admin ingest path, and an owned scenario is simply not a place curated
+// content belongs.
+func resolveCuratedScenarioOrFail(w http.ResponseWriter, r *http.Request, store RouteStore, slug string) (*string, bool) {
 	if slug == "" {
 		return nil, true
 	}
@@ -175,11 +193,37 @@ func resolveScenarioOrFail(w http.ResponseWriter, r *http.Request, store RouteSt
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return nil, false
 	}
-	if !found {
+	if !found || sc.OwnerID != nil {
 		writeError(w, http.StatusBadRequest, "unknown scenario_slug "+slug)
 		return nil, false
 	}
 	return &sc.ID, true
+}
+
+// buildRouteFromIngest turns a validated payload into the domain route. It is
+// the shared middle of the two create paths — admin ingestion and an owner
+// authoring their own alignment — which differ only in slug policy and owner,
+// both of which the caller has already decided.
+func buildRouteFromIngest(in route.Ingest, id, slug string, scenarioID, ownerID *string) transit.Route {
+	// Absent bidirectional means true: a physical alignment is traversable
+	// both ways unless the author says otherwise.
+	bidirectional := true
+	if in.Properties.Bidirectional != nil {
+		bidirectional = *in.Properties.Bidirectional
+	}
+
+	return transit.Route{
+		ID:            id,
+		ScenarioID:    scenarioID,
+		OwnerID:       ownerID,
+		Slug:          slug,
+		Name:          strings.TrimSpace(in.Properties.Name),
+		Description:   strings.TrimSpace(in.Properties.Description),
+		Mode:          in.Properties.Mode,
+		Geometry:      transit.GeoLineString{Type: in.Type, Coordinates: in.Coordinates},
+		Bidirectional: bidirectional,
+		Segments:      toRouteSegments(in.Properties.Segments),
+	}
 }
 
 // toRouteSegments converts the validated ingestion segments to their domain

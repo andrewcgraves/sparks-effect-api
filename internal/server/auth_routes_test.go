@@ -90,7 +90,21 @@ func (s *stubAuthDeps) CreateRoute(context.Context, transit.Route) error { retur
 func (s *stubAuthDeps) GetRouteBySlug(context.Context, string) (transit.Route, bool, error) {
 	return transit.Route{}, false, nil
 }
-func (s *stubAuthDeps) ListRouteSummaries(context.Context) ([]transit.RouteSummary, error) {
+func (s *stubAuthDeps) CreateScenario(context.Context, transit.Scenario) error { return nil }
+func (s *stubAuthDeps) UpdateScenario(context.Context, transit.Scenario) error { return nil }
+func (s *stubAuthDeps) DeleteScenario(context.Context, string) error           { return nil }
+func (s *stubAuthDeps) CountUnownedScenarioChildren(context.Context, string) (int, error) {
+	return 0, nil
+}
+func (s *stubAuthDeps) UpdateRoute(context.Context, transit.Route) error { return nil }
+func (s *stubAuthDeps) DeleteRoute(context.Context, string) error        { return nil }
+func (s *stubAuthDeps) CountRouteDependents(context.Context, string) (transit.RouteDependents, error) {
+	return transit.RouteDependents{}, nil
+}
+func (s *stubAuthDeps) ListRouteSummariesByOwner(context.Context, string) ([]transit.RouteSummary, error) {
+	return nil, nil
+}
+func (s *stubAuthDeps) ListCuratedRouteSummaries(context.Context) ([]transit.RouteSummary, error) {
 	return nil, nil
 }
 func (s *stubAuthDeps) GetScenarioBySlug(context.Context, string) (transit.Scenario, bool, error) {
