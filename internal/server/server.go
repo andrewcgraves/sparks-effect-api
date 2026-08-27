@@ -39,6 +39,14 @@ type AuthDeps interface {
 	// OwnedScenarioStore backs the owner-scoped CRUD over the seeded scenario
 	// model, whose table the curated ca-hsr baseline also lives in.
 	handler.OwnedScenarioStore
+	// OwnedStationStore and OwnedTravelTimesStore back the two surfaces that
+	// make an owned scenario compilable rather than an empty shell: its
+	// stations, and the segment run times between them.
+	handler.OwnedStationStore
+	handler.OwnedTravelTimesStore
+	// OwnedServiceStore backs the owner-scoped CRUD over the seeded service
+	// model — the operating patterns that run over an owned scenario's routes.
+	handler.OwnedServiceStore
 	// OwnedRouteStore backs the owner-scoped CRUD over the seeded route model,
 	// which shares its table with the curated alignments RouteStore reads.
 	handler.OwnedRouteStore
@@ -302,6 +310,37 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 	mux.Handle("GET /api/me/scenarios/{slug}", authenticated(handler.GetOwnedScenario(deps)))
 	mux.Handle("PUT /api/me/scenarios/{slug}", authenticated(handler.UpdateOwnedScenario(deps)))
 	mux.Handle("DELETE /api/me/scenarios/{slug}", authenticated(handler.DeleteOwnedScenario(deps)))
+
+	// A scenario's stations, and the segment run times between them. Together
+	// with its routes and services these are what make an owned scenario
+	// compilable — without stations there is nothing for a service to stop at,
+	// and without segments the compiler has no path to place those stops on.
+	//
+	// Stations are addressed by (scenario, slug) because stations.slug is
+	// unique per scenario rather than globally.
+	mux.Handle("GET /api/me/scenarios/{slug}/stations", authenticated(handler.ListOwnedStations(deps)))
+	mux.Handle("POST /api/me/scenarios/{slug}/stations", authenticated(handler.CreateOwnedStation(deps)))
+	mux.Handle("PUT /api/me/scenarios/{slug}/stations/{stationSlug}", authenticated(handler.UpdateOwnedStation(deps)))
+	mux.Handle("DELETE /api/me/scenarios/{slug}/stations/{stationSlug}", authenticated(handler.DeleteOwnedStation(deps)))
+
+	// Travel times are written as a whole set rather than per segment: a
+	// segment has no identity a client can address, and the set is meaningful
+	// only entire — the compiler walks it as one graph.
+	mux.Handle("GET /api/me/scenarios/{slug}/travel-times", authenticated(handler.GetOwnedTravelTimes(deps)))
+	mux.Handle("PUT /api/me/scenarios/{slug}/travel-times", authenticated(handler.ReplaceOwnedTravelTimes(deps)))
+
+	// Owner-scoped CRUD over the seeded service model. Addressed by id, not
+	// slug: the services table has no slug column, which removes slug minting
+	// from this model entirely.
+	//
+	// Distinct from /api/services, which is the self-contained UserService with
+	// its own inline vehicle and embedded stops. These are seeded services:
+	// they reference a scenario's stations and the shared vehicle-type catalog,
+	// and compile through the same path the ca-hsr baseline does.
+	mux.Handle("POST /api/me/services", authenticated(handler.CreateOwnedService(deps)))
+	mux.Handle("GET /api/me/services/{id}", authenticated(handler.GetOwnedService(deps, cfg.BoardingWait)))
+	mux.Handle("PUT /api/me/services/{id}", authenticated(handler.UpdateOwnedService(deps)))
+	mux.Handle("DELETE /api/me/services/{id}", authenticated(handler.DeleteOwnedService(deps)))
 
 	// User-authored services: owner-scoped CRUD. Reads are owner-scoped too —
 	// unlike the curated scenario data these are a user's own drafts, so they
