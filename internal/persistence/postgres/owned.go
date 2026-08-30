@@ -229,8 +229,8 @@ func (r *Repo) GetServiceByID(ctx context.Context, id string) (transit.Service, 
 	return svcs[0], true, nil
 }
 
-// UpdateService rewrites the whole aggregate — scalars, the stop pattern, and
-// the frequency windows — in one transaction. Children are replaced rather than
+// UpdateService rewrites the whole aggregate — scalars, the boarding-wait
+// override, the stop pattern, and the frequency windows — in one transaction. Children are replaced rather than
 // diffed, as UpdateUserService does, because neither has an identity a client
 // can address.
 //
@@ -244,12 +244,19 @@ func (r *Repo) UpdateService(ctx context.Context, svc transit.Service) error {
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // rollback after commit is a no-op
 
+	// The boarding-wait override is written here as well as on create (SPA-237),
+	// or an owner could set one and never change it again: the handler resolves
+	// omitted-vs-null-vs-set before this point, so whatever arrives is what the
+	// row should end up holding, nil included.
+	kind, secs := boardingWaitArgs(svc.BoardingWait)
 	tag, err := tx.Exec(ctx,
 		`UPDATE services
 		    SET route_id = $2, vehicle_type_id = $3, name = $4, direction = $5,
-		        active = $6, updated_at = now()
+		        active = $6, boarding_wait_policy = $7, boarding_wait_fixed_secs = $8,
+		        updated_at = now()
 		  WHERE id = $1`,
-		svc.ID, svc.RouteID, svc.VehicleTypeID, svc.Name, svc.Direction, svc.Active)
+		svc.ID, svc.RouteID, svc.VehicleTypeID, svc.Name, svc.Direction, svc.Active,
+		kind, secs)
 	if err != nil {
 		return wrap("UpdateService", err)
 	}

@@ -135,7 +135,7 @@ func asServiceUser(t *testing.T, h http.HandlerFunc, user transit.User, method, 
 func TestCreateOwnedServiceStampsTheCallerAsOwner(t *testing.T) {
 	store := newFakeOwnedServiceStore()
 
-	rec := asServiceUser(t, handler.CreateOwnedService(store), memberA, http.MethodPost,
+	rec := asServiceUser(t, handler.CreateOwnedService(store, transit.DefaultBoardingWaitPolicy()), memberA, http.MethodPost,
 		"/api/me/services", serviceBody("a-draft", "a-line", vehicleTypeID, "west-end", "east-end"))
 
 	if rec.Code != http.StatusCreated {
@@ -172,7 +172,7 @@ func TestCreateOwnedServiceReferencesCuratedRoutesButNotPrivateOnes(t *testing.T
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := newFakeOwnedServiceStore()
-			rec := asServiceUser(t, handler.CreateOwnedService(store), memberA, http.MethodPost,
+			rec := asServiceUser(t, handler.CreateOwnedService(store, transit.DefaultBoardingWaitPolicy()), memberA, http.MethodPost,
 				"/api/me/services", serviceBody("a-draft", tc.routeSlug, vehicleTypeID, "west-end", "east-end"))
 			if rec.Code != tc.want {
 				t.Errorf("status: want %d, got %d (%s)", tc.want, rec.Code, rec.Body)
@@ -195,7 +195,7 @@ func TestCreateOwnedServiceRefusesAScenarioTheCallerDoesNotOwn(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := newFakeOwnedServiceStore()
-			rec := asServiceUser(t, handler.CreateOwnedService(store), memberA, http.MethodPost,
+			rec := asServiceUser(t, handler.CreateOwnedService(store, transit.DefaultBoardingWaitPolicy()), memberA, http.MethodPost,
 				"/api/me/services", serviceBody(tc.scenarioSlug, "curated-line", vehicleTypeID, "west-end", "east-end"))
 			if rec.Code != tc.want {
 				t.Errorf("status: want %d, got %d (%s)", tc.want, rec.Code, rec.Body)
@@ -239,7 +239,7 @@ func TestCreateOwnedServiceRejectsUnknownReferences(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := newFakeOwnedServiceStore()
-			rec := asServiceUser(t, handler.CreateOwnedService(store), memberA,
+			rec := asServiceUser(t, handler.CreateOwnedService(store, transit.DefaultBoardingWaitPolicy()), memberA,
 				http.MethodPost, "/api/me/services", tc.body)
 			if rec.Code != http.StatusUnprocessableEntity {
 				t.Fatalf("status: want 422, got %d (%s)", rec.Code, rec.Body)
@@ -259,7 +259,7 @@ func TestCreateOwnedServiceIgnoresClientSuppliedProvenance(t *testing.T) {
 	body := `{"scenario_slug":"a-draft","route_slug":"a-line","vehicle_type_id":"` + vehicleTypeID + `",
 		"name":"Local","provenance":"` + transit.ProvenanceCalibrated + `",
 		"stops":[{"station_slug":"west-end","sequence":1},{"station_slug":"east-end","sequence":2}]}`
-	rec := asServiceUser(t, handler.CreateOwnedService(store), memberA,
+	rec := asServiceUser(t, handler.CreateOwnedService(store, transit.DefaultBoardingWaitPolicy()), memberA,
 		http.MethodPost, "/api/me/services", body)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status: want 201, got %d (%s)", rec.Code, rec.Body)
@@ -282,7 +282,7 @@ func TestCreateOwnedServiceRenumbersStopSequences(t *testing.T) {
 		"name":"Local","stops":[
 			{"station_slug":"east-end","sequence":70},
 			{"station_slug":"west-end","sequence":20}]}`
-	rec := asServiceUser(t, handler.CreateOwnedService(store), memberA,
+	rec := asServiceUser(t, handler.CreateOwnedService(store, transit.DefaultBoardingWaitPolicy()), memberA,
 		http.MethodPost, "/api/me/services", body)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status: want 201, got %d (%s)", rec.Code, rec.Body)
@@ -352,7 +352,7 @@ func TestUpdateOwnedServiceKeepsIdentity(t *testing.T) {
 		ID: ownedSvcID, ScenarioID: ownedScrID, Name: "Local", OwnerID: ptrTo(ownerAID),
 	}
 
-	rec := asServiceUser(t, handler.UpdateOwnedService(store), memberA, http.MethodPut,
+	rec := asServiceUser(t, handler.UpdateOwnedService(store, transit.DefaultBoardingWaitPolicy()), memberA, http.MethodPut,
 		"/api/me/services/"+ownedSvcID,
 		serviceBody("a-draft", "curated-line", vehicleTypeID, "west-end", "east-end"))
 	if rec.Code != http.StatusOK {
@@ -367,6 +367,65 @@ func TestUpdateOwnedServiceKeepsIdentity(t *testing.T) {
 	if got.OwnerID == nil || *got.OwnerID != ownerAID {
 		t.Errorf("owner: want it unchanged, got %v", got.OwnerID)
 	}
+}
+
+// SPA-237 put a boarding-wait override on services but no write path for a
+// seeded one; this CRUD is that path, so the three states its convention
+// distinguishes have to survive the round trip.
+func TestOwnedServiceCarriesTheBoardingWaitOverride(t *testing.T) {
+	store := newFakeOwnedServiceStore()
+	store.services[ownedSvcID] = transit.Service{
+		ID: ownedSvcID, ScenarioID: ownedScrID, Name: "Local", OwnerID: ptrTo(ownerAID),
+		BoardingWait: &transit.BoardingWaitOverride{Policy: transit.BoardingWaitHalfHeadway},
+	}
+	base := `"scenario_slug":"a-draft","route_slug":"a-line","vehicle_type_id":"` + vehicleTypeID + `",
+		"name":"Local","stops":[{"station_slug":"west-end","sequence":1},{"station_slug":"east-end","sequence":2}]`
+
+	t.Run("omitted leaves the stored override alone", func(t *testing.T) {
+		rec := asServiceUser(t, handler.UpdateOwnedService(store, transit.DefaultBoardingWaitPolicy()),
+			memberA, http.MethodPut, "/api/me/services/"+ownedSvcID, `{`+base+`}`)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status: want 200, got %d (%s)", rec.Code, rec.Body)
+		}
+		if got := store.services[ownedSvcID].BoardingWait; got == nil ||
+			got.Policy != transit.BoardingWaitHalfHeadway {
+			t.Errorf("override after an omitting update: want it kept, got %+v", got)
+		}
+	})
+
+	t.Run("an object sets it", func(t *testing.T) {
+		rec := asServiceUser(t, handler.UpdateOwnedService(store, transit.DefaultBoardingWaitPolicy()),
+			memberA, http.MethodPut, "/api/me/services/"+ownedSvcID,
+			`{`+base+`,"boarding_wait":{"policy":"fixed","secs":90}}`)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status: want 200, got %d (%s)", rec.Code, rec.Body)
+		}
+		got := store.services[ownedSvcID].BoardingWait
+		if got == nil || got.Policy != transit.BoardingWaitFixed || got.Secs == nil || *got.Secs != 90 {
+			t.Errorf("override after setting one: want fixed/90, got %+v", got)
+		}
+	})
+
+	t.Run("an explicit null clears it back to inherit", func(t *testing.T) {
+		rec := asServiceUser(t, handler.UpdateOwnedService(store, transit.DefaultBoardingWaitPolicy()),
+			memberA, http.MethodPut, "/api/me/services/"+ownedSvcID,
+			`{`+base+`,"boarding_wait":null}`)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status: want 200, got %d (%s)", rec.Code, rec.Body)
+		}
+		if got := store.services[ownedSvcID].BoardingWait; got != nil {
+			t.Errorf("override after an explicit null: want nil (inherit), got %+v", got)
+		}
+	})
+
+	t.Run("an unusable policy is a 422", func(t *testing.T) {
+		rec := asServiceUser(t, handler.CreateOwnedService(store, transit.DefaultBoardingWaitPolicy()),
+			memberA, http.MethodPost, "/api/me/services",
+			`{`+base+`,"boarding_wait":{"policy":"whenever"}}`)
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("status: want 422, got %d (%s)", rec.Code, rec.Body)
+		}
+	})
 }
 
 func TestOwnedServiceStorageFailureIsAnOpaque500(t *testing.T) {

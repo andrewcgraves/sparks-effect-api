@@ -16,7 +16,7 @@ func TestGraphStale_freshWhenMembershipAndTimestampsUnchanged(t *testing.T) {
 		"svc-2": created.Add(-time.Minute),
 	}
 
-	if transit.GraphStale(job, current, updatedAt, transit.DefaultBoardingWaitPolicy()) {
+	if transit.GraphStale(job, current, updatedAt, nil) {
 		t.Error("GraphStale = true, want false: membership and timestamps unchanged")
 	}
 }
@@ -31,7 +31,7 @@ func TestGraphStale_deletedMember(t *testing.T) {
 		"svc-1": created.Add(-time.Hour),
 	}
 
-	if !transit.GraphStale(job, current, updatedAt, transit.DefaultBoardingWaitPolicy()) {
+	if !transit.GraphStale(job, current, updatedAt, nil) {
 		t.Error("GraphStale = false, want true: a compiled member is no longer in the current set")
 	}
 }
@@ -44,7 +44,7 @@ func TestGraphStale_removedMemberWithoutDeletion(t *testing.T) {
 		"svc-1": created.Add(-time.Hour),
 	}
 
-	if !transit.GraphStale(job, current, updatedAt, transit.DefaultBoardingWaitPolicy()) {
+	if !transit.GraphStale(job, current, updatedAt, nil) {
 		t.Error("GraphStale = false, want true: membership shrank")
 	}
 }
@@ -58,7 +58,7 @@ func TestGraphStale_addedMember(t *testing.T) {
 		"svc-2": created.Add(-time.Minute),
 	}
 
-	if !transit.GraphStale(job, current, updatedAt, transit.DefaultBoardingWaitPolicy()) {
+	if !transit.GraphStale(job, current, updatedAt, nil) {
 		t.Error("GraphStale = false, want true: membership grew")
 	}
 }
@@ -72,7 +72,7 @@ func TestGraphStale_stillPresentMemberEditedAfterCompile(t *testing.T) {
 		"svc-2": created.Add(time.Minute), // edited after the job was created
 	}
 
-	if !transit.GraphStale(job, current, updatedAt, transit.DefaultBoardingWaitPolicy()) {
+	if !transit.GraphStale(job, current, updatedAt, nil) {
 		t.Error("GraphStale = false, want true: a still-present member changed after compile")
 	}
 }
@@ -94,7 +94,7 @@ func TestGraphStale_comparesAgainstCreatedAtNotUpdatedAt(t *testing.T) {
 		"svc-1": created.Add(time.Minute),
 	}
 
-	if !transit.GraphStale(job, current, updatedAt, transit.DefaultBoardingWaitPolicy()) {
+	if !transit.GraphStale(job, current, updatedAt, nil) {
 		t.Error("GraphStale = false, want true: edit fell between created_at and completion")
 	}
 }
@@ -103,7 +103,7 @@ func TestGraphStale_emptyScenario(t *testing.T) {
 	created := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 	job := transit.Job{CreatedAt: created, CompiledServiceIDs: nil}
 
-	if transit.GraphStale(job, nil, nil, transit.DefaultBoardingWaitPolicy()) {
+	if transit.GraphStale(job, nil, nil, nil) {
 		t.Error("GraphStale = true, want false: no members compiled, none present now")
 	}
 }
@@ -122,11 +122,76 @@ func TestGraphStale_boardingWaitPolicyChange(t *testing.T) {
 	current := []string{"svc-1"}
 	updatedAt := map[string]time.Time{"svc-1": created.Add(-time.Hour)}
 
-	if transit.GraphStale(job, current, updatedAt, transit.DefaultBoardingWaitPolicy()) {
+	if transit.GraphStale(job, current, updatedAt, map[string]transit.BoardingWaitPolicy{
+		"svc-1": transit.DefaultBoardingWaitPolicy(),
+	}) {
 		t.Error("GraphStale = true, want false: policy unchanged")
 	}
-	if !transit.GraphStale(job, current, updatedAt, transit.BoardingWaitPolicy{Kind: transit.BoardingWaitHalfHeadway}) {
+	if !transit.GraphStale(job, current, updatedAt, map[string]transit.BoardingWaitPolicy{
+		"svc-1": {Kind: transit.BoardingWaitHalfHeadway},
+	}) {
 		t.Error("GraphStale = false, want true: boarding-wait policy changed")
+	}
+}
+
+func TestGraphStale_perServiceOverrideChange(t *testing.T) {
+	created := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	job := transit.Job{
+		CreatedAt:          created,
+		CompiledServiceIDs: []string{"svc-1", "svc-2"},
+		Result: &transit.TransitGraph{Services: []transit.ServiceGraph{
+			{ServiceID: "svc-1", WaitSecs: 0, WaitPolicy: string(transit.BoardingWaitNone)},
+			{ServiceID: "svc-2", WaitSecs: 0, WaitPolicy: string(transit.BoardingWaitNone)},
+		}},
+	}
+	current := []string{"svc-1", "svc-2"}
+	updatedAt := map[string]time.Time{
+		"svc-1": created.Add(-time.Hour),
+		"svc-2": created.Add(-time.Hour),
+	}
+
+	unchanged := map[string]transit.BoardingWaitPolicy{
+		"svc-1": transit.DefaultBoardingWaitPolicy(),
+		"svc-2": transit.DefaultBoardingWaitPolicy(),
+	}
+	if transit.GraphStale(job, current, updatedAt, unchanged) {
+		t.Error("GraphStale = true, want false: neither override moved")
+	}
+
+	svc1Overridden := map[string]transit.BoardingWaitPolicy{
+		"svc-1": {Kind: transit.BoardingWaitFixed, FixedSecs: 120},
+		"svc-2": transit.DefaultBoardingWaitPolicy(),
+	}
+	if !transit.GraphStale(job, current, updatedAt, svc1Overridden) {
+		t.Error("GraphStale = false, want true: one member's override changed")
+	}
+}
+
+func TestGraphStale_scenarioOverrideChangeWithoutMemberEdit(t *testing.T) {
+	created := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	job := transit.Job{
+		CreatedAt:          created,
+		CompiledServiceIDs: []string{"svc-1"},
+		Result: &transit.TransitGraph{Services: []transit.ServiceGraph{{
+			ServiceID:  "svc-1",
+			WaitSecs:   1800,
+			WaitPolicy: string(transit.BoardingWaitHalfHeadway),
+		}}},
+	}
+	current := []string{"svc-1"}
+	// Member timestamps are still older than the compile — a scenario-only
+	// override change does not bump them.
+	updatedAt := map[string]time.Time{"svc-1": created.Add(-time.Hour)}
+
+	if transit.GraphStale(job, current, updatedAt, map[string]transit.BoardingWaitPolicy{
+		"svc-1": {Kind: transit.BoardingWaitHalfHeadway},
+	}) {
+		t.Error("GraphStale = true, want false: scenario override still half_headway")
+	}
+	if !transit.GraphStale(job, current, updatedAt, map[string]transit.BoardingWaitPolicy{
+		"svc-1": transit.DefaultBoardingWaitPolicy(),
+	}) {
+		t.Error("GraphStale = false, want true: scenario override cleared back to global none")
 	}
 }
 
@@ -143,7 +208,7 @@ func TestGraphStale_preSPA236GraphMissingWaitPolicyIsStale(t *testing.T) {
 	current := []string{"svc-1"}
 	updatedAt := map[string]time.Time{"svc-1": created.Add(-time.Hour)}
 
-	if !transit.GraphStale(job, current, updatedAt, transit.DefaultBoardingWaitPolicy()) {
+	if !transit.GraphStale(job, current, updatedAt, nil) {
 		t.Error("GraphStale = false, want true: empty WaitPolicy must not silently match none")
 	}
 }

@@ -38,19 +38,19 @@ func bigPayload(t *testing.T, marker string) json.RawMessage {
 	return b
 }
 
-// rewindPrerenderedIsochronesMigration unwinds 00019, unwinding the migration
-// above it first the way every link in the rewind chain that starts in
-// snapmigration_test.go does. The tail of that chain is now
-// rewindOwnedDomainModelsMigration; any migration added after 00020 must extend
-// it there, or every rewinding test in this package starts failing with goose's
-// "missing migrations before current version".
+// rewindPrerenderedIsochronesMigration unwinds 00019. 00020 and 00021 sit above
+// it, so this is not the tail of the rewind chain that starts in
+// snapmigration_test.go — rewindOwnedDomainModelsMigration is. Goose refuses to
+// re-apply an earlier migration while a later version is still recorded, so
+// anything rewinding 00019 must unrecord those two first, which the link below
+// does by delegating to the next one up.
 //
 // 00019 creates a table, so unwinding it drops the table as well as unrecording
 // the version: a bare DELETE from goose_db_version would leave the table behind
 // and the next Migrate call would fail on CREATE TABLE.
 func rewindPrerenderedIsochronesMigration(t *testing.T, url string) {
 	t.Helper()
-	rewindOwnedDomainModelsMigration(t, url)
+	rewindBoardingWaitOverrideMigration(t, url)
 	exec(t, url,
 		`DROP TABLE IF EXISTS prerendered_isochrones`,
 		`DELETE FROM goose_db_version WHERE version_id = 19`)
@@ -72,7 +72,9 @@ func TestPrerenderedIsochronesMigrationIsSafeToReRun(t *testing.T) {
 	}
 
 	// Unrecord the version without dropping the table, so the next Migrate
-	// re-runs 00019 over the schema it already created.
+	// re-runs 00019 over the schema it already created. 00020 must be forgotten
+	// first — goose refuses to re-apply 19 while a later version is recorded.
+	rewindBoardingWaitOverrideMigration(t, url)
 	exec(t, url, `DELETE FROM goose_db_version WHERE version_id = 19`)
 	if err := postgres.Migrate(context.Background(), url); err == nil {
 		t.Error("re-running 00019 over its own table succeeded; CREATE TABLE should have refused it")

@@ -7,19 +7,36 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/persistence/postgres"
 )
 
-// rewindOwnedDomainModelsMigration unwinds 00020 and is the current tail of the
+// rewindOwnedDomainModelsMigration unwinds 00021 and is the current tail of the
 // rewind chain that starts in snapmigration_test.go. Any migration added after
 // this one must extend the chain here, or every rewinding test in this package
 // starts failing with goose's "missing migrations before current version".
 //
-// Unlike 00019's link, this one is a bare unrecord: every statement in 00020 is
-// idempotent (IF NOT EXISTS on the columns and indexes, DROP CONSTRAINT IF
-// EXISTS before each FK), so the next Migrate re-applies it over the schema it
-// already created. Writing a hand-rolled undo here instead would be a second
-// copy of the migration that nothing keeps in step with the first.
+// It genuinely undoes the migration rather than merely unrecording it, for
+// 00020's reason: every statement in 00021 is idempotent (IF NOT EXISTS on the
+// columns and indexes, DROP CONSTRAINT IF EXISTS before each FK), so a bare
+// DELETE from goose_db_version would leave the schema in place and the next
+// Migrate would sail through as a no-op — hiding a rewind that did not actually
+// rewind. The FK swap is undone too, since restoring the columns without
+// restoring ON DELETE SET NULL would leave the database in a state neither
+// migration produces.
 func rewindOwnedDomainModelsMigration(t *testing.T, url string) {
 	t.Helper()
-	exec(t, url, `DELETE FROM goose_db_version WHERE version_id = 20`)
+	exec(t, url,
+		`ALTER TABLE services DROP CONSTRAINT IF EXISTS services_owner_id_fkey`,
+		`ALTER TABLE services ADD CONSTRAINT services_owner_id_fkey
+		   FOREIGN KEY (owner_id) REFERENCES users (id) ON DELETE SET NULL`,
+		`ALTER TABLE scenarios DROP CONSTRAINT IF EXISTS scenarios_owner_id_fkey`,
+		`ALTER TABLE scenarios ADD CONSTRAINT scenarios_owner_id_fkey
+		   FOREIGN KEY (owner_id) REFERENCES users (id) ON DELETE SET NULL`,
+		`DROP INDEX IF EXISTS services_owner_id_idx`,
+		`DROP INDEX IF EXISTS scenarios_owner_id_idx`,
+		`DROP INDEX IF EXISTS stations_owner_id_idx`,
+		`DROP INDEX IF EXISTS routes_owner_id_idx`,
+		`ALTER TABLE stations DROP COLUMN IF EXISTS owner_id`,
+		`ALTER TABLE routes DROP COLUMN IF EXISTS description`,
+		`ALTER TABLE routes DROP COLUMN IF EXISTS owner_id`,
+		`DELETE FROM goose_db_version WHERE version_id = 21`)
 }
 
 // The ownership columns are what every curated-vs-owned read filters on, so
@@ -98,18 +115,58 @@ func TestOwnedDomainModelsMigrationLeavesExistingRowsCurated(t *testing.T) {
 	}
 }
 
-// 00020 is re-applied over its own schema by every rewinding test in this
-// package, so its idempotency is load-bearing rather than incidental.
+// A schema change re-applied over a database that already holds it must not
+// fail — the property every migration in this package is held to, and the
+// reason 00021 is written with IF NOT EXISTS throughout.
+//
+// The unrecord here is deliberately bare rather than a call to the rewind
+// helper above: that helper undoes the schema, which would make this a test
+// that the migration applies from scratch. What is under test is the other
+// case — Migrate meeting its own columns, indexes, and constraints already in
+// place, as it does on any redeployed database.
 func TestOwnedDomainModelsMigrationIsSafeToReRun(t *testing.T) {
 	_, url := freshRepo(t)
 
-	rewindOwnedDomainModelsMigration(t, url)
+	exec(t, url, `DELETE FROM goose_db_version WHERE version_id = 21`)
 	if err := postgres.Migrate(context.Background(), url); err != nil {
-		t.Fatalf("re-running 00020 over the schema it already created: %v", err)
+		t.Fatalf("re-running 00021 over the schema it already created: %v", err)
 	}
 
 	if got := scalarCount(t, url,
 		`SELECT count(*) FROM pg_indexes WHERE indexname = 'routes_owner_id_idx'`); got != 1 {
 		t.Errorf("routes_owner_id_idx after a re-run: want 1, got %d", got)
+	}
+	// And the FK swap survived the second pass rather than being left half done.
+	if got := scalarCount(t, url,
+		`SELECT count(*) FROM information_schema.referential_constraints rc
+		   JOIN information_schema.table_constraints tc
+		     ON tc.constraint_name = rc.constraint_name
+		  WHERE tc.constraint_name = 'scenarios_owner_id_fkey'
+		    AND rc.delete_rule = 'CASCADE'`); got != 1 {
+		t.Errorf("scenarios_owner_id_fkey after a re-run: want ON DELETE CASCADE, got count %d", got)
+	}
+}
+
+// The rewind helper is a chain link every other rewinding test depends on, so
+// its correctness is load-bearing: if it leaves the schema behind, the tests
+// below it silently stop testing a rewind at all.
+func TestOwnedDomainModelsRewindActuallyUndoesTheMigration(t *testing.T) {
+	_, url := freshRepo(t)
+
+	rewindOwnedDomainModelsMigration(t, url)
+
+	if got := scalarCount(t, url,
+		`SELECT count(*) FROM information_schema.columns
+		  WHERE table_name = 'routes' AND column_name = 'owner_id'`); got != 0 {
+		t.Errorf("routes.owner_id after a rewind: want it gone, got count %d", got)
+	}
+
+	if err := postgres.Migrate(context.Background(), url); err != nil {
+		t.Fatalf("Migrate after a full rewind: %v", err)
+	}
+	if got := scalarCount(t, url,
+		`SELECT count(*) FROM information_schema.columns
+		  WHERE table_name = 'routes' AND column_name = 'owner_id'`); got != 1 {
+		t.Errorf("routes.owner_id after re-migrating: want it back, got count %d", got)
 	}
 }

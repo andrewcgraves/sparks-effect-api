@@ -144,7 +144,8 @@ func authoredTargetIsochrone(w http.ResponseWriter, r *http.Request, target auth
 		writeInternalError(r.Context(), w, "loading member services", err)
 		return
 	}
-	if transit.GraphStale(job, memberIDs, updatedAtByID(members), boardingWait) {
+	if transit.GraphStale(job, memberIDs, updatedAtByID(members),
+		resolvedBoardingWaitByService(members, owned.scenarioBoardingWait(), boardingWait)) {
 		writeErrorCode(w, http.StatusConflict, StaleGraphErrorCode,
 			"compiled graph is stale; recompile the "+noun+" and retry")
 		return

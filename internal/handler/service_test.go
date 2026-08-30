@@ -169,10 +169,10 @@ const createPayload = `{
 // covered in the server package.
 func serviceMux(store handler.ServiceStore) *http.ServeMux {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/services", handler.CreateService(store))
+	mux.HandleFunc("POST /api/services", handler.CreateService(store, transit.DefaultBoardingWaitPolicy()))
 	mux.HandleFunc("GET /api/services", handler.MyUserServices(store, transit.DefaultBoardingWaitPolicy()))
 	mux.HandleFunc("GET /api/services/{slug}", handler.GetService(store, transit.DefaultBoardingWaitPolicy()))
-	mux.HandleFunc("PUT /api/services/{slug}", handler.UpdateService(store))
+	mux.HandleFunc("PUT /api/services/{slug}", handler.UpdateService(store, transit.DefaultBoardingWaitPolicy()))
 	mux.HandleFunc("DELETE /api/services/{slug}", handler.DeleteService(store))
 	return mux
 }

@@ -189,19 +189,33 @@ type Service struct {
 	OwnerID          *string           `yaml:"owner_id,omitempty" json:"owner_id,omitempty"`
 	Stops            []ServiceStop     `yaml:"stops"            json:"stops"`
 	FrequencyWindows []FrequencyWindow `yaml:"frequency_windows" json:"frequency_windows"`
-	// BoardingWaitPolicy and BoardingWaitSecs are the resolved boarding wait
-	// that would be compiled into this service's graph under the current global
-	// policy (SPA-236). They are response-only — never persisted — and filled
-	// by the read handlers so a client never has to re-derive them.
+	// BoardingWait is the stored override; nil means inherit. Seeded YAML
+	// uses the nested object boarding_wait: {policy, secs}.
+	BoardingWait *BoardingWaitOverride `yaml:"boarding_wait,omitempty" json:"boarding_wait,omitempty"`
+	// BoardingWaitPolicy, BoardingWaitSecs, and BoardingWaitSource are the
+	// resolved boarding wait that would be compiled into this service's graph
+	// (SPA-236, SPA-237). They are response-only — filled by the read handlers
+	// so a client never has to re-derive them. Source is service, scenario, or
+	// global, matching ResolveBoardingWait.
 	BoardingWaitPolicy string `yaml:"-" json:"boarding_wait_policy,omitempty"`
 	BoardingWaitSecs   int    `yaml:"-" json:"boarding_wait_secs"`
+	BoardingWaitSource string `yaml:"-" json:"boarding_wait_source,omitempty"`
 }
 
-// ResolveBoardingWait fills the response-only boarding-wait fields from policy
-// and this service's own frequency windows. Both service models expose this,
-// so a caller can fill either without a parallel implementation.
-func (s *Service) ResolveBoardingWait(policy BoardingWaitPolicy) error {
-	return policy.resolveInto(s.FrequencyWindows, &s.BoardingWaitPolicy, &s.BoardingWaitSecs)
+// ResolveBoardingWait fills the response-only boarding-wait fields from the
+// precedence chain (this service's override, the optional scenario override,
+// then global) and this service's own frequency windows. Both service models
+// expose this, so a caller can fill either without a parallel implementation.
+func (s *Service) ResolveBoardingWait(scenario *BoardingWaitOverride, global BoardingWaitPolicy) error {
+	policy, source, err := ResolveBoardingWait(s.BoardingWait, scenario, global)
+	if err != nil {
+		return err
+	}
+	if err := policy.resolveInto(s.FrequencyWindows, &s.BoardingWaitPolicy, &s.BoardingWaitSecs); err != nil {
+		return err
+	}
+	s.BoardingWaitSource = source
+	return nil
 }
 
 // SegmentTime is the run-time-only seconds for one adjacent station pair along a service.

@@ -41,12 +41,18 @@ const maxOwnedServiceBodyBytes = 1 << 20 // 1 MiB
 // "locked by policy"), and a user cannot make such a claim about their own
 // work. It stays empty on anything authored through this endpoint.
 type ownedServiceRequest struct {
-	ScenarioSlug     string                    `json:"scenario_slug"`
-	RouteSlug        string                    `json:"route_slug"`
-	VehicleTypeID    string                    `json:"vehicle_type_id"`
-	Name             string                    `json:"name"`
-	Direction        string                    `json:"direction"`
-	Active           *bool                     `json:"active"`
+	ScenarioSlug  string `json:"scenario_slug"`
+	RouteSlug     string `json:"route_slug"`
+	VehicleTypeID string `json:"vehicle_type_id"`
+	Name          string `json:"name"`
+	Direction     string `json:"direction"`
+	Active        *bool  `json:"active"`
+	// BoardingWait is the exception to full-replace, matching the convention
+	// SPA-237 established on the user-service write path: omitted leaves the
+	// stored override alone, an explicit null clears it back to inherit, and an
+	// object sets it. optionalBoardingWait is what tells those three apart, and
+	// its parse() is where an invalid policy becomes a 422.
+	BoardingWait     optionalBoardingWait      `json:"boarding_wait"`
 	Stops            []ownedServiceStopIn      `json:"stops"`
 	FrequencyWindows []transit.FrequencyWindow `json:"frequency_windows"`
 }
@@ -63,7 +69,7 @@ type ownedServiceStopIn struct {
 }
 
 // CreateOwnedService persists a service inside a scenario the caller owns.
-func CreateOwnedService(store OwnedServiceStore) http.HandlerFunc {
+func CreateOwnedService(store OwnedServiceStore, boardingWait transit.BoardingWaitPolicy) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := auth.UserFrom(r.Context())
 		if !ok {
@@ -99,7 +105,8 @@ func CreateOwnedService(store OwnedServiceStore) http.HandlerFunc {
 		}
 
 		w.Header().Set("Location", "/api/me/services/"+svc.ID)
-		writeJSON(w, http.StatusCreated, svc)
+		writeJSON(w, http.StatusCreated,
+			withBoardingWait[transit.Service](r.Context(), svc, nil, boardingWait))
 	}
 }
 
@@ -112,14 +119,19 @@ func GetOwnedService(store OwnedServiceStore, boardingWait transit.BoardingWaitP
 		}
 		// The same response-only fill MyServices does for the list read, so a
 		// client never re-derives min(headway)/2 itself.
+		//
+		// The scenario argument is nil because SPA-237 put the override columns
+		// on user_scenarios and services, not on scenarios: a seeded service has
+		// no scenario-level override to inherit, so its precedence chain is its
+		// own override, then global.
 		writeJSON(w, http.StatusOK,
-			withBoardingWait[transit.Service](r.Context(), svc, boardingWait))
+			withBoardingWait[transit.Service](r.Context(), svc, nil, boardingWait))
 	}
 }
 
 // UpdateOwnedService rewrites a service the caller owns — its scalars, its
 // stopping pattern, and its frequency windows.
-func UpdateOwnedService(store OwnedServiceStore) http.HandlerFunc {
+func UpdateOwnedService(store OwnedServiceStore, boardingWait transit.BoardingWaitPolicy) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		svc, ok := loadOwnedService(w, r, store)
 		if !ok {
@@ -142,7 +154,8 @@ func UpdateOwnedService(store OwnedServiceStore) http.HandlerFunc {
 			writeInternalError(r.Context(), w, "updating service", err)
 			return
 		}
-		writeJSON(w, http.StatusOK, svc)
+		writeJSON(w, http.StatusOK,
+			withBoardingWait[transit.Service](r.Context(), svc, nil, boardingWait))
 	}
 }
 
@@ -237,6 +250,11 @@ func resolveOwnedService(
 	svc.Provenance = ""
 	svc.Stops = stops
 	svc.FrequencyWindows = req.FrequencyWindows
+	// Only when the client said something about it: an update that omits the
+	// key must not silently clear an override the service already carries.
+	if req.BoardingWait.set {
+		svc.BoardingWait = req.BoardingWait.value
+	}
 	return true
 }
 
@@ -332,6 +350,12 @@ func decodeOwnedServiceRequest(w http.ResponseWriter, r *http.Request) (ownedSer
 			return ownedServiceRequest{}, false
 		}
 		writeError(w, http.StatusBadRequest, "request body is not valid JSON")
+		return ownedServiceRequest{}, false
+	}
+	// Deferred out of UnmarshalJSON so a bad policy is a 422 about the value
+	// rather than a 400 about the syntax.
+	if err := req.BoardingWait.parse(); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
 		return ownedServiceRequest{}, false
 	}
 	return req, true

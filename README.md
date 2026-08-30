@@ -48,8 +48,11 @@ Runtime unit of truth is **seconds** (`Edge.Seconds`, `WaitSecs`,
 `full_headway`, or `fixed` with `BOARDING_WAIT_FIXED_SECS`. A malformed or
 incomplete setting falls back to `none` rather than refusing to boot: a typo
 should cost a wait, never a deployment, and never charge one nobody asked for.
-The service reads report the resolved wait as `boarding_wait_policy` and
-`boarding_wait_secs`, so a client never re-derives `min(headway)/2` itself.
+Per-service and per-scenario overrides (SPA-237) are set on create/update via
+`boarding_wait` and win in that order over the global default. Service reads
+report the resolved wait as `boarding_wait_policy`, `boarding_wait_secs`, and
+`boarding_wait_source` (`service` / `scenario` / `global`), so a client never
+re-derives `min(headway)/2` itself.
 
 ### The queue contract
 

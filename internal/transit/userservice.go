@@ -28,19 +28,31 @@ type UserService struct {
 	FrequencyWindows []FrequencyWindow  `json:"frequency_windows"`
 	CreatedAt        time.Time          `json:"created_at"`
 	UpdatedAt        time.Time          `json:"updated_at"`
-	// BoardingWaitPolicy and BoardingWaitSecs are the resolved boarding wait
-	// that would be compiled into this service's graph under the current global
-	// policy (SPA-236). They are response-only — never persisted — and filled
-	// by the read handlers so a client never has to re-derive them.
+	// BoardingWait is the stored override; nil means inherit from the
+	// scenario or the global default.
+	BoardingWait *BoardingWaitOverride `json:"boarding_wait,omitempty"`
+	// BoardingWaitPolicy, BoardingWaitSecs, and BoardingWaitSource are the
+	// resolved boarding wait that would be compiled into this service's graph
+	// (SPA-236, SPA-237). They are response-only — filled by the read handlers
+	// so a client never has to re-derive them.
 	BoardingWaitPolicy string `json:"boarding_wait_policy,omitempty"`
 	BoardingWaitSecs   int    `json:"boarding_wait_secs"`
+	BoardingWaitSource string `json:"boarding_wait_source,omitempty"`
 }
 
-// ResolveBoardingWait fills the response-only boarding-wait fields from policy
-// and this service's own frequency windows, matching Service so one caller
-// serves both models.
-func (s *UserService) ResolveBoardingWait(policy BoardingWaitPolicy) error {
-	return policy.resolveInto(s.FrequencyWindows, &s.BoardingWaitPolicy, &s.BoardingWaitSecs)
+// ResolveBoardingWait fills the response-only boarding-wait fields from the
+// precedence chain and this service's own frequency windows, matching Service
+// so one caller serves both models.
+func (s *UserService) ResolveBoardingWait(scenario *BoardingWaitOverride, global BoardingWaitPolicy) error {
+	policy, source, err := ResolveBoardingWait(s.BoardingWait, scenario, global)
+	if err != nil {
+		return err
+	}
+	if err := policy.resolveInto(s.FrequencyWindows, &s.BoardingWaitPolicy, &s.BoardingWaitSecs); err != nil {
+		return err
+	}
+	s.BoardingWaitSource = source
+	return nil
 }
 
 // VehicleParams are the rolling-stock capabilities a user sets on their own

@@ -337,18 +337,18 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 	// its own inline vehicle and embedded stops. These are seeded services:
 	// they reference a scenario's stations and the shared vehicle-type catalog,
 	// and compile through the same path the ca-hsr baseline does.
-	mux.Handle("POST /api/me/services", authenticated(handler.CreateOwnedService(deps)))
+	mux.Handle("POST /api/me/services", authenticated(handler.CreateOwnedService(deps, cfg.BoardingWait)))
 	mux.Handle("GET /api/me/services/{id}", authenticated(handler.GetOwnedService(deps, cfg.BoardingWait)))
-	mux.Handle("PUT /api/me/services/{id}", authenticated(handler.UpdateOwnedService(deps)))
+	mux.Handle("PUT /api/me/services/{id}", authenticated(handler.UpdateOwnedService(deps, cfg.BoardingWait)))
 	mux.Handle("DELETE /api/me/services/{id}", authenticated(handler.DeleteOwnedService(deps)))
 
 	// User-authored services: owner-scoped CRUD. Reads are owner-scoped too —
 	// unlike the curated scenario data these are a user's own drafts, so they
 	// sit behind the same gate as the writes rather than the public reads.
-	mux.Handle("POST /api/services", authenticated(handler.CreateService(deps)))
+	mux.Handle("POST /api/services", authenticated(handler.CreateService(deps, cfg.BoardingWait)))
 	mux.Handle("GET /api/services", authenticated(handler.MyUserServices(deps, cfg.BoardingWait)))
 	mux.Handle("GET /api/services/{slug}", authenticated(handler.GetService(deps, cfg.BoardingWait)))
-	mux.Handle("PUT /api/services/{slug}", authenticated(handler.UpdateService(deps)))
+	mux.Handle("PUT /api/services/{slug}", authenticated(handler.UpdateService(deps, cfg.BoardingWait)))
 	mux.Handle("DELETE /api/services/{slug}", authenticated(handler.DeleteService(deps)))
 	// Compiling a single service is the degenerate scenario compile; owner-scoped
 	// like the rest of the authored surface.
@@ -366,10 +366,10 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 	// ids. Named /api/user-scenarios, distinct from the public /api/scenarios
 	// collection above, so the existing curated read path is untouched rather
 	// than repurposed or ambiguously overloaded.
-	mux.Handle("POST /api/user-scenarios", authenticated(handler.CreateUserScenario(deps)))
-	mux.Handle("GET /api/user-scenarios", authenticated(handler.MyUserScenarios(deps)))
-	mux.Handle("GET /api/user-scenarios/{slug}", authenticated(handler.GetUserScenario(deps)))
-	mux.Handle("PUT /api/user-scenarios/{slug}", authenticated(handler.UpdateUserScenario(deps)))
+	mux.Handle("POST /api/user-scenarios", authenticated(handler.CreateUserScenario(deps, cfg.BoardingWait)))
+	mux.Handle("GET /api/user-scenarios", authenticated(handler.MyUserScenarios(deps, cfg.BoardingWait)))
+	mux.Handle("GET /api/user-scenarios/{slug}", authenticated(handler.GetUserScenario(deps, cfg.BoardingWait)))
+	mux.Handle("PUT /api/user-scenarios/{slug}", authenticated(handler.UpdateUserScenario(deps, cfg.BoardingWait)))
 	mux.Handle("DELETE /api/user-scenarios/{slug}", authenticated(handler.DeleteUserScenario(deps)))
 	// Compile a user scenario's curated members into one graph, then read it back
 	// by slug. Both owner-scoped, unlike the public seeded /api/scenarios/{slug}/graph.

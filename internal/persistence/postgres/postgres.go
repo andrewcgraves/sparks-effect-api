@@ -398,12 +398,14 @@ func (r *Repo) CreateService(ctx context.Context, svc transit.Service) error {
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // rollback after commit is a no-op
 
+	kind, secs := boardingWaitArgs(svc.BoardingWait)
 	_, err = tx.Exec(ctx,
 		`INSERT INTO services
-		   (id, scenario_id, route_id, vehicle_type_id, name, direction, active, provenance, owner_id)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		   (id, scenario_id, route_id, vehicle_type_id, name, direction, active, provenance, owner_id,
+		    boarding_wait_policy, boarding_wait_fixed_secs)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
 		svc.ID, svc.ScenarioID, svc.RouteID, svc.VehicleTypeID, svc.Name,
-		svc.Direction, svc.Active, svc.Provenance, svc.OwnerID)
+		svc.Direction, svc.Active, svc.Provenance, svc.OwnerID, kind, secs)
 	if err != nil {
 		return wrap("CreateService", err)
 	}
@@ -431,7 +433,8 @@ func (r *Repo) ListServicesByOwner(ctx context.Context, ownerID string) ([]trans
 // trusted internal identifier, never caller input.
 func (r *Repo) listServicesBy(ctx context.Context, op, column, value string) ([]transit.Service, error) {
 	rows, err := r.pool.Query(ctx,
-		`SELECT id, scenario_id, route_id, vehicle_type_id, name, direction, active, provenance, owner_id
+		`SELECT id, scenario_id, route_id, vehicle_type_id, name, direction, active, provenance, owner_id,
+		        boarding_wait_policy, boarding_wait_fixed_secs
 		 FROM services WHERE `+column+` = $1 ORDER BY id`, value)
 	if err != nil {
 		return nil, wrap(op, err)
@@ -440,11 +443,17 @@ func (r *Repo) listServicesBy(ctx context.Context, op, column, value string) ([]
 
 	var out []transit.Service
 	for rows.Next() {
-		var svc transit.Service
+		var (
+			svc  transit.Service
+			kind *string
+			secs *int
+		)
 		if err := rows.Scan(&svc.ID, &svc.ScenarioID, &svc.RouteID, &svc.VehicleTypeID,
-			&svc.Name, &svc.Direction, &svc.Active, &svc.Provenance, &svc.OwnerID); err != nil {
+			&svc.Name, &svc.Direction, &svc.Active, &svc.Provenance, &svc.OwnerID,
+			&kind, &secs); err != nil {
 			return nil, wrap(op+" scan", err)
 		}
+		svc.BoardingWait = scanBoardingWait(kind, secs)
 		out = append(out, svc)
 	}
 	if err := rows.Err(); err != nil {
