@@ -260,13 +260,11 @@ func TestIsochrone_400_invalidMode(t *testing.T) {
 // Every mode the enum accepts must get through the request path to a published
 // message, in the domain's own spelling. Valhalla's "multimodal" is the
 // worker's business and must never appear on this side (SPA-246).
+//
+// Driven from transit.TravelModes() so a mode added to the enum is covered here
+// without anyone remembering to add it.
 func TestIsochrone_202_everyModeIsAccepted(t *testing.T) {
-	for _, mode := range []transit.TravelMode{
-		transit.TravelModeWalk,
-		transit.TravelModeBike,
-		transit.TravelModeDrive,
-		transit.TravelModeTransit,
-	} {
+	for _, mode := range transit.TravelModes() {
 		t.Run(string(mode), func(t *testing.T) {
 			pub := &routing.FakePublisher{}
 			rec := postIsochrone(compiledStore(), pub,

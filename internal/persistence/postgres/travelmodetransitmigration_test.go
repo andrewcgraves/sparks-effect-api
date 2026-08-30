@@ -87,20 +87,24 @@ func countRoutingJobs(t *testing.T, url string) int {
 }
 
 // Every mode the Go enum accepts must be storable. This is the pairing that
-// keeps the constraint honest: transit.travelModes and the CHECK are one set
-// written twice in two languages, and only a test can compare them.
+// keeps the constraint honest: the enum and the CHECK are one set written twice
+// in two languages, and only a test can compare them.
+//
+// It walks transit.TravelModes() rather than the four modes written out here,
+// so a mode added to the enum without being added to 00021 fails here. Written
+// out, this test would be a third copy of the set and would simply not cover
+// the new mode — which is the whole failure it exists to catch.
 func TestTravelModeCheckAcceptsEveryModeTheEnumDoes(t *testing.T) {
 	repo, url := freshRepo(t)
 	seedCompileJob(t, repo, routingCompileJobID)
 
-	for i, mode := range []transit.TravelMode{
-		transit.TravelModeWalk,
-		transit.TravelModeBike,
-		transit.TravelModeDrive,
-		transit.TravelModeTransit,
-	} {
+	modes := transit.TravelModes()
+	if len(modes) == 0 {
+		t.Fatal("TravelModes() is empty; there is no set to check the constraint against")
+	}
+	for i, mode := range modes {
 		if !mode.Valid() {
-			t.Fatalf("%q is not a valid mode; fix the test, not the code", mode)
+			t.Fatalf("%q is in TravelModes() but not Valid; fix the enum, not the test", mode)
 		}
 		if err := insertRoutingJobMode(t, url, modeJobID(i), string(mode)); err != nil {
 			t.Errorf("mode %q is accepted by TravelMode.Valid but refused by the database: %v", mode, err)

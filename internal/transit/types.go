@@ -340,6 +340,18 @@ func (m TravelMode) Valid() bool {
 	return slices.Contains(travelModes, m)
 }
 
+// TravelModes returns every mode, for a caller outside this package that has to
+// hold something to the whole set rather than to one member — the test that
+// checks the Postgres CHECK accepts everything Valid does, most of it. Without
+// it such a test writes the set out a third time, and a mode added here would
+// simply not be covered by it.
+//
+// A copy, because a caller must not be able to edit the set by editing what it
+// was handed.
+func TravelModes() []TravelMode {
+	return slices.Clone(travelModes)
+}
+
 // TravelModeList names every mode as a comma-separated string, for the error
 // messages that tell a client what it should have sent. Derived from the set
 // rather than written out, so a message cannot come to disagree with what
