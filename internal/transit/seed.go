@@ -90,6 +90,11 @@ func seedScenario(ctx context.Context, repo Repository, slug string) error {
 		return err
 	}
 	for _, svc := range services {
+		if svc.BoardingWait != nil {
+			if _, err := svc.BoardingWait.Parse(); err != nil {
+				return fmt.Errorf("service %q: %w", svc.ID, err)
+			}
+		}
 		if err := repo.CreateService(ctx, svc); err != nil {
 			return fmt.Errorf("creating service %q: %w", svc.ID, err)
 		}

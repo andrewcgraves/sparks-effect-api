@@ -40,15 +40,22 @@ type userScenarioRequest struct {
 	Description      string                    `json:"description"`
 	ServiceIDs       []string                  `json:"service_ids"`
 	InterchangePairs []transit.InterchangePair `json:"interchange_pairs"`
+	BoardingWait     optionalBoardingWait      `json:"boarding_wait"`
 }
 
 // applyTo copies the client-writable fields onto sc, leaving ID, Slug, and
 // OwnerID untouched.
+//
+// BoardingWait is the exception to full-replace: omitted leaves the stored
+// override, explicit null clears it to inherit.
 func (req userScenarioRequest) applyTo(sc *transit.UserScenario) {
 	sc.Name = req.Name
 	sc.Description = req.Description
 	sc.ServiceIDs = req.ServiceIDs
 	sc.InterchangePairs = req.InterchangePairs
+	if req.BoardingWait.set {
+		sc.BoardingWait = req.BoardingWait.value
+	}
 }
 
 // CreateUserScenario persists a new curated scenario owned by the caller.
@@ -56,7 +63,7 @@ func (req userScenarioRequest) applyTo(sc *transit.UserScenario) {
 // The owner is the identity the middleware resolved from the bearer token, so
 // there is no field a client can set to create a scenario in someone else's
 // name.
-func CreateUserScenario(store ScenarioStore) http.HandlerFunc {
+func CreateUserScenario(store ScenarioStore, boardingWait transit.BoardingWaitPolicy) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := auth.UserFrom(r.Context())
 		if !ok {
@@ -101,14 +108,14 @@ func CreateUserScenario(store ScenarioStore) http.HandlerFunc {
 		}
 
 		w.Header().Set("Location", "/api/user-scenarios/"+sc.Slug)
-		writeJSON(w, http.StatusCreated, sc)
+		writeJSON(w, http.StatusCreated, withScenarioBoardingWait(r.Context(), sc, boardingWait))
 	}
 }
 
 // GetUserScenario returns one scenario by slug. Reads are owner-scoped: like a
 // user service, a scenario is authored content, visible only to its owner (and
 // to admins, per auth.CanAccess).
-func GetUserScenario(store ScenarioStore) http.HandlerFunc {
+func GetUserScenario(store ScenarioStore, boardingWait transit.BoardingWaitPolicy) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sc, ok := loadScenario(w, r, store)
 		if !ok {
@@ -117,12 +124,12 @@ func GetUserScenario(store ScenarioStore) http.HandlerFunc {
 		if !authorizeScenario(w, r, sc) {
 			return
 		}
-		writeJSON(w, http.StatusOK, sc)
+		writeJSON(w, http.StatusOK, withScenarioBoardingWait(r.Context(), sc, boardingWait))
 	}
 }
 
 // MyUserScenarios returns the scenarios owned by the caller.
-func MyUserScenarios(store ScenarioStore) http.HandlerFunc {
+func MyUserScenarios(store ScenarioStore, boardingWait transit.BoardingWaitPolicy) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := auth.UserFrom(r.Context())
 		if !ok {
@@ -138,13 +145,13 @@ func MyUserScenarios(store ScenarioStore) http.HandlerFunc {
 		if scenarios == nil {
 			scenarios = []transit.UserScenario{}
 		}
-		writeJSON(w, http.StatusOK, scenarios)
+		writeJSON(w, http.StatusOK, withScenarioBoardingWaits(r.Context(), scenarios, boardingWait))
 	}
 }
 
 // UpdateUserScenario replaces a scenario's name, description, and membership.
 // The caller must own it.
-func UpdateUserScenario(store ScenarioStore) http.HandlerFunc {
+func UpdateUserScenario(store ScenarioStore, boardingWait transit.BoardingWaitPolicy) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sc, ok := loadScenario(w, r, store)
 		if !ok {
@@ -173,7 +180,7 @@ func UpdateUserScenario(store ScenarioStore) http.HandlerFunc {
 		if stored, found, err := store.GetUserScenarioByID(r.Context(), sc.ID); err == nil && found {
 			sc = stored
 		}
-		writeJSON(w, http.StatusOK, sc)
+		writeJSON(w, http.StatusOK, withScenarioBoardingWait(r.Context(), sc, boardingWait))
 	}
 }
 
@@ -247,6 +254,10 @@ func decodeScenarioRequest(w http.ResponseWriter, r *http.Request) (userScenario
 			return userScenarioRequest{}, false
 		}
 		writeError(w, http.StatusBadRequest, "request body is not valid JSON")
+		return userScenarioRequest{}, false
+	}
+	if err := req.BoardingWait.parse(); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
 		return userScenarioRequest{}, false
 	}
 	return req, true

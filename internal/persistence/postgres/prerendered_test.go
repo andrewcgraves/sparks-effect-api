@@ -38,18 +38,18 @@ func bigPayload(t *testing.T, marker string) json.RawMessage {
 	return b
 }
 
-// rewindPrerenderedIsochronesMigration unwinds 00019 and is the current tail
-// of the rewind chain that starts in snapmigration_test.go — 00019 is the
-// highest migration today, so nothing needs unwinding above it the way every
-// other link in the chain unwinds the one above. Any migration added after
-// this one must extend the chain here, or every rewinding test in this package
-// starts failing with goose's "missing migrations before current version".
+// rewindPrerenderedIsochronesMigration unwinds 00019. 00020 sits above it, so
+// this is no longer the tail of the rewind chain that starts in
+// snapmigration_test.go — rewindBoardingWaitOverrideMigration is. Goose
+// refuses to re-apply an earlier migration while a later version is still
+// recorded, so anything rewinding 00019 must unrecord 00020 first.
 //
 // 00019 creates a table, so unwinding it drops the table as well as unrecording
 // the version: a bare DELETE from goose_db_version would leave the table behind
 // and the next Migrate call would fail on CREATE TABLE.
 func rewindPrerenderedIsochronesMigration(t *testing.T, url string) {
 	t.Helper()
+	rewindBoardingWaitOverrideMigration(t, url)
 	exec(t, url,
 		`DROP TABLE IF EXISTS prerendered_isochrones`,
 		`DELETE FROM goose_db_version WHERE version_id = 19`)
@@ -71,7 +71,9 @@ func TestPrerenderedIsochronesMigrationIsSafeToReRun(t *testing.T) {
 	}
 
 	// Unrecord the version without dropping the table, so the next Migrate
-	// re-runs 00019 over the schema it already created.
+	// re-runs 00019 over the schema it already created. 00020 must be forgotten
+	// first — goose refuses to re-apply 19 while a later version is recorded.
+	rewindBoardingWaitOverrideMigration(t, url)
 	exec(t, url, `DELETE FROM goose_db_version WHERE version_id = 19`)
 	if err := postgres.Migrate(context.Background(), url); err == nil {
 		t.Error("re-running 00019 over its own table succeeded; CREATE TABLE should have refused it")

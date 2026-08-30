@@ -7,6 +7,12 @@
 #
 # Frequency windows are representative of the 2026 Business Plan peak/off-peak headways.
 # HeadwayS 1800 = every 30 min (peak), 3600 = every 60 min (off-peak).
+#
+# boarding_wait is an optional per-service override (SPA-237):
+#   boarding_wait: {policy: half_headway}
+#   boarding_wait: {policy: fixed, secs: 120}
+# Absent means inherit from the global default (BOARDING_WAIT_POLICY, itself
+# none unless set). Seeded scenarios have no scenario-level override.
 
 - id: "00000000-0000-4004-8001-000000000001"
   scenario_id: "00000000-0000-4001-8001-000000000001"

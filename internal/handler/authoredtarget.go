@@ -71,6 +71,9 @@ type ownedTarget interface {
 	// answers 409 for, so the id set rather than the loaded rows is the
 	// authority on membership.
 	members(ctx context.Context) ([]string, []transit.UserService, error)
+	// scenarioBoardingWait is the owning scenario's stored override, or nil
+	// when the target is a lone service (no scenario in the chain).
+	scenarioBoardingWait() *transit.BoardingWaitOverride
 }
 
 // serviceTarget adapts a single user-authored service: the degenerate
@@ -117,6 +120,8 @@ func (t ownedService) members(context.Context) ([]string, []transit.UserService,
 	return []string{t.svc.ID}, []transit.UserService{t.svc}, nil
 }
 
+func (t ownedService) scenarioBoardingWait() *transit.BoardingWaitOverride { return nil }
+
 // scenarioTarget adapts a user-authored scenario: a curated set of the owner's
 // services, compiled and read as one network.
 type scenarioTarget struct{ store ScenarioTargetStore }
@@ -160,6 +165,10 @@ func (t ownedScenario) members(ctx context.Context) ([]string, []transit.UserSer
 		return nil, nil, err
 	}
 	return t.sc.ServiceIDs, services, nil
+}
+
+func (t ownedScenario) scenarioBoardingWait() *transit.BoardingWaitOverride {
+	return t.sc.BoardingWait
 }
 
 // loadCompiledGraph reads the target's latest succeeded compile, writing the

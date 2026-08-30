@@ -137,6 +137,14 @@ func (s *Store) loadScenario(slug string, boardingWait BoardingWaitPolicy) error
 	if err := unmarshalFile(dataFS, base+"/services.yaml", &services); err != nil {
 		return err
 	}
+	for i, svc := range services {
+		if svc.BoardingWait != nil {
+			if _, err := svc.BoardingWait.Parse(); err != nil {
+				return fmt.Errorf("service %q: %w", svc.ID, err)
+			}
+		}
+		services[i] = svc
+	}
 	s.services = append(s.services, services...)
 
 	var tt TravelTimes

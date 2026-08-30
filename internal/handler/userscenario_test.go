@@ -140,10 +140,10 @@ const scenarioCreatePayload = `{"name": "Weekend Getaway", "description": "Fri-S
 
 func scenarioMux(store handler.ScenarioStore) *http.ServeMux {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/user-scenarios", handler.CreateUserScenario(store))
-	mux.HandleFunc("GET /api/user-scenarios", handler.MyUserScenarios(store))
-	mux.HandleFunc("GET /api/user-scenarios/{slug}", handler.GetUserScenario(store))
-	mux.HandleFunc("PUT /api/user-scenarios/{slug}", handler.UpdateUserScenario(store))
+	mux.HandleFunc("POST /api/user-scenarios", handler.CreateUserScenario(store, transit.DefaultBoardingWaitPolicy()))
+	mux.HandleFunc("GET /api/user-scenarios", handler.MyUserScenarios(store, transit.DefaultBoardingWaitPolicy()))
+	mux.HandleFunc("GET /api/user-scenarios/{slug}", handler.GetUserScenario(store, transit.DefaultBoardingWaitPolicy()))
+	mux.HandleFunc("PUT /api/user-scenarios/{slug}", handler.UpdateUserScenario(store, transit.DefaultBoardingWaitPolicy()))
 	mux.HandleFunc("DELETE /api/user-scenarios/{slug}", handler.DeleteUserScenario(store))
 	return mux
 }
