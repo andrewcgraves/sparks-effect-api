@@ -196,7 +196,7 @@ func readPrerenderedSeedFile(fsys fs.FS, file string) (prerenderedSeedFile, erro
 		return prerenderedSeedFile{}, fmt.Errorf("%s: label is required", file)
 	}
 	if !seed.Mode.Valid() {
-		return prerenderedSeedFile{}, fmt.Errorf("%s: mode %q is not walk, bike, or drive", file, seed.Mode)
+		return prerenderedSeedFile{}, fmt.Errorf("%s: mode %q is not one of %s", file, seed.Mode, TravelModeList())
 	}
 	if seed.BudgetMins <= 0 {
 		return prerenderedSeedFile{}, fmt.Errorf("%s: budget_mins must be greater than 0", file)

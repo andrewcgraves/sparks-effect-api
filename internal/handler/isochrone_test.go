@@ -250,8 +250,40 @@ func TestIsochrone_400_invalidMode(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status: want 400, got %d", rec.Code)
 	}
-	if got := errorField(t, rec); got != "invalid mode: must be walk, bike, or drive" {
+	// The message names the set from the enum itself, so it cannot come to
+	// disagree with what the validator accepts.
+	if got := errorField(t, rec); got != "invalid mode: must be one of walk, bike, drive, transit" {
 		t.Errorf("error: got %q", got)
+	}
+}
+
+// Every mode the enum accepts must get through the request path to a published
+// message, in the domain's own spelling. Valhalla's "multimodal" is the
+// worker's business and must never appear on this side (SPA-246).
+func TestIsochrone_202_everyModeIsAccepted(t *testing.T) {
+	for _, mode := range []transit.TravelMode{
+		transit.TravelModeWalk,
+		transit.TravelModeBike,
+		transit.TravelModeDrive,
+		transit.TravelModeTransit,
+	} {
+		t.Run(string(mode), func(t *testing.T) {
+			pub := &routing.FakePublisher{}
+			rec := postIsochrone(compiledStore(), pub,
+				`{"lat":37.7,"lng":-122.4,"budget_mins":30,"mode":"`+string(mode)+
+					`","scenario_slug":"ca-hsr"}`)
+
+			if rec.Code != http.StatusAccepted {
+				t.Fatalf("status: want 202, got %d: %s", rec.Code, rec.Body.String())
+			}
+			msgs := pub.Messages()
+			if len(msgs) != 1 {
+				t.Fatalf("published %d messages, want exactly 1", len(msgs))
+			}
+			if msgs[0].Mode != mode {
+				t.Errorf("published mode = %q, want %q", msgs[0].Mode, mode)
+			}
+		})
 	}
 }
 

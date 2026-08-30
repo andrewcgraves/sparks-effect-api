@@ -15,8 +15,8 @@ import "math"
 // of magnitude below anything that could change the answer.
 const earthRadiusKm = 6371.0
 
-// Assumed travel speeds, in km/h, for the three modes an isochrone can be
-// plotted in.
+// Assumed travel speeds, in km/h, for the modes an isochrone can be plotted
+// in.
 //
 // These are the same numbers as the routing worker's geo package, and they have
 // to stay the same numbers. The worker sizes its destination pre-filter with
@@ -29,12 +29,27 @@ const earthRadiusKm = 6371.0
 // Go code by design (see the routing worker's README): the only things that
 // cross the boundary are the Postgres schema and one message body. A third
 // shared thing would have to be a third hand-maintained copy anyway. What keeps
-// this honest is that they are physical constants — a walking pace and a
-// cycling pace — rather than tuning knobs anyone has a reason to turn.
+// the first three honest is that they are physical constants — a walking pace
+// and a cycling pace — rather than tuning knobs anyone has a reason to turn.
 const (
 	WalkSpeedKmH  = 5.0
 	BikeSpeedKmH  = 15.0
 	DriveSpeedKmH = 80.0
+	// TransitSpeedKmH is the one number here that is a decision rather than a
+	// physical constant: a blended door-to-door pace for walking plus local
+	// transit, including waiting and transfers, chosen in SPA-246's design
+	// note. A single bus is slower than this and a commuter rail leg is much
+	// faster, so no pace is "the" transit pace the way 5 km/h is walking.
+	//
+	// That makes it the one speed the two repositories could plausibly want to
+	// tune, and so the one that must be changed in both at once. It is the
+	// worker's transit pre-filter speed, and this side must never be the
+	// smaller of the two: this side refuses a request outright, so a radius
+	// tighter than the worker's would reject origins the worker would have
+	// found a station for. Equal is what keeps that impossible in both
+	// directions — the worker still divides by its detour factor, leaving its
+	// own bound strictly inside this one.
+	TransitSpeedKmH = 40.0
 )
 
 // ReachKm is the furthest a traveller moving at speedKmH could possibly get in
