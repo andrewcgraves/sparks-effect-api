@@ -47,9 +47,13 @@ func CanAccess(user transit.User, ownerID *string) bool {
 	return *ownerID == user.ID
 }
 
-// CanReference reports whether user may build owned content on top of a row
-// owned by ownerID — pointing a service at a route, or authoring inside a
-// scenario.
+// CanReference reports whether user may point owned content at a row owned by
+// ownerID — a service naming the route it runs over, which is the only thing
+// this question is asked about today.
+//
+// Referencing is not authoring. Attaching a child to a scenario is mutating
+// that scenario, so it asks CanAccess (in fact mayAuthorInScenario, which is
+// stricter still) and never this.
 //
 // Deliberately not CanAccess. The two ask different questions about the same
 // nil owner: an unowned row is curated platform data, which is a public

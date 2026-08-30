@@ -204,6 +204,71 @@ func TestCreateOwnedServiceRefusesAScenarioTheCallerDoesNotOwn(t *testing.T) {
 	}
 }
 
+// The admin half of the same rule, and the reason it is mayAuthorInScenario
+// rather than auth.CanAccess: CanAccess short-circuits on IsAdmin, so an admin
+// used to be able to POST /api/me/services with scenario_slug ca-hsr and leave
+// an *owned* service in the curated baseline. ListServicesByScenario is
+// unfiltered, so CompileSeededIfNeeded would then compile it into the public
+// store — the exact thing acceptance criterion 4 forbids.
+func TestCreateOwnedServiceNeverLeavesAChildOwnedDifferentlyFromItsScenario(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		user         transit.User
+		scenarioSlug string
+		wantStatus   int
+		wantOwner    *string // only checked on a 201
+	}{
+		{"an admin into the curated baseline", adminU, "ca-hsr", http.StatusUnprocessableEntity, nil},
+		{"a member into the curated baseline", memberA, "ca-hsr", http.StatusUnprocessableEntity, nil},
+		{"a member into their own scenario", memberA, "a-draft", http.StatusCreated, ptrTo(ownerAID)},
+		// The service takes the scenario's owner, not the admin's, so the
+		// member's scenario does not acquire a child they do not own.
+		{"an admin into a member's scenario", adminU, "a-draft", http.StatusCreated, ptrTo(ownerAID)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newFakeOwnedServiceStore()
+			rec := asServiceUser(t, handler.CreateOwnedService(store, transit.DefaultBoardingWaitPolicy()),
+				tc.user, http.MethodPost, "/api/me/services",
+				serviceBody(tc.scenarioSlug, "curated-line", vehicleTypeID, "west-end", "east-end"))
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status: want %d, got %d (%s)", tc.wantStatus, rec.Code, rec.Body)
+			}
+			if tc.wantStatus != http.StatusCreated {
+				if len(store.services) != 0 {
+					t.Errorf("a service was written despite the refusal: %+v", store.services)
+				}
+				return
+			}
+			var got transit.Service
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+				t.Fatalf("decoding response: %v", err)
+			}
+			if got.OwnerID == nil || *got.OwnerID != *tc.wantOwner {
+				t.Errorf("owner: want %q, got %v", *tc.wantOwner, got.OwnerID)
+			}
+		})
+	}
+}
+
+// The update path resolves the scenario a second time, so it gets the same
+// guard: a service cannot be moved into the curated baseline either.
+func TestUpdateOwnedServiceCannotMoveAServiceIntoTheCuratedBaseline(t *testing.T) {
+	store := newFakeOwnedServiceStore()
+	store.services[ownedSvcID] = transit.Service{
+		ID: ownedSvcID, ScenarioID: ownedScrID, Name: "Local", OwnerID: ptrTo(ownerAID),
+	}
+
+	rec := asServiceUser(t, handler.UpdateOwnedService(store, transit.DefaultBoardingWaitPolicy()),
+		adminU, http.MethodPut, "/api/me/services/"+ownedSvcID,
+		serviceBody("ca-hsr", "curated-line", vehicleTypeID, "west-end", "east-end"))
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status: want 422, got %d (%s)", rec.Code, rec.Body)
+	}
+	if got := store.services[ownedSvcID]; got.ScenarioID != ownedScrID {
+		t.Errorf("scenario: want it unmoved, got %q", got.ScenarioID)
+	}
+}
+
 // Every NOT NULL foreign key gets a 422 naming the offending value rather than
 // an opaque 500 from the constraint.
 func TestCreateOwnedServiceRejectsUnknownReferences(t *testing.T) {

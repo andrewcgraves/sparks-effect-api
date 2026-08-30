@@ -257,3 +257,96 @@ func TestIntegration_AuthoringAnOwnedScenarioLeavesTheCuratedBaselineAlone(t *te
 		t.Errorf("CompileSeededIfNeeded recompiled %d scenario(s); authoring must not cause drift", compiled)
 	}
 }
+
+// AC4's other half, which the test above does not reach: the curated baseline's
+// prerendered isochrones must still report themselves current after a member
+// has authored a scenario *and a service* of their own.
+//
+// The mechanism under test is the deliberately absent AddServiceToScenario call
+// in CreateOwnedService. scenario_service is the scenario's *curated*
+// membership, and PrerenderedOutdated compares an entry's snapshot of that join
+// against the live one, so an owned service entering it would flip every
+// curated entry to outdated — a whole page of illustrations quietly labelled
+// stale by somebody else's draft. The same assertion catches the other route to
+// that damage: a spurious recompile of ca-hsr bumps its services' updated_at,
+// which MembershipStale reads as drift just the same.
+//
+// The entry is curated through the admin endpoint rather than seeded, because
+// SeedPrerenderedIsochrones runs in cmd/api and not in integrationServer. The
+// membership snapshot taken at create time is identical either way, and it is
+// the only thing outdated is computed against.
+func TestIntegration_AuthoringLeavesTheCuratedPrerenderedIsochronesCurrent(t *testing.T) {
+	h, repo := integrationServer(t)
+	adminToken := provisionAdminAndLogin(t, h, repo)
+	memberToken := provisionMember(t, h, adminToken, "member@example.com", "member-password")
+
+	if _, err := transit.SeedIfEmpty(context.Background(), repo); err != nil {
+		t.Fatalf("SeedIfEmpty: %v", err)
+	}
+	if _, err := transit.CompileSeededIfNeeded(context.Background(), repo,
+		transit.DefaultBoardingWaitPolicy()); err != nil {
+		t.Fatalf("CompileSeededIfNeeded (initial): %v", err)
+	}
+
+	// Curated against ca-hsr as it stands right now, which is what makes
+	// "outdated" mean anything at all afterwards.
+	rec := authedRequest(t, h, adminToken, http.MethodPost,
+		"/api/scenarios/ca-hsr/prerendered-isochrones",
+		`{"label":"Fresno, 45 min","lat":36.74,"lng":-119.79,"budget_mins":45,
+		  "mode":"walk","result":{"type":"FeatureCollection","features":[]}}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("curating a prerendered isochrone: status %d, body %s", rec.Code, rec.Body.String())
+	}
+
+	before := curatedPrerenderedOutdated(t, h)
+	if len(before) != 1 {
+		t.Fatalf("want exactly the one curated entry before authoring, got %v", before)
+	}
+	if before[0] {
+		t.Fatal("the entry reported outdated before anyone had authored anything")
+	}
+
+	slug := ownedScenarioFixture(t, h, memberToken)
+	createOwnedServiceIn(t, h, memberToken, slug, "bay-spine",
+		firstVehicleTypeID(t, repo), "Bay Local")
+
+	// The boot a deployment would do next, which must find nothing to redo.
+	if _, err := transit.CompileSeededIfNeeded(context.Background(), repo,
+		transit.DefaultBoardingWaitPolicy()); err != nil {
+		t.Fatalf("CompileSeededIfNeeded (second boot): %v", err)
+	}
+
+	after := curatedPrerenderedOutdated(t, h)
+	if len(after) != len(before) {
+		t.Fatalf("curated entries went from %d to %d", len(before), len(after))
+	}
+	for i, outdated := range after {
+		if outdated {
+			t.Errorf("curated prerendered isochrone %d reports outdated after a member authored "+
+				"a scenario and a service; the ca-hsr baseline must be untouched", i)
+		}
+	}
+}
+
+// curatedPrerenderedOutdated reads ca-hsr's prerendered isochrones through the
+// public endpoint — the surface a reader actually sees, rather than the
+// staleness helper underneath it — and returns each entry's outdated flag.
+func curatedPrerenderedOutdated(t *testing.T, h http.Handler) []bool {
+	t.Helper()
+	rec := authedRequest(t, h, "", http.MethodGet, "/api/scenarios/ca-hsr/prerendered-isochrones", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("listing curated prerendered isochrones: status %d, body %s", rec.Code, rec.Body.String())
+	}
+	var entries []struct {
+		Label    string `json:"label"`
+		Outdated bool   `json:"outdated"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&entries); err != nil {
+		t.Fatalf("decoding prerendered isochrones: %v", err)
+	}
+	out := make([]bool, len(entries))
+	for i, e := range entries {
+		out[i] = e.Outdated
+	}
+	return out
+}

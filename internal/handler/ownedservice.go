@@ -88,7 +88,11 @@ func CreateOwnedService(store OwnedServiceStore, boardingWait transit.BoardingWa
 			return
 		}
 
-		svc := transit.Service{ID: id, OwnerID: &user.ID}
+		// The owner is not taken from the caller: resolveOwnedService inherits
+		// it from the scenario the service is authored into, which is the
+		// ownership-uniformity invariant and the only thing that keeps the
+		// unfiltered ListServicesByScenario safe.
+		svc := transit.Service{ID: id}
 		if !resolveOwnedService(w, r, store, user, req, &svc) {
 			return
 		}
@@ -144,8 +148,9 @@ func UpdateOwnedService(store OwnedServiceStore, boardingWait transit.BoardingWa
 			return
 		}
 		// resolveOwnedService rewrites every client-writable field on the
-		// loaded service, so ID and OwnerID carry over and neither can be
-		// reassigned through an update.
+		// loaded service, so the ID carries over and cannot be reassigned
+		// through an update. The owner is re-derived from the scenario, which
+		// for any service satisfying the invariant is the owner it already had.
 		if !resolveOwnedService(w, r, store, user, req, &svc) {
 			return
 		}
@@ -192,16 +197,18 @@ func resolveOwnedService(
 		return false
 	}
 
-	// 1. The scenario must be one the caller owns — a service is a child, and a
-	//    child shares its parent's owner. CanAccess, not CanReference: adding a
-	//    service to a scenario is mutating it, so a curated scenario stays
-	//    admin-only.
+	// 1. The scenario must be an owned one the caller can reach — a service is
+	//    a child, and a child shares its parent's owner. mayAuthorInScenario,
+	//    not CanReference and not bare CanAccess: adding a service to a
+	//    scenario is mutating it, so a curated scenario is refused outright
+	//    rather than admitting the admin that CanAccess waves through.
+	//    Authoring curated services is the seed's job, not /api/me's.
 	sc, found, err := store.GetScenarioBySlug(r.Context(), req.ScenarioSlug)
 	if err != nil {
 		writeInternalError(r.Context(), w, "looking up scenario", err)
 		return false
 	}
-	if !found || !auth.CanAccess(user, sc.OwnerID) {
+	if !found || !mayAuthorInScenario(user, sc) {
 		writeError(w, http.StatusUnprocessableEntity, "unknown scenario_slug "+req.ScenarioSlug)
 		return false
 	}
@@ -242,6 +249,10 @@ func resolveOwnedService(
 	}
 
 	svc.ScenarioID = sc.ID
+	// Inherited, never taken from the caller: mayAuthorInScenario has already
+	// ruled out a curated parent, so this is always a real owner, and it is by
+	// construction the same one the parent scenario carries.
+	svc.OwnerID = sc.OwnerID
 	svc.RouteID = rt.ID
 	svc.VehicleTypeID = req.VehicleTypeID
 	svc.Name = strings.TrimSpace(req.Name)

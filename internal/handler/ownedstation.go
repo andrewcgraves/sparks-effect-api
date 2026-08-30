@@ -122,10 +122,13 @@ func ListOwnedStations(store OwnedStationStore) http.HandlerFunc {
 //
 // The station inherits the scenario's owner rather than taking one from the
 // request: that is the ownership-uniformity invariant, and it is what lets
-// every scenario-scoped read stay unfiltered.
+// every scenario-scoped read stay unfiltered. The scenario is resolved through
+// loadScenarioToAuthorIn rather than loadOwnedScenario so a curated parent is
+// refused outright — inheriting from one would mint *curated* platform data
+// through an /api/me endpoint.
 func CreateOwnedStation(store OwnedStationStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		sc, ok := loadOwnedScenario(w, r, store)
+		sc, ok := loadScenarioToAuthorIn(w, r, store)
 		if !ok {
 			return
 		}

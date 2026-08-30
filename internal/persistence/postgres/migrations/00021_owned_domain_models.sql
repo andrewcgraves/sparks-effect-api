@@ -26,9 +26,14 @@
 -- Every statement is idempotent — IF NOT EXISTS on the columns and indexes, and
 -- DROP CONSTRAINT IF EXISTS before each FK is re-added — for 00018's reason: a
 -- schema change re-run against data it already wrote must not fail on "already
--- exists". It is also what lets the package's migration-rewind tests unrecord
--- version 20 with a bare DELETE and bring the database forward again, without a
--- hand-written undo that would drift from the statements above.
+-- exists". That idempotency is also why the package's migration-rewind tests
+-- cannot simply unrecord version 21: a bare DELETE from goose_db_version would
+-- leave this schema in place and the next Migrate would sail through as a
+-- no-op, hiding a rewind that did not rewind. So
+-- rewindOwnedDomainModelsMigration in ownedmodelsmigration_test.go genuinely
+-- undoes the statements below — it restores the ON DELETE SET NULL foreign
+-- keys, drops the indexes and the added columns, and only then deletes the
+-- version row.
 --
 -- ## Fresh vs deployed databases
 --

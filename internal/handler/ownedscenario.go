@@ -205,6 +205,27 @@ func loadOwnedScenario(w http.ResponseWriter, r *http.Request, store OwnedScenar
 	return sc, true
 }
 
+// loadScenarioToAuthorIn is loadOwnedScenario for the paths that create a child
+// row inside the scenario they resolve. It adds mayAuthorInScenario's one extra
+// refusal: a curated scenario is not an authoring target on /api/me, admins
+// included, because the child would be stamped with an owner its parent does
+// not have.
+//
+// It answers 404, like loadOwnedScenario, rather than distinguishing "you may
+// not author here" from "no such scenario".
+func loadScenarioToAuthorIn(w http.ResponseWriter, r *http.Request, store OwnedScenarioStore) (transit.Scenario, bool) {
+	sc, ok := loadOwnedScenario(w, r, store)
+	if !ok {
+		return transit.Scenario{}, false
+	}
+	user, _ := auth.UserFrom(r.Context())
+	if !mayAuthorInScenario(user, sc) {
+		writeError(w, http.StatusNotFound, "scenario not found")
+		return transit.Scenario{}, false
+	}
+	return sc, true
+}
+
 func decodeOwnedScenarioRequest(w http.ResponseWriter, r *http.Request) (ownedScenarioRequest, bool) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxOwnedScenarioBodyBytes)
 

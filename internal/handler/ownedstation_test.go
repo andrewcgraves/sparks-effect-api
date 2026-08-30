@@ -177,23 +177,49 @@ func TestCreateOwnedStationInheritsTheScenariosOwner(t *testing.T) {
 }
 
 // Nobody may add stations to a scenario they do not own, curated or otherwise.
+//
+// The admin row is the one worth stating: a station inherits its scenario's
+// owner, so an admin creating one under ca-hsr would not break the invariant so
+// much as mint *curated* platform data through an /api/me endpoint. The
+// owner-scoped surface refuses it; seeding and the admin endpoints are where
+// curated rows come from.
 func TestCreateOwnedStationRefusesAScenarioTheCallerDoesNotOwn(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		user transit.User
-		slug string
-		want int
+		name      string
+		user      transit.User
+		slug      string
+		want      int
+		wantOwner *string // only checked on a 201
 	}{
-		{"a member on their own", memberA, "a-draft", http.StatusCreated},
-		{"a member on the curated baseline", memberA, "ca-hsr", http.StatusNotFound},
-		{"a stranger on someone else's", memberB, "a-draft", http.StatusNotFound},
+		{"a member on their own", memberA, "a-draft", http.StatusCreated, ptrTo(ownerAID)},
+		{"a member on the curated baseline", memberA, "ca-hsr", http.StatusNotFound, nil},
+		{"an admin on the curated baseline", adminU, "ca-hsr", http.StatusNotFound, nil},
+		{"a stranger on someone else's", memberB, "a-draft", http.StatusNotFound, nil},
+		// An admin reaches a member's scenario, and the station it leaves there
+		// is the member's, not the admin's.
+		{"an admin on a member's own", adminU, "a-draft", http.StatusCreated, ptrTo(ownerAID)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := newFakeOwnedStationStore()
 			rec := asStationUser(t, handler.CreateOwnedStation(store), tc.user, http.MethodPost,
 				tc.slug, "", `{"name":"West End","lat":37.0,"lng":-121.9}`)
 			if rec.Code != tc.want {
-				t.Errorf("status: want %d, got %d (%s)", tc.want, rec.Code, rec.Body)
+				t.Fatalf("status: want %d, got %d (%s)", tc.want, rec.Code, rec.Body)
+			}
+			if tc.want != http.StatusCreated {
+				for scenarioID, list := range store.stations {
+					if len(list) > 0 {
+						t.Errorf("a station was written to %s despite the refusal", scenarioID)
+					}
+				}
+				return
+			}
+			var got transit.Station
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+				t.Fatalf("decoding response: %v", err)
+			}
+			if got.OwnerID == nil || *got.OwnerID != *tc.wantOwner {
+				t.Errorf("owner: want %q, got %v", *tc.wantOwner, got.OwnerID)
 			}
 		})
 	}

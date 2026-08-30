@@ -43,8 +43,9 @@ const maxRouteBodyBytes = 8 << 20 // 8 MiB
 // name rather than honoured from the payload: an admin curating platform data
 // is choosing a public address, while a user naming their own draft is not, and
 // letting them claim an arbitrary slug would let them squat one. And the route
-// is stamped with the caller's id, which is what keeps it out of the public
-// picker.
+// is stamped with an owner, which is what keeps it out of the public picker —
+// the caller's own id when it stands alone, and the parent scenario's owner
+// when it is authored into one.
 func CreateOwnedRoute(store OwnedRouteStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := auth.UserFrom(r.Context())
@@ -59,11 +60,11 @@ func CreateOwnedRoute(store OwnedRouteStore) http.HandlerFunc {
 		}
 
 		// A scenario is optional: a route is a standalone alignment unless the
-		// caller names one. When they do it must be a scenario they own — the
-		// ownership-uniformity invariant, without which an owned route could be
-		// smuggled into the curated ca-hsr scenario and compiled into the
-		// public graph.
-		scenarioID, ok := resolveOwnScenarioOrFail(w, r, store, user, in.Properties.ScenarioSlug)
+		// caller names one. When they do it must be an owned scenario they can
+		// reach — the ownership-uniformity invariant, without which an owned
+		// route could be smuggled into the curated ca-hsr scenario and compiled
+		// into the public graph.
+		parent, ok := resolveOwnScenarioOrFail(w, r, store, user, in.Properties.ScenarioSlug)
 		if !ok {
 			return
 		}
@@ -87,7 +88,10 @@ func CreateOwnedRoute(store OwnedRouteStore) http.HandlerFunc {
 			return
 		}
 
-		rt := buildRouteFromIngest(in, id, slug, scenarioID, &user.ID)
+		// Standalone, the route is the caller's own. Inside a scenario it takes
+		// that scenario's owner, so the two can never disagree.
+		scenarioID, ownerID := childOwnership(parent, &user.ID)
+		rt := buildRouteFromIngest(in, id, slug, scenarioID, ownerID)
 		if err := store.CreateRoute(r.Context(), rt); err != nil {
 			writeInternalError(r.Context(), w, "creating route", err)
 			return
@@ -155,15 +159,19 @@ func UpdateOwnedRoute(store OwnedRouteStore) http.HandlerFunc {
 			return
 		}
 
-		scenarioID, ok := resolveOwnScenarioOrFail(w, r, store, user, in.Properties.ScenarioSlug)
+		parent, ok := resolveOwnScenarioOrFail(w, r, store, user, in.Properties.ScenarioSlug)
 		if !ok {
 			return
 		}
 
 		// Identity carries over from the stored row: buildRouteFromIngest is
-		// handed the existing id, slug, and owner rather than anything the
-		// client sent, so neither can be reassigned through an update.
-		updated := buildRouteFromIngest(in, rt.ID, rt.Slug, scenarioID, rt.OwnerID)
+		// handed the existing id and slug rather than anything the client sent,
+		// so neither can be reassigned through an update. The owner carries
+		// over too while the route stands alone; moving it into a scenario
+		// hands it that scenario's owner, since a re-parented route that kept
+		// its old owner would be exactly the mismatch the invariant forbids.
+		scenarioID, ownerID := childOwnership(parent, rt.OwnerID)
+		updated := buildRouteFromIngest(in, rt.ID, rt.Slug, scenarioID, ownerID)
 		if err := store.UpdateRoute(r.Context(), updated); err != nil {
 			writeInternalError(r.Context(), w, "updating route", err)
 			return
@@ -235,18 +243,22 @@ func loadOwnedRoute(w http.ResponseWriter, r *http.Request, store OwnedRouteStor
 	return rt, true
 }
 
-// resolveOwnScenarioOrFail turns an optional scenario slug into a scenario id
+// resolveOwnScenarioOrFail turns an optional scenario slug into the scenario
 // the caller may author inside. An empty slug is not an error — it yields a nil
 // (standalone) scenario.
 //
 // This is the enforcement point for the ownership-uniformity invariant on the
-// create and update paths. Note it is CanAccess, not CanReference: a curated
-// scenario is a public building block to *reference*, but authoring a route
-// into one is mutating it, and that stays admin-only.
+// create and update paths, which is why it returns the whole scenario: the
+// caller needs its owner, not only its id, to stamp the child with.
+//
+// Note it is mayAuthorInScenario, not auth.CanAccess or auth.CanReference. A
+// curated scenario is a public building block to *reference*, but authoring a
+// route into one is mutating it — and CanAccess would wave an admin through,
+// which is how an owned route used to end up under the curated ca-hsr parent.
 func resolveOwnScenarioOrFail(
 	w http.ResponseWriter, r *http.Request, store OwnedRouteStore,
 	user transit.User, slug string,
-) (*string, bool) {
+) (*transit.Scenario, bool) {
 	if slug == "" {
 		return nil, true
 	}
@@ -255,14 +267,14 @@ func resolveOwnScenarioOrFail(
 		writeInternalError(r.Context(), w, "looking up scenario", err)
 		return nil, false
 	}
-	if !found || !auth.CanAccess(user, sc.OwnerID) {
+	if !found || !mayAuthorInScenario(user, sc) {
 		// Reported as unknown rather than forbidden, for loadOwnedRoute's
 		// reason: a scenario the caller cannot reach should not be
 		// distinguishable from one that does not exist.
 		writeError(w, http.StatusUnprocessableEntity, "unknown scenario_slug "+slug)
 		return nil, false
 	}
-	return &sc.ID, true
+	return &sc, true
 }
 
 // decodeRouteIngest reads and validates the GeoJSON ingestion payload shared by

@@ -235,6 +235,99 @@ func TestCreateOwnedRouteRefusesAScenarioTheCallerDoesNotOwn(t *testing.T) {
 	}
 }
 
+// The hole auth.CanAccess leaves on its own: it short-circuits on IsAdmin, so
+// an admin passes it on a curated scenario, and the create path then stamps the
+// *caller* as the child's owner. That is an owned route inside the curated
+// ca-hsr baseline — which ListRoutesByScenario does not filter, so LoadStore
+// would publish it into the compiled store.
+//
+// Two rules close it, and both are pinned here: /api/me refuses a curated
+// parent outright, and a route that names a parent takes that parent's owner
+// rather than the caller's.
+func TestCreateOwnedRouteNeverLeavesAChildOwnedDifferentlyFromItsScenario(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		user         transit.User
+		scenarioSlug string
+		wantStatus   int
+		wantOwner    *string // only checked on a 201
+	}{
+		{"an admin into the curated baseline", adminU, "ca-hsr", http.StatusUnprocessableEntity, nil},
+		{"a member into the curated baseline", memberA, "ca-hsr", http.StatusUnprocessableEntity, nil},
+		// The invariant's sole exception: no parent to agree with, so the route
+		// carries the caller's own id.
+		{"an admin standalone", adminU, "", http.StatusCreated, ptrTo(adminU.ID)},
+		{"a member into their own scenario", memberA, "a-draft", http.StatusCreated, ptrTo(ownerAID)},
+		// An admin may reach a member's scenario, but the row it leaves behind
+		// belongs to the member, not the admin.
+		{"an admin into a member's scenario", adminU, "a-draft", http.StatusCreated, ptrTo(ownerAID)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newFakeOwnedRouteStore()
+			rec := asUser(t, handler.CreateOwnedRoute(store), tc.user,
+				http.MethodPost, "/api/me/routes", ownedRouteBody("Spur", "", tc.scenarioSlug))
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status: want %d, got %d (%s)", tc.wantStatus, rec.Code, rec.Body)
+			}
+			if tc.wantStatus != http.StatusCreated {
+				if len(store.routes) != 0 {
+					t.Errorf("a route was written despite the refusal: %+v", store.routes)
+				}
+				return
+			}
+			var got transit.Route
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+				t.Fatalf("decoding response: %v", err)
+			}
+			if got.OwnerID == nil || *got.OwnerID != *tc.wantOwner {
+				t.Errorf("owner: want %q, got %v", *tc.wantOwner, got.OwnerID)
+			}
+		})
+	}
+}
+
+// The same rule on the update path, which resolves the parent scenario a second
+// time: a route cannot be moved into the curated baseline, and moving it into
+// somebody's scenario hands it that scenario's owner.
+func TestUpdateOwnedRouteCannotMoveARouteIntoTheCuratedBaseline(t *testing.T) {
+	seed := func() *fakeOwnedRouteStore {
+		store := newFakeOwnedRouteStore()
+		store.routes["bay-link"] = transit.Route{
+			ID: "00000000-0000-4002-8000-000000000001", Slug: "bay-link",
+			Name: "Bay Link", OwnerID: ptrTo(ownerAID),
+		}
+		return store
+	}
+
+	t.Run("an admin moving it into ca-hsr", func(t *testing.T) {
+		store := seed()
+		rec := asUser(t, handler.UpdateOwnedRoute(store), adminU, http.MethodPut,
+			"/api/me/routes/bay-link", ownedRouteBody("Bay Link", "", "ca-hsr"))
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("status: want 422, got %d (%s)", rec.Code, rec.Body)
+		}
+		if got := store.routes["bay-link"]; got.ScenarioID != nil {
+			t.Errorf("scenario: want it unmoved, got %v", got.ScenarioID)
+		}
+	})
+
+	t.Run("an admin moving it into the member's own scenario", func(t *testing.T) {
+		store := seed()
+		rec := asUser(t, handler.UpdateOwnedRoute(store), adminU, http.MethodPut,
+			"/api/me/routes/bay-link", ownedRouteBody("Bay Link", "", "a-draft"))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status: want 200, got %d (%s)", rec.Code, rec.Body)
+		}
+		got := store.routes["bay-link"]
+		if got.OwnerID == nil || *got.OwnerID != ownerAID {
+			t.Errorf("owner: want the scenario's owner %q, got %v", ownerAID, got.OwnerID)
+		}
+		if got.ScenarioID == nil || *got.ScenarioID != ownedScrID {
+			t.Errorf("scenario: want %q, got %v", ownedScrID, got.ScenarioID)
+		}
+	})
+}
+
 // A non-owner gets 404, not 403: the set of authored slugs is not public
 // knowledge, and a name-derived slug is guessable enough that 403 would confirm
 // it exists.

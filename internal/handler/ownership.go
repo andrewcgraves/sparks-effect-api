@@ -34,3 +34,41 @@ func mayReachScenario(ctx context.Context, sc transit.Scenario) bool {
 	user, ok := auth.UserFrom(ctx)
 	return ok && auth.CanAccess(user, sc.OwnerID)
 }
+
+// mayAuthorInScenario reports whether user may create a child row — a route, a
+// station, a service — inside sc through the owner-scoped /api/me surface.
+//
+// It is auth.CanAccess plus one refusal: a curated scenario (OwnerID == nil) is
+// never an authoring target here, admins included. CanAccess short-circuits on
+// IsAdmin, so on its own it admits an admin to the curated ca-hsr baseline, and
+// every /api/me create then stamps the row with an owner — leaving an owned
+// child under a curated parent. That breaks the ownership-uniformity invariant,
+// and because ListRoutesByScenario and ListServicesByScenario are deliberately
+// unfiltered — the invariant is what makes that safe — the row would be pulled
+// into LoadStore and published in the public compiled store.
+//
+// This forbids nothing an admin needs: authoring curated platform data is what
+// the admin endpoints are for (POST /api/admin/routes), and they deliberately
+// create unowned rows. It is the exact mirror of resolveCuratedScenarioOrFail,
+// which refuses an *owned* parent on that side.
+//
+// A standalone route (no scenario named at all) is untouched by this: it has no
+// parent to agree with, and carries its own owner — the invariant's sole stated
+// exception.
+func mayAuthorInScenario(user transit.User, sc transit.Scenario) bool {
+	return sc.OwnerID != nil && auth.CanAccess(user, sc.OwnerID)
+}
+
+// childOwnership resolves the (scenario_id, owner_id) pair a child row must
+// carry. A child inherits its parent scenario's owner rather than taking the
+// caller's — that is the uniformity invariant stated as an assignment, and it
+// is what stops an admin authoring into somebody else's scenario from leaving a
+// row whose owner differs from its parent's. With no parent the row is
+// standalone and keeps standaloneOwner: the caller on a create, the stored
+// owner on an update.
+func childOwnership(parent *transit.Scenario, standaloneOwner *string) (scenarioID, ownerID *string) {
+	if parent == nil {
+		return nil, standaloneOwner
+	}
+	return &parent.ID, parent.OwnerID
+}

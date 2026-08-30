@@ -497,10 +497,12 @@ func TestIngestedRouteRoundTrip(t *testing.T) {
 	}
 }
 
-// ListCuratedRouteSummaries backs the route picker (SPA-104): every route, in a
-// stable order, reduced to the three fields a picker needs. Scenario-attached
-// and standalone routes are both listed — a picker offers whatever exists.
-func TestListRouteSummariesReturnsEveryRouteInSlugOrder(t *testing.T) {
+// ListCuratedRouteSummaries backs the route picker (SPA-104): the curated
+// routes — those with no owner — in a stable slug order, reduced to the three
+// fields a picker needs. Scenario-attached and standalone curated routes are
+// both listed; owned drafts are not, which
+// TestListCuratedRouteSummariesExcludesOwnedRoutes in ownership_test.go pins.
+func TestListCuratedRouteSummariesReturnsCuratedRoutesInSlugOrder(t *testing.T) {
 	ctx := context.Background()
 	repo, _ := freshRepo(t)
 

@@ -294,6 +294,7 @@ auth endpoints answer `503` rather than pretending to work.
 | `GET /api/me/scenarios` | authenticated | Scenarios the caller owns |
 | `GET /api/me/services` | authenticated | Services the caller owns |
 | `POST /api/me/routes` | authenticated | Author an alignment of your own |
+| `GET /api/me/routes` | authenticated | Routes the caller owns |
 | `GET`/`PUT`/`DELETE /api/me/routes/{slug}` | authenticated | Read, edit, or remove one |
 | `POST /api/me/scenarios` | authenticated | Author a scenario of your own |
 | `GET`/`PUT`/`DELETE /api/me/scenarios/{slug}` | authenticated | Read, edit, or remove one |
