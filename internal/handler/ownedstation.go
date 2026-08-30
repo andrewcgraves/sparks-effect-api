@@ -2,8 +2,6 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -255,19 +253,7 @@ func loadOwnedStation(w http.ResponseWriter, r *http.Request, store OwnedStation
 }
 
 func decodeStationRequest(w http.ResponseWriter, r *http.Request) (stationRequest, bool) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxStationBodyBytes)
-
-	var req stationRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
-			return stationRequest{}, false
-		}
-		writeError(w, http.StatusBadRequest, "request body is not valid JSON")
-		return stationRequest{}, false
-	}
-	return req, true
+	return decodeBody[stationRequest](w, r, maxStationBodyBytes)
 }
 
 // mintStationSlug derives a slug from name, appending -2, -3, ... until it
@@ -278,18 +264,11 @@ func mintStationSlug(ctx context.Context, store OwnedStationStore, scenarioID, n
 	if base == "" {
 		return "", nil
 	}
-	for attempt := 1; attempt <= maxSlugAttempts; attempt++ {
-		candidate := base
-		if attempt > 1 {
-			candidate = fmt.Sprintf("%s-%d", base, attempt)
-		}
+	// The probe closes over scenarioID: this is the one mint site whose
+	// namespace is not global, so a name free in this scenario is minted even
+	// when another scenario already holds it.
+	return mintUniqueSlug(ctx, base, func(ctx context.Context, candidate string) (bool, error) {
 		_, taken, err := store.GetStationBySlug(ctx, scenarioID, candidate)
-		if err != nil {
-			return "", err
-		}
-		if !taken {
-			return candidate, nil
-		}
-	}
-	return "", fmt.Errorf("no free slug for %q after %d attempts", base, maxSlugAttempts)
+		return taken, err
+	})
 }

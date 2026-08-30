@@ -2,9 +2,7 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -274,16 +272,8 @@ func authorizeService(w http.ResponseWriter, r *http.Request, svc transit.UserSe
 }
 
 func decodeServiceRequest(w http.ResponseWriter, r *http.Request) (serviceRequest, bool) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxServiceBodyBytes)
-
-	var req serviceRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
-			return serviceRequest{}, false
-		}
-		writeError(w, http.StatusBadRequest, "request body is not valid JSON")
+	req, ok := decodeBody[serviceRequest](w, r, maxServiceBodyBytes)
+	if !ok {
 		return serviceRequest{}, false
 	}
 	if err := req.BoardingWait.parse(); err != nil {
@@ -389,33 +379,15 @@ func validateAndSnapService(w http.ResponseWriter, r *http.Request, store Servic
 	return true
 }
 
-// maxSlugAttempts bounds the collision-suffix search. Exhausting it means
-// something is badly wrong (or a name is absurdly popular); either way the
-// caller gets a 500 rather than an unbounded loop.
-const maxSlugAttempts = 100
-
 // mintSlug derives a URL-safe slug from name, appending -2, -3, ... until it
-// finds one no service is using.
-//
-// This is check-then-insert, so two concurrent creates of the same name can
-// both see a slug free and the loser will fail the UNIQUE constraint with a
-// 500. Acceptable at present scale; the constraint is what keeps it correct.
+// finds one no service is using. The loop, its bound, and its exhaustion error
+// live in mintUniqueSlug; what is local to a service is the namespace probed
+// and transit.Slugify's fallback for a name that slugifies to nothing.
 func mintSlug(ctx context.Context, store ServiceStore, name string) (string, error) {
-	base := transit.Slugify(name)
-	for attempt := 1; attempt <= maxSlugAttempts; attempt++ {
-		candidate := base
-		if attempt > 1 {
-			candidate = fmt.Sprintf("%s-%d", base, attempt)
-		}
+	return mintUniqueSlug(ctx, transit.Slugify(name), func(ctx context.Context, candidate string) (bool, error) {
 		_, taken, err := store.GetUserServiceBySlug(ctx, candidate)
-		if err != nil {
-			return "", err
-		}
-		if !taken {
-			return candidate, nil
-		}
-	}
-	return "", fmt.Errorf("no free slug for %q after %d attempts", base, maxSlugAttempts)
+		return taken, err
+	})
 }
 
 // writeInternalError logs the underlying cause and returns an opaque 500, so

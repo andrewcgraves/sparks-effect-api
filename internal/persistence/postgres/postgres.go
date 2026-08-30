@@ -7,6 +7,7 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
 	"embed"
 	"errors"
 	"fmt"
@@ -55,23 +56,35 @@ func Connect(ctx context.Context, databaseURL string, maxConns int) (*Repo, erro
 // Close releases the connection pool.
 func (r *Repo) Close() { r.pool.Close() }
 
-// Migrate runs all pending goose migrations against databaseURL. It opens a
-// short-lived database/sql handle via the pgx stdlib driver (goose speaks
-// database/sql) and closes it before returning; the app itself uses the pgx
-// pool. Safe to run on every boot — already-applied migrations are skipped.
-func Migrate(ctx context.Context, databaseURL string) error {
+// migrationsDir is the path of the embedded migrations within migrationsFS.
+const migrationsDir = "migrations"
+
+// openMigrationDB opens the short-lived database/sql handle goose needs (goose
+// speaks database/sql; the app itself uses the pgx pool) and points goose at
+// the embedded migrations. The caller closes the handle.
+func openMigrationDB(databaseURL string) (*sql.DB, error) {
 	cfg, err := pgx.ParseConfig(databaseURL)
 	if err != nil {
-		return fmt.Errorf("postgres: parsing DATABASE_URL for migrations: %w", err)
+		return nil, fmt.Errorf("postgres: parsing DATABASE_URL for migrations: %w", err)
 	}
-	db := stdlib.OpenDB(*cfg)
-	defer func() { _ = db.Close() }()
-
 	goose.SetBaseFS(migrationsFS)
 	if err := goose.SetDialect("postgres"); err != nil {
-		return fmt.Errorf("postgres: setting goose dialect: %w", err)
+		return nil, fmt.Errorf("postgres: setting goose dialect: %w", err)
 	}
-	if err := goose.UpContext(ctx, db, "migrations"); err != nil {
+	return stdlib.OpenDB(*cfg), nil
+}
+
+// Migrate runs all pending goose migrations against databaseURL. It opens a
+// short-lived database/sql handle and closes it before returning. Safe to run
+// on every boot — already-applied migrations are skipped.
+func Migrate(ctx context.Context, databaseURL string) error {
+	db, err := openMigrationDB(databaseURL)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = db.Close() }()
+
+	if err := goose.UpContext(ctx, db, migrationsDir); err != nil {
 		return fmt.Errorf("postgres: running migrations: %w", err)
 	}
 	return nil

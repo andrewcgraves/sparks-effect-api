@@ -2,8 +2,6 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -351,16 +349,8 @@ func loadOwnedService(w http.ResponseWriter, r *http.Request, store OwnedService
 }
 
 func decodeOwnedServiceRequest(w http.ResponseWriter, r *http.Request) (ownedServiceRequest, bool) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxOwnedServiceBodyBytes)
-
-	var req ownedServiceRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
-			return ownedServiceRequest{}, false
-		}
-		writeError(w, http.StatusBadRequest, "request body is not valid JSON")
+	req, ok := decodeBody[ownedServiceRequest](w, r, maxOwnedServiceBodyBytes)
+	if !ok {
 		return ownedServiceRequest{}, false
 	}
 	// Deferred out of UnmarshalJSON so a bad policy is a 422 about the value

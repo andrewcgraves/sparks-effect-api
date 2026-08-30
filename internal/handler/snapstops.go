@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -193,22 +192,12 @@ func chainageOrder(snapped []physics.SnappedStop) []int {
 }
 
 func decodeSnapStopsRequest(w http.ResponseWriter, r *http.Request) (snapStopsRequest, bool) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxSnapStopsBodyBytes)
-
-	var req snapStopsRequest
-	dec := json.NewDecoder(r.Body)
-	// Unknown fields are rejected rather than ignored, as in route ingestion: a
-	// misspelled coordinate key (latitude) would otherwise decode to zero and
-	// preview a stop in the Gulf of Guinea as wildly off-route, blaming the
-	// user for a typo the server could see.
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&req); err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
-			return snapStopsRequest{}, false
-		}
-		writeError(w, http.StatusBadRequest, "malformed request body: "+err.Error())
+	// Strict rather than lenient, as in route ingestion: a misspelled coordinate
+	// key (latitude) would otherwise decode to zero and preview a stop in the
+	// Gulf of Guinea as wildly off-route, blaming the user for a typo the
+	// server could see.
+	req, ok := decodeBodyStrict[snapStopsRequest](w, r, maxSnapStopsBodyBytes)
+	if !ok {
 		return snapStopsRequest{}, false
 	}
 

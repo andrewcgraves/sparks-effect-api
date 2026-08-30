@@ -2,9 +2,65 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 )
+
+// decodeBody reads a JSON request body of type T under a byte cap, writing the
+// error response itself and reporting false when it cannot. limit is the
+// caller's own cap constant — they differ deliberately per endpoint, and each
+// one's comment says why — so the cap stays at the call site and only the
+// plumbing lives here.
+//
+// A body over the cap is a 413 rather than a 400: the payload may be perfectly
+// well-formed, and telling a client its JSON is malformed when the real problem
+// is size sends it looking in the wrong place.
+func decodeBody[T any](w http.ResponseWriter, r *http.Request, limit int64) (T, bool) {
+	return decodeJSONBody[T](w, r, limit, false)
+}
+
+// decodeBodyStrict is decodeBody with DisallowUnknownFields.
+//
+// It exists for the payloads where an unrecognised key is a typo the server can
+// see and the client cannot: a misspelled physics key (cant__mm) or coordinate
+// key (latitude) would otherwise decode to a zero value and pass validation as
+// real data — tangent, level track, or a stop in the Gulf of Guinea — blaming
+// the author for something the decoder knew about. Strictness is opt-in rather
+// than the default because the lenient endpoints accept forward-compatible
+// clients that may send fields this build does not know yet.
+//
+// Its 400 carries the decoder's own message, which names the offending field;
+// that is the whole point of rejecting the key, so the prose differs from
+// decodeBody's deliberately.
+func decodeBodyStrict[T any](w http.ResponseWriter, r *http.Request, limit int64) (T, bool) {
+	return decodeJSONBody[T](w, r, limit, true)
+}
+
+func decodeJSONBody[T any](w http.ResponseWriter, r *http.Request, limit int64, strict bool) (T, bool) {
+	var zero T
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
+
+	var req T
+	dec := json.NewDecoder(r.Body)
+	if strict {
+		dec.DisallowUnknownFields()
+	}
+	if err := dec.Decode(&req); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+			return zero, false
+		}
+		if strict {
+			writeError(w, http.StatusBadRequest, "malformed request body: "+err.Error())
+		} else {
+			writeError(w, http.StatusBadRequest, "request body is not valid JSON")
+		}
+		return zero, false
+	}
+	return req, true
+}
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")

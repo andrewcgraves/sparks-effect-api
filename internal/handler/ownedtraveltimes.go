@@ -2,8 +2,6 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 
@@ -194,17 +192,5 @@ func resolveSegments(
 }
 
 func decodeTravelTimesRequest(w http.ResponseWriter, r *http.Request) (travelTimesRequest, bool) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxTravelTimesBodyBytes)
-
-	var req travelTimesRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
-			return travelTimesRequest{}, false
-		}
-		writeError(w, http.StatusBadRequest, "request body is not valid JSON")
-		return travelTimesRequest{}, false
-	}
-	return req, true
+	return decodeBody[travelTimesRequest](w, r, maxTravelTimesBodyBytes)
 }

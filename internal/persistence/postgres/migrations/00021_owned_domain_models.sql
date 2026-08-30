@@ -30,10 +30,11 @@
 -- cannot simply unrecord version 21: a bare DELETE from goose_db_version would
 -- leave this schema in place and the next Migrate would sail through as a
 -- no-op, hiding a rewind that did not rewind. So
--- rewindOwnedDomainModelsMigration in ownedmodelsmigration_test.go genuinely
--- undoes the statements below — it restores the ON DELETE SET NULL foreign
--- keys, drops the indexes and the added columns, and only then deletes the
--- version row.
+-- rewindOwnedDomainModelsMigration in ownedmodelsmigration_test.go rolls goose
+-- back to version 20, which runs the Down block at the bottom of this file.
+-- That block is therefore live test infrastructure rather than documentation:
+-- it must keep restoring the ON DELETE SET NULL foreign keys and dropping the
+-- indexes and columns added below, or the rewinding tests stop rewinding.
 --
 -- ## Fresh vs deployed databases
 --

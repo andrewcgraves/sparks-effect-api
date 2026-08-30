@@ -7,6 +7,10 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/persistence/postgres"
 )
 
+// ownedDomainModelsFloor is the version 00021 sits directly above: rolling back
+// to it is what unwinds 00021 and nothing below it.
+const ownedDomainModelsFloor = 20
+
 // rewindOwnedDomainModelsMigration unwinds 00021 and is the current tail of the
 // rewind chain that starts in snapmigration_test.go. Any migration added after
 // this one must extend the chain here, or every rewinding test in this package
@@ -17,26 +21,28 @@ import (
 // columns and indexes, DROP CONSTRAINT IF EXISTS before each FK), so a bare
 // DELETE from goose_db_version would leave the schema in place and the next
 // Migrate would sail through as a no-op — hiding a rewind that did not actually
-// rewind. The FK swap is undone too, since restoring the columns without
-// restoring ON DELETE SET NULL would leave the database in a state neither
-// migration produces.
+// rewind.
+//
+// It undoes it by running 00021's own `-- +goose Down` block rather than by
+// restating those statements in Go. A restatement is a twin: it compiles and
+// passes whatever it says, so an edit to the migration's Down block leaves it
+// silently disagreeing about what "before 00021" means, and this helper is what
+// most of the package's rewinding tests stand on.
+//
+// Down-*to* rather than a single Down step because this helper is called more
+// than once against the same database, sometimes when 00021 is already
+// unrecorded — TestPrerenderedIsochronesMigrationIsSafeToReRun deliberately
+// leaves it that way by letting a Migrate fail. goose.Down would then roll back
+// whatever the current version happened to be, which is some unrelated earlier
+// migration; DownTo compares against the fixed floor below and does nothing
+// once the database is already at or under it. That is the same no-op the old
+// hand-written `DELETE ... WHERE version_id = 21` gave, kept deliberately
+// rather than by accident.
 func rewindOwnedDomainModelsMigration(t *testing.T, url string) {
 	t.Helper()
-	exec(t, url,
-		`ALTER TABLE services DROP CONSTRAINT IF EXISTS services_owner_id_fkey`,
-		`ALTER TABLE services ADD CONSTRAINT services_owner_id_fkey
-		   FOREIGN KEY (owner_id) REFERENCES users (id) ON DELETE SET NULL`,
-		`ALTER TABLE scenarios DROP CONSTRAINT IF EXISTS scenarios_owner_id_fkey`,
-		`ALTER TABLE scenarios ADD CONSTRAINT scenarios_owner_id_fkey
-		   FOREIGN KEY (owner_id) REFERENCES users (id) ON DELETE SET NULL`,
-		`DROP INDEX IF EXISTS services_owner_id_idx`,
-		`DROP INDEX IF EXISTS scenarios_owner_id_idx`,
-		`DROP INDEX IF EXISTS stations_owner_id_idx`,
-		`DROP INDEX IF EXISTS routes_owner_id_idx`,
-		`ALTER TABLE stations DROP COLUMN IF EXISTS owner_id`,
-		`ALTER TABLE routes DROP COLUMN IF EXISTS description`,
-		`ALTER TABLE routes DROP COLUMN IF EXISTS owner_id`,
-		`DELETE FROM goose_db_version WHERE version_id = 21`)
+	if err := postgres.MigrateDownTo(context.Background(), url, ownedDomainModelsFloor); err != nil {
+		t.Fatalf("rewinding 00021: %v", err)
+	}
 }
 
 // The ownership columns are what every curated-vs-owned read filters on, so

@@ -2,9 +2,6 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
 	"net/http"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
@@ -280,23 +277,15 @@ func resolveOwnScenarioOrFail(
 // decodeRouteIngest reads and validates the GeoJSON ingestion payload shared by
 // both create paths.
 //
-// Unknown fields are rejected rather than ignored, as they are for admin
-// ingestion: a misspelled physics key (cant__mm) would otherwise decode to a
-// zero-valued segment and sail through range validation as tangent, level
-// track — silently storing physics the author never wrote.
+// It decodes strictly — decodeBodyStrict rather than decodeBody — as admin
+// ingestion does: a misspelled physics key (cant__mm) would otherwise decode to
+// a zero-valued segment and sail through range validation as tangent, level
+// track, silently storing physics the author never wrote. Every other authoring
+// endpoint here is lenient, so this is a deliberate departure rather than the
+// package default.
 func decodeRouteIngest(w http.ResponseWriter, r *http.Request) (route.Ingest, bool) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxRouteBodyBytes)
-
-	var in route.Ingest
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&in); err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
-			return route.Ingest{}, false
-		}
-		writeError(w, http.StatusBadRequest, "malformed request body: "+err.Error())
+	in, ok := decodeBodyStrict[route.Ingest](w, r, maxRouteBodyBytes)
+	if !ok {
 		return route.Ingest{}, false
 	}
 
@@ -328,18 +317,8 @@ func mintRouteSlug(ctx context.Context, store OwnedRouteStore, name string) (str
 	if base == "" {
 		return "", nil
 	}
-	for attempt := 1; attempt <= maxSlugAttempts; attempt++ {
-		candidate := base
-		if attempt > 1 {
-			candidate = fmt.Sprintf("%s-%d", base, attempt)
-		}
+	return mintUniqueSlug(ctx, base, func(ctx context.Context, candidate string) (bool, error) {
 		_, taken, err := store.GetRouteBySlug(ctx, candidate)
-		if err != nil {
-			return "", err
-		}
-		if !taken {
-			return candidate, nil
-		}
-	}
-	return "", fmt.Errorf("no free slug for %q after %d attempts", base, maxSlugAttempts)
+		return taken, err
+	})
 }

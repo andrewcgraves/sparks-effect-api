@@ -2,8 +2,6 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 
@@ -244,16 +242,8 @@ func authorizeScenario(w http.ResponseWriter, r *http.Request, sc transit.UserSc
 }
 
 func decodeScenarioRequest(w http.ResponseWriter, r *http.Request) (userScenarioRequest, bool) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxScenarioBodyBytes)
-
-	var req userScenarioRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
-			return userScenarioRequest{}, false
-		}
-		writeError(w, http.StatusBadRequest, "request body is not valid JSON")
+	req, ok := decodeBody[userScenarioRequest](w, r, maxScenarioBodyBytes)
+	if !ok {
 		return userScenarioRequest{}, false
 	}
 	if err := req.BoardingWait.parse(); err != nil {
@@ -290,25 +280,11 @@ func validateScenario(w http.ResponseWriter, r *http.Request, store ScenarioStor
 }
 
 // mintScenarioSlug derives a URL-safe slug from name, appending -2, -3, ...
-// until it finds one no scenario is using.
-//
-// This is check-then-insert, so two concurrent creates of the same name can
-// both see a slug free and the loser will fail the UNIQUE constraint with a
-// 500. Acceptable at present scale; the constraint is what keeps it correct.
+// until it finds one no scenario is using. It probes the user-scenario
+// namespace; the loop and its bound are mintUniqueSlug's.
 func mintScenarioSlug(ctx context.Context, store ScenarioStore, name string) (string, error) {
-	base := transit.Slugify(name)
-	for attempt := 1; attempt <= maxSlugAttempts; attempt++ {
-		candidate := base
-		if attempt > 1 {
-			candidate = fmt.Sprintf("%s-%d", base, attempt)
-		}
+	return mintUniqueSlug(ctx, transit.Slugify(name), func(ctx context.Context, candidate string) (bool, error) {
 		_, taken, err := store.GetUserScenarioBySlug(ctx, candidate)
-		if err != nil {
-			return "", err
-		}
-		if !taken {
-			return candidate, nil
-		}
-	}
-	return "", fmt.Errorf("no free slug for %q after %d attempts", base, maxSlugAttempts)
+		return taken, err
+	})
 }

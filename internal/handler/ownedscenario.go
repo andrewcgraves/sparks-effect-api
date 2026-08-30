@@ -2,9 +2,6 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -227,19 +224,7 @@ func loadScenarioToAuthorIn(w http.ResponseWriter, r *http.Request, store OwnedS
 }
 
 func decodeOwnedScenarioRequest(w http.ResponseWriter, r *http.Request) (ownedScenarioRequest, bool) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxOwnedScenarioBodyBytes)
-
-	var req ownedScenarioRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
-			return ownedScenarioRequest{}, false
-		}
-		writeError(w, http.StatusBadRequest, "request body is not valid JSON")
-		return ownedScenarioRequest{}, false
-	}
-	return req, true
+	return decodeBody[ownedScenarioRequest](w, r, maxOwnedScenarioBodyBytes)
 }
 
 // mintOwnedScenarioSlug derives a slug from name, appending -2, -3, ... until
@@ -261,18 +246,8 @@ func mintOwnedScenarioSlug(ctx context.Context, store OwnedScenarioStore, name s
 	if base == "" {
 		return "", nil
 	}
-	for attempt := 1; attempt <= maxSlugAttempts; attempt++ {
-		candidate := base
-		if attempt > 1 {
-			candidate = fmt.Sprintf("%s-%d", base, attempt)
-		}
+	return mintUniqueSlug(ctx, base, func(ctx context.Context, candidate string) (bool, error) {
 		_, taken, err := store.GetScenarioBySlug(ctx, candidate)
-		if err != nil {
-			return "", err
-		}
-		if !taken {
-			return candidate, nil
-		}
-	}
-	return "", fmt.Errorf("no free slug for %q after %d attempts", base, maxSlugAttempts)
+		return taken, err
+	})
 }
