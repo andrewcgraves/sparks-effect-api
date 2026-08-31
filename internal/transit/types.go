@@ -2,6 +2,8 @@ package transit
 
 import (
 	"encoding/json"
+	"slices"
+	"strings"
 	"time"
 )
 
@@ -296,26 +298,70 @@ type Job struct {
 // the domain's own vocabulary, and what the routing_jobs row stores.
 //
 // Valhalla calls the same concept "costing" and spells it pedestrian /
-// bicycle / auto. That translation belongs at the routing client's boundary, in
-// the worker; persisting both would be two columns that must agree forever.
+// bicycle / auto / multimodal. That translation belongs at the routing client's
+// boundary, in the worker; persisting both would be two columns that must agree
+// forever.
 type TravelMode string
 
 const (
 	TravelModeWalk  TravelMode = "walk"
 	TravelModeBike  TravelMode = "bike"
 	TravelModeDrive TravelMode = "drive"
+	// TravelModeTransit is walking plus scheduled local transit, which is why
+	// it is an access/egress mode and not a rival to the compiled service
+	// itself: it is how a rider gets to and from a station, not how they ride
+	// the authored line (that leg is physics-compiled here, never routed).
+	//
+	// Valhalla spells it "multimodal". Its own "transit" costing is a different
+	// thing — transit-only, stop to stop — and is useless for an access leg
+	// that starts at a house rather than a stop, so the worker must not map
+	// this mode to the identically-spelled costing (SPA-246).
+	TravelModeTransit TravelMode = "transit"
 )
 
-// Valid reports whether m is one of the three modes. It is the single
-// definition of the set, so the request validator, the queue message, and the
-// database cannot drift apart on what a mode is.
+// travelModes is every mode there is, and the single definition of the set:
+// Valid, the error messages that name the set for a client, and the test that
+// holds every mode to having an assumed speed all read it, so the request
+// validator, the queue message, and the database cannot drift apart on what a
+// mode is.
+//
+// A Postgres CHECK constraint holds the same list (migration 00021). That is
+// the one copy no compiler can check, so a mode added here needs a migration
+// with it.
+var travelModes = []TravelMode{
+	TravelModeWalk,
+	TravelModeBike,
+	TravelModeDrive,
+	TravelModeTransit,
+}
+
+// Valid reports whether m is a mode at all.
 func (m TravelMode) Valid() bool {
-	switch m {
-	case TravelModeWalk, TravelModeBike, TravelModeDrive:
-		return true
-	default:
-		return false
+	return slices.Contains(travelModes, m)
+}
+
+// TravelModes returns every mode, for a caller outside this package that has to
+// hold something to the whole set rather than to one member — the test that
+// checks the Postgres CHECK accepts everything Valid does, most of it. Without
+// it such a test writes the set out a third time, and a mode added here would
+// simply not be covered by it.
+//
+// A copy, because a caller must not be able to edit the set by editing what it
+// was handed.
+func TravelModes() []TravelMode {
+	return slices.Clone(travelModes)
+}
+
+// TravelModeList names every mode as a comma-separated string, for the error
+// messages that tell a client what it should have sent. Derived from the set
+// rather than written out, so a message cannot come to disagree with what
+// Valid accepts.
+func TravelModeList() string {
+	names := make([]string, len(travelModes))
+	for i, m := range travelModes {
+		names[i] = string(m)
 	}
+	return strings.Join(names, ", ")
 }
 
 // RoutingJob is one isochrone the API has handed to the routing worker: a

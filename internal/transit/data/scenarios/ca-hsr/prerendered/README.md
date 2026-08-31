@@ -30,7 +30,7 @@ One JSON object per file, self-describing:
 | `label` | string | Non-empty. What the page calls this isochrone. |
 | `lat`, `lng` | number | WGS84 origin the isochrone is centred on. |
 | `budget_mins` | integer | Greater than 0. |
-| `mode` | string | One of `walk`, `bike`, `drive` (`transit.TravelMode`). |
+| `mode` | string | One of `walk`, `bike`, `drive`, `transit` (`transit.TravelMode`). |
 | `result` | any JSON | **Opaque.** The isochrone payload, stored and served byte for byte. Nothing in this API parses, validates, or rewrites it — exactly like `routing_jobs.result`. Whatever the routing worker produced is what belongs here. |
 
 A malformed file — missing id, empty label, unknown mode, non-positive budget,

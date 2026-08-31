@@ -8,11 +8,12 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// rewindBoardingWaitOverrideMigration unwinds 00020 and is the current tail of
-// the rewind chain that starts in snapmigration_test.go. Goose refuses to
+// rewindBoardingWaitOverrideMigration unwinds 00020. 00021 sits above it, so
+// this is no longer the tail of the rewind chain that starts in
+// snapmigration_test.go — rewindTravelModeTransitMigration is. Goose refuses to
 // re-apply an earlier migration while a later version is still recorded, so
-// anything rewinding a migration below this one must unrecord 00020 first —
-// rewindPrerenderedIsochronesMigration does that by calling this.
+// anything rewinding a migration below this one must unrecord both, which it
+// gets by calling this.
 //
 // 00020 adds nullable columns, so unwinding it drops them as well as
 // unrecording the version. A bare DELETE from goose_db_version would leave the
@@ -20,6 +21,7 @@ import (
 // hides a rewind that did not actually rewind.
 func rewindBoardingWaitOverrideMigration(t *testing.T, url string) {
 	t.Helper()
+	rewindTravelModeTransitMigration(t, url)
 	exec(t, url,
 		`ALTER TABLE user_services DROP COLUMN IF EXISTS boarding_wait_policy, DROP COLUMN IF EXISTS boarding_wait_fixed_secs`,
 		`ALTER TABLE user_scenarios DROP COLUMN IF EXISTS boarding_wait_policy, DROP COLUMN IF EXISTS boarding_wait_fixed_secs`,
@@ -54,7 +56,13 @@ func TestBoardingWaitOverridesMigrationIsSafeToReRun(t *testing.T) {
 	// Forget that it ran while keeping the columns it added, so the second
 	// pass meets a database that already has them. ADD COLUMN IF NOT EXISTS
 	// must succeed rather than fail on "column already exists".
-	exec(t, url, `DELETE FROM goose_db_version WHERE version_id = 20`)
+	//
+	// 00021 is unrecorded too, and its constraints deliberately left in place.
+	// Not for its own sake but for this test's: goose applies only versions
+	// above the highest one recorded, so leaving 00021 recorded would make it
+	// skip 00020 silently and this re-run would prove nothing. 00021 is
+	// re-runnable over its own constraints by construction (DROP then ADD).
+	exec(t, url, `DELETE FROM goose_db_version WHERE version_id IN (20, 21)`)
 	if err := postgres.Migrate(context.Background(), url); err != nil {
 		t.Fatalf("migration re-run over columns it already added: %v", err)
 	}

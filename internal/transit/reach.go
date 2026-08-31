@@ -12,8 +12,8 @@ import (
 // A mode with no entry reports ok=false rather than a zero speed, because a
 // zero speed is a reach of zero, which would reject every origin on earth. The
 // request validator has already rejected any mode that could land here, so this
-// is the guard against a fourth mode being added to TravelMode and forgotten
-// here rather than against a caller passing rubbish.
+// is the guard against a mode being added to TravelMode and forgotten here
+// rather than against a caller passing rubbish.
 func modeSpeedKmH(m TravelMode) (float64, bool) {
 	switch m {
 	case TravelModeWalk:
@@ -22,6 +22,8 @@ func modeSpeedKmH(m TravelMode) (float64, bool) {
 		return geo.BikeSpeedKmH, true
 	case TravelModeDrive:
 		return geo.DriveSpeedKmH, true
+	case TravelModeTransit:
+		return geo.TransitSpeedKmH, true
 	default:
 		return 0, false
 	}
