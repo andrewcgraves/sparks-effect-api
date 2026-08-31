@@ -260,7 +260,7 @@ func lookupScenario(w http.ResponseWriter, r *http.Request, store PrerenderedSto
 	// scenario is simply not a place one can hang. Reported as not found rather
 	// than refused, so this endpoint cannot be used to probe which owned slugs
 	// exist.
-	if !found || sc.OwnerID != nil {
+	if !found || !isCuratedScenario(sc) {
 		writeError(w, http.StatusNotFound, "scenario not found")
 		return transit.Scenario{}, false
 	}

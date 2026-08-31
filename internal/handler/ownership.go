@@ -8,7 +8,8 @@ import (
 )
 
 // Ownership predicates shared by the handlers that reach a seeded scenario or
-// route by slug.
+// route by slug, plus the two rules that keep a child row's owner in step with
+// its parent's.
 //
 // They exist because owned and curated rows share tables. The collection reads
 // filter in SQL (Repository.ListCuratedScenarios, ListCuratedRouteSummaries),
@@ -16,6 +17,33 @@ import (
 // minting one has to see the whole namespace. That leaves the by-slug paths to
 // decide for themselves, and having them all ask the same question here is what
 // keeps a new one from quietly answering it differently.
+//
+// Three questions get asked, and they are not the same question:
+//
+//   - mayReach*  — may this request see or act on the row? Curated rows are
+//     public, so anyone the endpoint admits passes.
+//   - isCuratedScenario — is this row curated at all? Stricter than mayReach:
+//     it refuses the owner too, for the surfaces that exist only for the
+//     public baseline.
+//   - mayAuthorInScenario — may this caller add a child to it? Stricter again,
+//     and the enforcement point for the ownership-uniformity invariant.
+
+// mayReachOwnedRow is the shape mayReachScenario and mayReadRoute share: a row
+// with no owner is curated and public; an owned one belongs to its owner or an
+// admin. It takes the owner column rather than a row so the two callers can
+// pass a Scenario's and a Route's without a type parameter buying anything.
+//
+// The identity is read rather than required, because the endpoints these guard
+// are public: registering them behind RequireAuth would take the curated
+// alignments and the ca-hsr baseline away from the anonymous callers they exist
+// for.
+func mayReachOwnedRow(ctx context.Context, ownerID *string) bool {
+	if ownerID == nil {
+		return true
+	}
+	user, ok := auth.UserFrom(ctx)
+	return ok && auth.CanAccess(user, ownerID)
+}
 
 // mayReachScenario reports whether this request may act on sc.
 //
@@ -28,11 +56,37 @@ import (
 // plotting over it. Mutating one is auth.CanAccess, which is stricter: it makes
 // a curated scenario admin-only.
 func mayReachScenario(ctx context.Context, sc transit.Scenario) bool {
-	if sc.OwnerID == nil {
-		return true
-	}
-	user, ok := auth.UserFrom(ctx)
-	return ok && auth.CanAccess(user, sc.OwnerID)
+	return mayReachOwnedRow(ctx, sc.OwnerID)
+}
+
+// mayReadRoute reports whether this request may see rt. A curated route is
+// public and needs no identity; an owned one is visible only to its owner or an
+// admin.
+//
+// The list read needs no equivalent — ListCuratedRouteSummaries filters in SQL
+// — but a by-slug read would otherwise confirm a draft's existence to anyone
+// who guessed its name-derived slug, which is the leak SPA-80 and SPA-81
+// answered with 404s.
+func mayReadRoute(ctx context.Context, rt transit.Route) bool {
+	return mayReachOwnedRow(ctx, rt.OwnerID)
+}
+
+// isCuratedScenario reports whether sc is platform data rather than somebody's
+// draft. Curated is the absence of an owner: migration 00021 left every
+// pre-existing row NULL precisely so that "unowned" and "curated" would mean
+// the same thing from then on.
+//
+// This is stricter than mayReachScenario, and deliberately so. mayReachScenario
+// asks "may this caller reach it", which an owner passes for their own
+// scenario; this asks "is it curated at all", which an owner fails for their
+// own. The surfaces that need it — admin route ingestion, prerendered
+// isochrones — exist only for the public baseline, so an owned scenario is not
+// a place their content can hang, whoever is asking.
+//
+// Callers report the failure as not-found rather than forbidden, so neither
+// endpoint can be used to probe which owned slugs exist.
+func isCuratedScenario(sc transit.Scenario) bool {
+	return sc.OwnerID == nil
 }
 
 // mayAuthorInScenario reports whether user may create a child row — a route, a

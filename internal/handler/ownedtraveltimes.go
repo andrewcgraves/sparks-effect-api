@@ -11,7 +11,7 @@ import (
 // OwnedTravelTimesStore is the slice of the repository the owner-scoped
 // travel-time surface needs.
 type OwnedTravelTimesStore interface {
-	OwnedScenarioStore
+	ScenarioBySlugStore
 	UpsertTravelTimes(ctx context.Context, tt transit.TravelTimes) error
 	GetTravelTimes(ctx context.Context, scenarioSlug string) (transit.TravelTimes, bool, error)
 	ListStationsByScenario(ctx context.Context, scenarioID string) ([]transit.Station, error)

@@ -18,7 +18,7 @@ import (
 // handler.OwnedTravelTimesStore — both surfaces read the same scenario's
 // children, so one fake serves both rather than two that must agree.
 type fakeOwnedStationStore struct {
-	*fakeOwnedScenarioStore
+	*fakeScenarioLookup
 
 	stations   map[string][]transit.Station // by scenario id
 	routes     map[string][]transit.Route   // by scenario id
@@ -28,13 +28,13 @@ type fakeOwnedStationStore struct {
 }
 
 func newFakeOwnedStationStore() *fakeOwnedStationStore {
-	scenarios := newFakeOwnedScenarioStore()
+	scenarios := newFakeScenarioLookup()
 	scenarios.scenarios["a-draft"] = transit.Scenario{
 		ID: ownedScrID, Slug: "a-draft", Name: "A Draft", OwnerID: ptrTo(ownerAID),
 	}
 	return &fakeOwnedStationStore{
-		fakeOwnedScenarioStore: scenarios,
-		stations:               map[string][]transit.Station{},
+		fakeScenarioLookup: scenarios,
+		stations:           map[string][]transit.Station{},
 		routes: map[string][]transit.Route{
 			ownedScrID: {{ID: "rt-1", Slug: "a-line", OwnerID: ptrTo(ownerAID)}},
 		},

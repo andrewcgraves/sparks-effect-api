@@ -13,19 +13,42 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// fakeOwnedScenarioStore is an in-memory handler.OwnedScenarioStore.
-type fakeOwnedScenarioStore struct {
+// fakeScenarioLookup is an in-memory handler.ScenarioBySlugStore: the parent
+// lookup, and nothing else. The scenario-scoped child surfaces (stations,
+// travel times) embed this rather than the full fake below, so their fakes
+// carry only what their handlers can actually call.
+type fakeScenarioLookup struct {
 	scenarios map[string]transit.Scenario // by slug
-	curated   map[string]int              // scenario id -> curated child count
 	failWith  error
+}
+
+func newFakeScenarioLookup() *fakeScenarioLookup {
+	return &fakeScenarioLookup{
+		scenarios: map[string]transit.Scenario{
+			"ca-hsr": {ID: "00000000-0000-4001-8001-000000000001", Slug: "ca-hsr", Name: "CA HSR"},
+		},
+	}
+}
+
+func (f *fakeScenarioLookup) GetScenarioBySlug(_ context.Context, slug string) (transit.Scenario, bool, error) {
+	if f.failWith != nil {
+		return transit.Scenario{}, false, f.failWith
+	}
+	sc, ok := f.scenarios[slug]
+	return sc, ok, nil
+}
+
+// fakeOwnedScenarioStore is an in-memory handler.OwnedScenarioStore: the lookup
+// above plus the four methods that change a scenario.
+type fakeOwnedScenarioStore struct {
+	*fakeScenarioLookup
+	curated map[string]int // scenario id -> curated child count
 }
 
 func newFakeOwnedScenarioStore() *fakeOwnedScenarioStore {
 	return &fakeOwnedScenarioStore{
-		scenarios: map[string]transit.Scenario{
-			"ca-hsr": {ID: "00000000-0000-4001-8001-000000000001", Slug: "ca-hsr", Name: "CA HSR"},
-		},
-		curated: map[string]int{},
+		fakeScenarioLookup: newFakeScenarioLookup(),
+		curated:            map[string]int{},
 	}
 }
 
@@ -38,14 +61,6 @@ func (f *fakeOwnedScenarioStore) CreateScenario(_ context.Context, sc transit.Sc
 	}
 	f.scenarios[sc.Slug] = sc
 	return nil
-}
-
-func (f *fakeOwnedScenarioStore) GetScenarioBySlug(_ context.Context, slug string) (transit.Scenario, bool, error) {
-	if f.failWith != nil {
-		return transit.Scenario{}, false, f.failWith
-	}
-	sc, ok := f.scenarios[slug]
-	return sc, ok, nil
 }
 
 func (f *fakeOwnedScenarioStore) UpdateScenario(_ context.Context, sc transit.Scenario) error {

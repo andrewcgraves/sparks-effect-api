@@ -18,7 +18,7 @@ import (
 // is unique per scenario rather than globally — there is no station read here
 // that is not scenario-scoped, and no global namespace to mint against.
 type OwnedStationStore interface {
-	OwnedScenarioStore
+	ScenarioBySlugStore
 	CreateStation(ctx context.Context, st transit.Station) error
 	GetStationBySlug(ctx context.Context, scenarioID, slug string) (transit.Station, bool, error)
 	UpdateStation(ctx context.Context, st transit.Station) error

@@ -11,15 +11,25 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// OwnedScenarioStore is the slice of the repository the owner-scoped scenario
-// CRUD needs.
+// ScenarioBySlugStore is the one method a scenario-scoped child surface needs:
+// resolving the parent scenario named in its path. Stations, travel times and
+// services hang off a scenario but never mutate one, so embedding the whole of
+// OwnedScenarioStore in their stores would oblige every fake to implement four
+// scenario-mutation methods none of those handlers can reach.
 //
 // GetScenarioBySlug is unfiltered for GetRouteBySlug's reason: scenarios.slug is
 // globally unique across curated and owned rows, so minting a slug has to see
-// the whole namespace. Ownership is decided here, against the row it returns.
-type OwnedScenarioStore interface {
-	CreateScenario(ctx context.Context, sc transit.Scenario) error
+// the whole namespace. Ownership is decided against the row it returns, by
+// loadOwnedScenario for a read and loadScenarioToAuthorIn for a write.
+type ScenarioBySlugStore interface {
 	GetScenarioBySlug(ctx context.Context, slug string) (transit.Scenario, bool, error)
+}
+
+// OwnedScenarioStore is the slice of the repository the owner-scoped scenario
+// CRUD needs: resolving a scenario, plus the four methods that change one.
+type OwnedScenarioStore interface {
+	ScenarioBySlugStore
+	CreateScenario(ctx context.Context, sc transit.Scenario) error
 	UpdateScenario(ctx context.Context, sc transit.Scenario) error
 	DeleteScenario(ctx context.Context, id string) error
 	CountUnownedScenarioChildren(ctx context.Context, scenarioID string) (int, error)
@@ -183,7 +193,7 @@ func DeleteOwnedScenario(store OwnedScenarioStore) http.HandlerFunc {
 // rule, answering 404 rather than 403 for the reason loadOwnedRoute does. A
 // curated scenario lands here too — its owner is nil, so CanAccess admits only
 // admins — which is what keeps the ca-hsr baseline read-only.
-func loadOwnedScenario(w http.ResponseWriter, r *http.Request, store OwnedScenarioStore) (transit.Scenario, bool) {
+func loadOwnedScenario(w http.ResponseWriter, r *http.Request, store ScenarioBySlugStore) (transit.Scenario, bool) {
 	user, ok := auth.UserFrom(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "authentication required")
@@ -210,7 +220,7 @@ func loadOwnedScenario(w http.ResponseWriter, r *http.Request, store OwnedScenar
 //
 // It answers 404, like loadOwnedScenario, rather than distinguishing "you may
 // not author here" from "no such scenario".
-func loadScenarioToAuthorIn(w http.ResponseWriter, r *http.Request, store OwnedScenarioStore) (transit.Scenario, bool) {
+func loadScenarioToAuthorIn(w http.ResponseWriter, r *http.Request, store ScenarioBySlugStore) (transit.Scenario, bool) {
 	sc, ok := loadOwnedScenario(w, r, store)
 	if !ok {
 		return transit.Scenario{}, false

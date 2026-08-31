@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/ids"
 	"github.com/andrewcgraves/sparks-effect-api/internal/route"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
@@ -132,25 +131,6 @@ func RouteBySlug(store RouteStore) http.HandlerFunc {
 	}
 }
 
-// mayReadRoute reports whether this request may see rt. A curated route is
-// public and needs no identity; an owned one is visible only to its owner or an
-// admin.
-//
-// It reads the optional identity rather than requiring one, because the
-// endpoints it guards are public: registering them behind RequireAuth would
-// take the curated alignments away from the anonymous callers they exist for.
-// The list read needs no equivalent — ListCuratedRouteSummaries filters in SQL
-// — but a by-slug read would otherwise confirm a draft's existence to anyone
-// who guessed its name-derived slug, which is the leak SPA-80 and SPA-81
-// answered with 404s.
-func mayReadRoute(ctx context.Context, rt transit.Route) bool {
-	if rt.OwnerID == nil {
-		return true
-	}
-	user, ok := auth.UserFrom(ctx)
-	return ok && auth.CanAccess(user, rt.OwnerID)
-}
-
 // Routes returns a handler that lists routes for a picker: enough to show a
 // choice and address the one that is chosen, no more. It is the discovery half
 // of RouteBySlug — without it a client would have to already know a slug to
@@ -193,7 +173,7 @@ func resolveCuratedScenarioOrFail(w http.ResponseWriter, r *http.Request, store 
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return nil, false
 	}
-	if !found || sc.OwnerID != nil {
+	if !found || !isCuratedScenario(sc) {
 		writeError(w, http.StatusBadRequest, "unknown scenario_slug "+slug)
 		return nil, false
 	}
