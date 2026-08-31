@@ -52,6 +52,14 @@
     type: Point
     coordinates: [-120.491, 37.302]
 
+# routing_location is a provisional stand-in the routing worker centres this
+# station's isochrones on instead of `location` (SPA-258, audited in SPA-244).
+# The pin is the proposed Avenue 13 station site, which OpenStreetMap knows
+# only as farm tracks: a 10-minute auto isochrone centred on it covers
+# 0.59 km², against 81 km² at Fresno. The value below is Santa Fe Drive, the
+# mapped arterial ~360 m west at the same latitude — approximate by design,
+# not a survey point. See migration 00023 for the full reasoning, and remove
+# it once the built station's own street network is mapped.
 - id: "00000000-0000-4005-8001-000000000006"
   scenario_id: "00000000-0000-4001-8001-000000000001"
   slug: "madera"
@@ -60,6 +68,9 @@
   location:
     type: Point
     coordinates: [-119.986, 36.936]
+  routing_location:
+    type: Point
+    coordinates: [-119.99, 36.936]
 
 - id: "00000000-0000-4005-8001-000000000007"
   scenario_id: "00000000-0000-4001-8001-000000000001"
@@ -70,6 +81,10 @@
     type: Point
     coordinates: [-119.794, 36.733]
 
+# routing_location, same provisional stand-in as madera above (SPA-258). The
+# pin sits on the planned Hanford Viaduct, whose OSM neighbourhood is farm
+# tracks: 8.8 km² for a 10-minute auto isochrone. The value below is ~720 m
+# east, on the mapped road grid. See migration 00023.
 - id: "00000000-0000-4005-8001-000000000008"
   scenario_id: "00000000-0000-4001-8001-000000000001"
   slug: "kings-tulare"
@@ -78,7 +93,16 @@
   location:
     type: Point
     coordinates: [-119.592, 36.335]
+  routing_location:
+    type: Point
+    coordinates: [-119.584, 36.335]
 
+# routing_location, same provisional stand-in as madera above (SPA-258). The
+# pin snaps onto a `railway=proposed` HSR node rather than a street, giving
+# 5.5 km² for a 10-minute auto isochrone. The value below is ~220 m south, on
+# the surrounding F Street / Golden State street grid. `location` stays on the
+# EIR-cleared F Street site — the 2026 business plan's interim 7th Standard
+# Road stop is a separate `location` question. See migration 00023.
 - id: "00000000-0000-4005-8001-000000000009"
   scenario_id: "00000000-0000-4001-8001-000000000001"
   slug: "bakersfield"
@@ -87,6 +111,9 @@
   location:
     type: Point
     coordinates: [-119.022, 35.391]
+  routing_location:
+    type: Point
+    coordinates: [-119.022, 35.389]
 
 - id: "00000000-0000-4005-8001-00000000000a"
   scenario_id: "00000000-0000-4001-8001-000000000001"

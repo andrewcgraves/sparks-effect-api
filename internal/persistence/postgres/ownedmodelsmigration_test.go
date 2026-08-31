@@ -7,10 +7,13 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/persistence/postgres"
 )
 
-// rewindOwnedDomainModelsMigration unwinds 00022 and is the current tail of the
-// rewind chain that starts in snapmigration_test.go. Any migration added after
-// this one must extend the chain here, or every rewinding test in this package
-// starts failing with goose's "missing migrations before current version".
+// rewindOwnedDomainModelsMigration unwinds 00022, unwinding the migration above
+// it first the way every link in this chain does. 00023 sits above it, so the
+// tail of the rewind chain that starts in snapmigration_test.go is now
+// rewindCAHSRRoutingAnchorsMigration. Goose refuses to re-apply a migration
+// older than the highest version recorded, so anything rewinding a migration
+// below this one must unrecord both — rewindTravelModeTransitMigration does
+// that by calling this.
 //
 // It genuinely undoes the migration rather than merely unrecording it, for
 // 00020's reason: every statement in 00022 is idempotent (IF NOT EXISTS on the
@@ -22,6 +25,7 @@ import (
 // migration produces.
 func rewindOwnedDomainModelsMigration(t *testing.T, url string) {
 	t.Helper()
+	rewindCAHSRRoutingAnchorsMigration(t, url)
 	exec(t, url,
 		`ALTER TABLE services DROP CONSTRAINT IF EXISTS services_owner_id_fkey`,
 		`ALTER TABLE services ADD CONSTRAINT services_owner_id_fkey
@@ -127,7 +131,10 @@ func TestOwnedDomainModelsMigrationLeavesExistingRowsCurated(t *testing.T) {
 func TestOwnedDomainModelsMigrationIsSafeToReRun(t *testing.T) {
 	_, url := freshRepo(t)
 
-	exec(t, url, `DELETE FROM goose_db_version WHERE version_id = 22`)
+	// 00023 is unrecorded too: goose applies only versions above the highest
+	// one recorded, so leaving it would make this re-run skip 00022 and prove
+	// nothing. 00023 is re-runnable over the UPDATEs it already wrote.
+	exec(t, url, `DELETE FROM goose_db_version WHERE version_id IN (22, 23)`)
 	if err := postgres.Migrate(context.Background(), url); err != nil {
 		t.Fatalf("re-running 00022 over the schema it already created: %v", err)
 	}

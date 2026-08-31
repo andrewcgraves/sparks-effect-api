@@ -107,15 +107,16 @@ func (d RouteDependents) Any() bool {
 
 // Station is a named boarding point owned by a scenario.
 //
-// RoutingLocation is nil for every station but one today (SPA-234): it exists
-// for a station whose real, surveyed Location is not yet reachable through the
-// routing worker's Valhalla graph — a site still under construction has no
-// walkable network OSM can see yet — so a pedestrian/bike/drive egress
-// isochrone centred on Location itself is rejected outright ("Locations are in
-// unconnected regions"). Location stays the accurate place the station is
-// (what the map pin and the route geometry's terminus show); RoutingLocation,
-// when set, is only where the compiled graph node's egress isochrone is
-// centred instead — see seededNodes. Moving Location itself to whatever is
+// RoutingLocation is nil for most stations (SPA-234, SPA-258): it exists for a
+// station whose real, surveyed Location the routing worker's Valhalla graph
+// cannot usefully route from — a site still under construction has no walkable
+// network OSM can see yet, and a pin on a proposed alignment or a viaduct
+// snaps onto an edge connected to almost nothing — so an egress isochrone
+// centred on Location itself is either rejected outright ("Locations are in
+// unconnected regions") or comes back orders of magnitude too small. Location
+// stays the accurate place the station is (what the map pin and the route
+// geometry's terminus show); RoutingLocation, when set, is only where the
+// compiled graph node's egress isochrone is centred instead — see seededNodes. Moving Location itself to whatever is
 // walkable today was rejected: that point is not the station and would need
 // correcting again once the real thing opens (see migration 00015 and SPA-222,
 // which did exactly that correction the other way).

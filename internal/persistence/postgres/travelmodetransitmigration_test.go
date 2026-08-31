@@ -24,12 +24,12 @@ import (
 // statement about Go code only.
 
 // rewindTravelModeTransitMigration unwinds 00021, unwinding the migration above
-// it first the way every link in this chain does. 00022 sits above it, so the
-// tail of the rewind chain that starts in snapmigration_test.go is now
-// rewindOwnedDomainModelsMigration. Goose refuses to re-apply a migration older
-// than the highest version recorded, so anything rewinding a migration below
-// this one must unrecord both — rewindBoardingWaitOverrideMigration does that
-// by calling this.
+// it first the way every link in this chain does. 00022 and 00023 sit above it,
+// so the tail of the rewind chain that starts in snapmigration_test.go is now
+// rewindCAHSRRoutingAnchorsMigration. Goose refuses to re-apply a migration
+// older than the highest version recorded, so anything rewinding a migration
+// below this one must unrecord those — rewindBoardingWaitOverrideMigration does
+// that by calling this.
 //
 // 00021 adds constraints, so unwinding it drops them as well as unrecording the
 // version. Leaving them behind would let the next Migrate's DROP-then-ADD
@@ -253,11 +253,11 @@ func TestTravelModeCheckMigrationIsSafeToReRun(t *testing.T) {
 	seedCompileJob(t, repo, routingCompileJobID)
 
 	// Forget that it ran while keeping the constraints it added, so the second
-	// pass meets exactly the state a deployed database presents. 00022 is
-	// unrecorded with it: goose applies only versions above the highest one
-	// recorded, so leaving it would make this re-run skip 00021 and prove
-	// nothing.
-	execSQL(t, url, `DELETE FROM goose_db_version WHERE version_id IN (21, 22)`)
+	// pass meets exactly the state a deployed database presents. 00022 and
+	// 00023 are unrecorded with it: goose applies only versions above the
+	// highest one recorded, so leaving either would make this re-run skip
+	// 00021 and prove nothing.
+	execSQL(t, url, `DELETE FROM goose_db_version WHERE version_id IN (21, 22, 23)`)
 	if err := postgres.Migrate(context.Background(), url); err != nil {
 		t.Fatalf("00021 re-run over the constraints it already added: %v", err)
 	}
