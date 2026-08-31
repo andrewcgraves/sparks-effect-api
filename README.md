@@ -68,7 +68,7 @@ which this repo asserts it produces and the worker repo asserts it consumes.
   "graph": { "...compiled TransitGraph..." },
   "lat": 0.0, "lng": 0.0,
   "budget_mins": 0,
-  "mode": "walk | bike | drive"
+  "mode": "walk | bike | drive | transit"
 }
 ```
 
@@ -80,8 +80,15 @@ see. On a failed confirm the job is marked failed immediately and the caller
 gets a 502 carrying the `publish_failed` code.
 
 Travel mode is stored in the domain's own vocabulary — `walk` / `bike` /
-`drive`. "Costing" is Valhalla's word for the same concept and stays at the
-worker's client boundary.
+`drive` / `transit`. "Costing" is Valhalla's word for the same concept and stays
+at the worker's client boundary, which is also where `transit` becomes
+Valhalla's `multimodal` (SPA-246). A Postgres CHECK holds the same set
+(migration 00021), so a mode the API would refuse is not storable either.
+
+`transit` is walking plus scheduled local transit, and like the other three it
+covers only the access and egress legs — how a rider reaches a station. The ride
+along the authored line is physics-compiled here and never routed, so no mode
+applies to it.
 
 ### Capping the backlog
 

@@ -7,41 +7,41 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/persistence/postgres"
 )
 
-// ownedDomainModelsFloor is the version 00021 sits directly above: rolling back
-// to it is what unwinds 00021 and nothing below it.
-const ownedDomainModelsFloor = 20
+// ownedDomainModelsFloor is the version 00022 sits directly above: rolling back
+// to it is what unwinds 00022 and nothing below it.
+const ownedDomainModelsFloor = 21
 
-// rewindOwnedDomainModelsMigration unwinds 00021 and is the current tail of the
+// rewindOwnedDomainModelsMigration unwinds 00022 and is the current tail of the
 // rewind chain that starts in snapmigration_test.go. Any migration added after
 // this one must extend the chain here, or every rewinding test in this package
 // starts failing with goose's "missing migrations before current version".
 //
 // It genuinely undoes the migration rather than merely unrecording it, for
-// 00020's reason: every statement in 00021 is idempotent (IF NOT EXISTS on the
+// 00020's reason: every statement in 00022 is idempotent (IF NOT EXISTS on the
 // columns and indexes, DROP CONSTRAINT IF EXISTS before each FK), so a bare
 // DELETE from goose_db_version would leave the schema in place and the next
 // Migrate would sail through as a no-op — hiding a rewind that did not actually
 // rewind.
 //
-// It undoes it by running 00021's own `-- +goose Down` block rather than by
+// It undoes it by running 00022's own `-- +goose Down` block rather than by
 // restating those statements in Go. A restatement is a twin: it compiles and
 // passes whatever it says, so an edit to the migration's Down block leaves it
-// silently disagreeing about what "before 00021" means, and this helper is what
+// silently disagreeing about what "before 00022" means, and this helper is what
 // most of the package's rewinding tests stand on.
 //
 // Down-*to* rather than a single Down step because this helper is called more
-// than once against the same database, sometimes when 00021 is already
+// than once against the same database, sometimes when 00022 is already
 // unrecorded — TestPrerenderedIsochronesMigrationIsSafeToReRun deliberately
 // leaves it that way by letting a Migrate fail. goose.Down would then roll back
 // whatever the current version happened to be, which is some unrelated earlier
 // migration; DownTo compares against the fixed floor below and does nothing
 // once the database is already at or under it. That is the same no-op the old
-// hand-written `DELETE ... WHERE version_id = 21` gave, kept deliberately
+// hand-written `DELETE ... WHERE version_id = 22` gave, kept deliberately
 // rather than by accident.
 func rewindOwnedDomainModelsMigration(t *testing.T, url string) {
 	t.Helper()
 	if err := postgres.MigrateDownTo(context.Background(), url, ownedDomainModelsFloor); err != nil {
-		t.Fatalf("rewinding 00021: %v", err)
+		t.Fatalf("rewinding 00022: %v", err)
 	}
 }
 
@@ -123,7 +123,7 @@ func TestOwnedDomainModelsMigrationLeavesExistingRowsCurated(t *testing.T) {
 
 // A schema change re-applied over a database that already holds it must not
 // fail — the property every migration in this package is held to, and the
-// reason 00021 is written with IF NOT EXISTS throughout.
+// reason 00022 is written with IF NOT EXISTS throughout.
 //
 // The unrecord here is deliberately bare rather than a call to the rewind
 // helper above: that helper undoes the schema, which would make this a test
@@ -133,9 +133,9 @@ func TestOwnedDomainModelsMigrationLeavesExistingRowsCurated(t *testing.T) {
 func TestOwnedDomainModelsMigrationIsSafeToReRun(t *testing.T) {
 	_, url := freshRepo(t)
 
-	exec(t, url, `DELETE FROM goose_db_version WHERE version_id = 21`)
+	exec(t, url, `DELETE FROM goose_db_version WHERE version_id = 22`)
 	if err := postgres.Migrate(context.Background(), url); err != nil {
-		t.Fatalf("re-running 00021 over the schema it already created: %v", err)
+		t.Fatalf("re-running 00022 over the schema it already created: %v", err)
 	}
 
 	if got := scalarCount(t, url,

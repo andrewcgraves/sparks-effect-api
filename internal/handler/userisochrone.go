@@ -50,7 +50,7 @@ func validateIsochroneParams(w http.ResponseWriter, budgetMins int, mode string)
 		return false
 	}
 	if !transit.TravelMode(mode).Valid() {
-		writeError(w, http.StatusBadRequest, "invalid mode: must be walk, bike, or drive")
+		writeError(w, http.StatusBadRequest, "invalid mode: must be one of "+transit.TravelModeList())
 		return false
 	}
 	return true

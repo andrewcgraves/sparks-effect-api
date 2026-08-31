@@ -172,11 +172,11 @@ func PrerenderedIsochrone(store PrerenderedStore) http.HandlerFunc {
 // are editorial content on a public page rather than anyone's own work.
 //
 // What it validates is what it can be wrong about: a label that is not there,
-// a mode outside walk/bike/drive, a budget that is not a duration, a scenario
-// that does not exist. It validates nothing about result beyond its presence —
-// the API neither produces nor understands an isochrone payload, so any shape
-// it insisted on would be a guess about someone else's output that could only
-// go stale. Presence is checked because an entry with no payload is an entry
+// a mode outside transit.TravelMode's set, a budget that is not a duration, a
+// scenario that does not exist. It validates nothing about result beyond its
+// presence — the API neither produces nor understands an isochrone payload, so
+// any shape it insisted on would be a guess about someone else's output that
+// could only go stale. Presence is checked because an entry with no payload is an entry
 // nothing can display, and the column is NOT NULL.
 //
 // The membership snapshot is taken here, from the scenario's services as they
