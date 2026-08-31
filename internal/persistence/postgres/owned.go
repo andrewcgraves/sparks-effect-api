@@ -43,7 +43,7 @@ func (r *Repo) UpdateScenario(ctx context.Context, sc transit.Scenario) error {
 // DeleteScenario removes a scenario and, by cascade, its routes, stations,
 // services, segments, travel-time set, and curated membership rows. That is
 // safe exactly while the ownership-uniformity invariant holds, which
-// CountUnownedScenarioChildren is how a caller checks first.
+// CountCuratedScenarioChildren is how a caller checks first.
 func (r *Repo) DeleteScenario(ctx context.Context, id string) error {
 	tag, err := r.pool.Exec(ctx, `DELETE FROM scenarios WHERE id = $1`, id)
 	if err != nil {
@@ -55,11 +55,11 @@ func (r *Repo) DeleteScenario(ctx context.Context, id string) error {
 	return nil
 }
 
-// CountUnownedScenarioChildren counts curated rows living under a scenario.
+// CountCuratedScenarioChildren counts curated rows living under a scenario.
 // A non-zero answer means the uniformity invariant has been broken — an admin
 // attached curated content to an owned scenario — and the delete is refused
 // rather than cascading over rows the caller does not own.
-func (r *Repo) CountUnownedScenarioChildren(ctx context.Context, scenarioID string) (int, error) {
+func (r *Repo) CountCuratedScenarioChildren(ctx context.Context, scenarioID string) (int, error) {
 	var n int
 	err := r.pool.QueryRow(ctx,
 		`SELECT (SELECT count(*) FROM routes   WHERE scenario_id = $1 AND owner_id IS NULL)
@@ -67,7 +67,7 @@ func (r *Repo) CountUnownedScenarioChildren(ctx context.Context, scenarioID stri
 		      + (SELECT count(*) FROM services WHERE scenario_id = $1 AND owner_id IS NULL)`,
 		scenarioID).Scan(&n)
 	if err != nil {
-		return 0, wrap("CountUnownedScenarioChildren", err)
+		return 0, wrap("CountCuratedScenarioChildren", err)
 	}
 	return n, nil
 }

@@ -84,7 +84,7 @@ func (f *fakeOwnedScenarioStore) DeleteScenario(_ context.Context, id string) er
 	return fmt.Errorf("no scenario with id %q", id)
 }
 
-func (f *fakeOwnedScenarioStore) CountUnownedScenarioChildren(_ context.Context, id string) (int, error) {
+func (f *fakeOwnedScenarioStore) CountCuratedScenarioChildren(_ context.Context, id string) (int, error) {
 	if f.failWith != nil {
 		return 0, f.failWith
 	}

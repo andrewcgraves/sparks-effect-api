@@ -16,11 +16,11 @@ type Repository interface {
 	CreateScenario(ctx context.Context, sc Scenario) error
 	UpdateScenario(ctx context.Context, sc Scenario) error
 	DeleteScenario(ctx context.Context, id string) error
-	// CountUnownedScenarioChildren reports curated rows living under a scenario.
+	// CountCuratedScenarioChildren reports curated rows living under a scenario.
 	// Deleting a scenario cascades to its children, which is safe exactly while
 	// the uniformity invariant holds; a non-zero count means it does not, and
 	// the delete is refused rather than cascading over someone else's rows.
-	CountUnownedScenarioChildren(ctx context.Context, scenarioID string) (int, error)
+	CountCuratedScenarioChildren(ctx context.Context, scenarioID string) (int, error)
 	// GetScenarioByID resolves a scenario the way a compile job names its
 	// target; GetScenarioBySlug is how every request-facing path addresses one.
 	GetScenarioByID(ctx context.Context, id string) (Scenario, bool, error)

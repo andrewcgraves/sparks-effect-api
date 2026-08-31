@@ -32,7 +32,7 @@ type OwnedScenarioStore interface {
 	CreateScenario(ctx context.Context, sc transit.Scenario) error
 	UpdateScenario(ctx context.Context, sc transit.Scenario) error
 	DeleteScenario(ctx context.Context, id string) error
-	CountUnownedScenarioChildren(ctx context.Context, scenarioID string) (int, error)
+	CountCuratedScenarioChildren(ctx context.Context, scenarioID string) (int, error)
 }
 
 // maxOwnedScenarioBodyBytes caps a request body. A scenario is three short
@@ -170,7 +170,7 @@ func DeleteOwnedScenario(store OwnedScenarioStore) http.HandlerFunc {
 			return
 		}
 
-		curated, err := store.CountUnownedScenarioChildren(r.Context(), sc.ID)
+		curated, err := store.CountCuratedScenarioChildren(r.Context(), sc.ID)
 		if err != nil {
 			writeInternalError(r.Context(), w, "counting curated scenario children", err)
 			return

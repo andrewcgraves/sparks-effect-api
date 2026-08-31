@@ -117,7 +117,7 @@ func (s *stubAuthDeps) GetVehicleTypeByID(context.Context, string) (transit.Vehi
 func (s *stubAuthDeps) CreateScenario(context.Context, transit.Scenario) error { return nil }
 func (s *stubAuthDeps) UpdateScenario(context.Context, transit.Scenario) error { return nil }
 func (s *stubAuthDeps) DeleteScenario(context.Context, string) error           { return nil }
-func (s *stubAuthDeps) CountUnownedScenarioChildren(context.Context, string) (int, error) {
+func (s *stubAuthDeps) CountCuratedScenarioChildren(context.Context, string) (int, error) {
 	return 0, nil
 }
 func (s *stubAuthDeps) UpdateRoute(context.Context, transit.Route) error { return nil }

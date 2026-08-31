@@ -28,10 +28,15 @@ const maxTravelTimesBodyBytes = 4 << 20 // 4 MiB
 // the reason every other authoring payload names things by slug: a client
 // addresses stations and routes by slug everywhere else, and resolving here
 // means it can never supply an arbitrary id.
+//
+// provenance and source are deliberately absent, for the reason they are absent
+// from ownedServiceRequest: they are editorial claims about where a set of
+// numbers came from — calibrated against a published timetable, frozen from an
+// import — and a user cannot make such a claim about their own work. They stay
+// empty on an owned set, which is the honest answer for times somebody authored
+// by hand.
 type travelTimesRequest struct {
-	Provenance string                `json:"provenance"`
-	Source     string                `json:"source"`
-	Segments   []travelTimeSegmentIn `json:"segments"`
+	Segments []travelTimeSegmentIn `json:"segments"`
 }
 
 type travelTimeSegmentIn struct {
@@ -98,10 +103,12 @@ func ReplaceOwnedTravelTimes(store OwnedTravelTimesStore) http.HandlerFunc {
 			return
 		}
 
+		// Provenance and Source are left empty rather than taken from the
+		// caller: they are the editorial claim ownedServiceRequest refuses for
+		// the same reason, and an owner authoring their own run times is not in
+		// a position to make it.
 		tt := transit.TravelTimes{
 			ScenarioSlug: sc.Slug,
-			Provenance:   req.Provenance,
-			Source:       req.Source,
 			Segments:     segments,
 		}
 		if err := store.UpsertTravelTimes(r.Context(), tt); err != nil {
