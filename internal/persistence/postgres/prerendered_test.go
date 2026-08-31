@@ -38,11 +38,12 @@ func bigPayload(t *testing.T, marker string) json.RawMessage {
 	return b
 }
 
-// rewindPrerenderedIsochronesMigration unwinds 00019. 00020 sits above it, so
-// this is no longer the tail of the rewind chain that starts in
-// snapmigration_test.go — rewindBoardingWaitOverrideMigration is. Goose
-// refuses to re-apply an earlier migration while a later version is still
-// recorded, so anything rewinding 00019 must unrecord 00020 first.
+// rewindPrerenderedIsochronesMigration unwinds 00019. 00020 and 00021 sit above
+// it, so this is not the tail of the rewind chain that starts in
+// snapmigration_test.go — rewindOwnedDomainModelsMigration is. Goose refuses to
+// re-apply an earlier migration while a later version is still recorded, so
+// anything rewinding 00019 must unrecord those two first, which the link below
+// does by delegating to the next one up.
 //
 // 00019 creates a table, so unwinding it drops the table as well as unrecording
 // the version: a bare DELETE from goose_db_version would leave the table behind

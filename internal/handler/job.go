@@ -50,7 +50,10 @@ func CompileScenario(store CompileStore, boardingWait transit.BoardingWaitPolicy
 			writeInternalError(r.Context(), w, "looking up scenario", err)
 			return
 		}
-		if !found {
+		// An owned scenario is compilable, but only by the person who authored
+		// it. A stranger is told it does not exist rather than that they may
+		// not touch it, matching every other owner-scoped read.
+		if !found || !mayReachScenario(r.Context(), sc) {
 			writeError(w, http.StatusNotFound, "scenario not found")
 			return
 		}
@@ -119,7 +122,24 @@ func JobStatus(store CompileStore) http.HandlerFunc {
 // no job id to carry around. It is public, like the other scenario reads.
 func ScenarioGraph(store CompileStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		job, ok := latestSeededCompile(w, r, store, r.PathValue("slug"))
+		slug := r.PathValue("slug")
+
+		// Resolved first, purely to apply the ownership gate: the compiled
+		// graph of an owned scenario is as private as the scenario is, and
+		// without this the job read would hand it to anyone with the slug.
+		// A curated scenario passes without an identity, which is what keeps
+		// this endpoint public for the seeded data it was built for.
+		sc, found, err := store.GetScenarioBySlug(r.Context(), slug)
+		if err != nil {
+			writeInternalError(r.Context(), w, "looking up scenario", err)
+			return
+		}
+		if !found || !mayReachScenario(r.Context(), sc) {
+			writeError(w, http.StatusNotFound, "scenario not found")
+			return
+		}
+
+		job, ok := latestSeededCompile(w, r, store, slug)
 		if !ok {
 			return
 		}

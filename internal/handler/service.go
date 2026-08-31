@@ -352,7 +352,13 @@ func validateAndSnapService(w http.ResponseWriter, r *http.Request, store Servic
 		writeInternalError(r.Context(), w, "looking up route", err)
 		return false
 	}
-	if !found {
+	// CanReference, not CanAccess: a curated route is a public building block
+	// any authored service may run over, which is what curated alignments are
+	// for. What the check rules out is referencing someone else's *private*
+	// draft — reachable before ownership existed only because no route had an
+	// owner to check.
+	user, _ := auth.UserFrom(r.Context())
+	if !found || !auth.CanReference(user, rt.OwnerID) {
 		writeError(w, http.StatusUnprocessableEntity, "unknown route_slug "+routeSlug)
 		return false
 	}

@@ -90,7 +90,45 @@ func (s *stubAuthDeps) CreateRoute(context.Context, transit.Route) error { retur
 func (s *stubAuthDeps) GetRouteBySlug(context.Context, string) (transit.Route, bool, error) {
 	return transit.Route{}, false, nil
 }
-func (s *stubAuthDeps) ListRouteSummaries(context.Context) ([]transit.RouteSummary, error) {
+func (s *stubAuthDeps) CreateStation(context.Context, transit.Station) error { return nil }
+func (s *stubAuthDeps) ListStationsByScenario(context.Context, string) ([]transit.Station, error) {
+	return nil, nil
+}
+func (s *stubAuthDeps) ListRoutesByScenario(context.Context, string) ([]transit.Route, error) {
+	return nil, nil
+}
+func (s *stubAuthDeps) GetStationBySlug(context.Context, string, string) (transit.Station, bool, error) {
+	return transit.Station{}, false, nil
+}
+func (s *stubAuthDeps) UpdateStation(context.Context, transit.Station) error { return nil }
+func (s *stubAuthDeps) DeleteStation(context.Context, string) error          { return nil }
+func (s *stubAuthDeps) CountStationDependents(context.Context, string) (int, error) {
+	return 0, nil
+}
+func (s *stubAuthDeps) GetServiceByID(context.Context, string) (transit.Service, bool, error) {
+	return transit.Service{}, false, nil
+}
+func (s *stubAuthDeps) CreateService(context.Context, transit.Service) error { return nil }
+func (s *stubAuthDeps) UpdateService(context.Context, transit.Service) error { return nil }
+func (s *stubAuthDeps) DeleteService(context.Context, string) error          { return nil }
+func (s *stubAuthDeps) GetVehicleTypeByID(context.Context, string) (transit.VehicleType, bool, error) {
+	return transit.VehicleType{}, false, nil
+}
+func (s *stubAuthDeps) CreateScenario(context.Context, transit.Scenario) error { return nil }
+func (s *stubAuthDeps) UpdateScenario(context.Context, transit.Scenario) error { return nil }
+func (s *stubAuthDeps) DeleteScenario(context.Context, string) error           { return nil }
+func (s *stubAuthDeps) CountUnownedScenarioChildren(context.Context, string) (int, error) {
+	return 0, nil
+}
+func (s *stubAuthDeps) UpdateRoute(context.Context, transit.Route) error { return nil }
+func (s *stubAuthDeps) DeleteRoute(context.Context, string) error        { return nil }
+func (s *stubAuthDeps) CountRouteDependents(context.Context, string) (transit.RouteDependents, error) {
+	return transit.RouteDependents{}, nil
+}
+func (s *stubAuthDeps) ListRouteSummariesByOwner(context.Context, string) ([]transit.RouteSummary, error) {
+	return nil, nil
+}
+func (s *stubAuthDeps) ListCuratedRouteSummaries(context.Context) ([]transit.RouteSummary, error) {
 	return nil, nil
 }
 func (s *stubAuthDeps) GetScenarioBySlug(context.Context, string) (transit.Scenario, bool, error) {
@@ -99,6 +137,7 @@ func (s *stubAuthDeps) GetScenarioBySlug(context.Context, string) (transit.Scena
 func (s *stubAuthDeps) GetScenarioByID(context.Context, string) (transit.Scenario, bool, error) {
 	return transit.Scenario{}, false, nil
 }
+func (s *stubAuthDeps) UpsertTravelTimes(context.Context, transit.TravelTimes) error { return nil }
 func (s *stubAuthDeps) GetTravelTimes(context.Context, string) (transit.TravelTimes, bool, error) {
 	return transit.TravelTimes{}, false, nil
 }
@@ -123,12 +162,6 @@ func (s *stubAuthDeps) ListUserServicesByIDs(context.Context, []string) ([]trans
 	return nil, nil
 }
 func (s *stubAuthDeps) ListRoutesByIDs(context.Context, []string) ([]transit.Route, error) {
-	return nil, nil
-}
-func (s *stubAuthDeps) ListRoutesByScenario(context.Context, string) ([]transit.Route, error) {
-	return nil, nil
-}
-func (s *stubAuthDeps) ListStationsByScenario(context.Context, string) ([]transit.Station, error) {
 	return nil, nil
 }
 func (s *stubAuthDeps) ListServicesByScenario(context.Context, string) ([]transit.Service, error) {

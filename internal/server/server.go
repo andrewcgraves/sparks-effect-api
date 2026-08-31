@@ -36,6 +36,20 @@ type AuthDeps interface {
 	handler.ServiceStore
 	// ScenarioStore backs the user-owned scenario CRUD endpoints.
 	handler.ScenarioStore
+	// OwnedScenarioStore backs the owner-scoped CRUD over the seeded scenario
+	// model, whose table the curated ca-hsr baseline also lives in.
+	handler.OwnedScenarioStore
+	// OwnedStationStore and OwnedTravelTimesStore back the two surfaces that
+	// make an owned scenario compilable rather than an empty shell: its
+	// stations, and the segment run times between them.
+	handler.OwnedStationStore
+	handler.OwnedTravelTimesStore
+	// OwnedServiceStore backs the owner-scoped CRUD over the seeded service
+	// model — the operating patterns that run over an owned scenario's routes.
+	handler.OwnedServiceStore
+	// OwnedRouteStore backs the owner-scoped CRUD over the seeded route model,
+	// which shares its table with the curated alignments RouteStore reads.
+	handler.OwnedRouteStore
 	// RoutingStore backs the isochrone enqueue surface and the routing job poll.
 	handler.RoutingStore
 	// RoutingBacklogStore backs the enqueue cap that refuses isochrones once
@@ -121,9 +135,20 @@ func registerRouteRoutes(mux *http.ServeMux, deps AuthDeps) {
 		mux.HandleFunc("/api/routes/", noDatabase("route storage is unavailable"))
 		return
 	}
+	// The list filters in SQL, so it needs no identity: ListCuratedRouteSummaries
+	// never loads an owned row.
 	mux.HandleFunc("GET /api/routes", handler.Routes(deps))
-	mux.HandleFunc("GET /api/routes/{slug}", handler.RouteBySlug(deps))
-	mux.HandleFunc("POST /api/routes/{slug}/snap-stops", handler.SnapStops(deps))
+
+	// The two by-slug paths take OptionalAuth rather than nothing. They stay
+	// public — the curated alignments are what they exist to serve — but a
+	// route now has an owner, and without an identity on the context an owner
+	// could not read back their own draft here, while everyone else would be
+	// able to confirm it exists by guessing its slug. Same shape as
+	// GET /api/routing-jobs/{id}, which is public for an unowned job and
+	// owner-scoped for an owned one.
+	optional := auth.OptionalAuth(deps.GetSessionUser)
+	mux.Handle("GET /api/routes/{slug}", optional(handler.RouteBySlug(deps)))
+	mux.Handle("POST /api/routes/{slug}/snap-stops", optional(handler.SnapStops(deps)))
 }
 
 // registerCompileRoutes wires the public half of the async job model: the
@@ -151,11 +176,16 @@ func registerCompileRoutes(mux *http.ServeMux, deps AuthDeps, publisher routing.
 		mux.HandleFunc("GET /api/routing-jobs/{id}", noDatabase("routing job storage is unavailable"))
 		return
 	}
-	mux.HandleFunc("GET /api/scenarios/{slug}/graph", handler.ScenarioGraph(deps))
+	// All three are public, and all three take OptionalAuth for the same
+	// reason: a scenario now has an owner, so each has a curated half anyone
+	// may reach and an owned half only its owner may. Requiring auth would
+	// take the seeded data away from the anonymous callers these exist for;
+	// omitting it would hand an owner's compiled graph to anyone with the slug.
+	optional := auth.OptionalAuth(deps.GetSessionUser)
+	mux.Handle("GET /api/scenarios/{slug}/graph", optional(handler.ScenarioGraph(deps)))
 	mux.Handle("POST /api/isochrone",
-		requirePublisher(publisher, capBacklog(handler.Isochrone(deps, publisher, lg))))
-	mux.Handle("GET /api/routing-jobs/{id}",
-		auth.OptionalAuth(deps.GetSessionUser)(handler.RoutingJobStatus(deps)))
+		optional(requirePublisher(publisher, capBacklog(handler.Isochrone(deps, publisher, lg)))))
+	mux.Handle("GET /api/routing-jobs/{id}", optional(handler.RoutingJobStatus(deps)))
 }
 
 // registerPrerenderedRoutes wires the public half of the curated isochrone
@@ -218,7 +248,16 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 	if deps == nil {
 		for _, pattern := range []string{
 			"/api/auth/login", "/api/auth/logout", "/api/auth/me",
-			"/api/me/scenarios", "/api/me/services", "/api/admin/",
+			"/api/me/scenarios", "/api/me/services",
+			// The owner-scoped seeded-model CRUD. Each collection needs its own
+			// entry alongside its subtree: "/api/me/routes/" does not serve
+			// "/api/me/routes", it makes the mux answer that path with a 307 to
+			// the trailing-slash form — so without both, the list would redirect
+			// rather than report itself unavailable. The two entries above are
+			// exact paths and do not cover their {slug} subtrees either.
+			"/api/me/routes", "/api/me/routes/",
+			"/api/me/scenarios/", "/api/me/services/",
+			"/api/admin/",
 			"/api/scenarios/{slug}/compile", "/api/jobs/{id}",
 			"/api/services", "/api/services/",
 			"/api/user-scenarios", "/api/user-scenarios/",
@@ -245,6 +284,63 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 	// since "not found" there means something different from "not admin".
 	mux.Handle("POST /api/scenarios/{slug}/compile", authenticated(handler.CompileScenario(deps, cfg.BoardingWait)))
 	mux.Handle("GET /api/jobs/{id}", authenticated(handler.JobStatus(deps)))
+
+	// Owner-scoped CRUD over the seeded route model. Distinct from the public
+	// /api/routes reads registered in registerRouteRoutes: those serve the
+	// curated alignments anyone may pick from, while these are a caller's own
+	// drafts, so they sit behind the auth gate rather than beside them.
+	//
+	// /api/me is where the owner-scoped view of the seeded models already
+	// lives — GET /api/me/scenarios and /api/me/services predate this — so the
+	// ownership scope is in the path where a reader sees it.
+	mux.Handle("POST /api/me/routes", authenticated(handler.CreateOwnedRoute(deps)))
+	mux.Handle("GET /api/me/routes", authenticated(handler.MyRoutes(deps)))
+	mux.Handle("GET /api/me/routes/{slug}", authenticated(handler.GetOwnedRoute(deps)))
+	mux.Handle("PUT /api/me/routes/{slug}", authenticated(handler.UpdateOwnedRoute(deps)))
+	mux.Handle("DELETE /api/me/routes/{slug}", authenticated(handler.DeleteOwnedRoute(deps)))
+
+	// Owner-scoped CRUD over the seeded scenario model. The list read at
+	// GET /api/me/scenarios is registered above and predates the writes.
+	//
+	// Distinct from /api/user-scenarios, which curates a set of UserService
+	// ids: this is a scenario in the seeded sense — it holds its own routes,
+	// stations, segments, and services, and compiles through the same path the
+	// ca-hsr baseline does.
+	mux.Handle("POST /api/me/scenarios", authenticated(handler.CreateOwnedScenario(deps)))
+	mux.Handle("GET /api/me/scenarios/{slug}", authenticated(handler.GetOwnedScenario(deps)))
+	mux.Handle("PUT /api/me/scenarios/{slug}", authenticated(handler.UpdateOwnedScenario(deps)))
+	mux.Handle("DELETE /api/me/scenarios/{slug}", authenticated(handler.DeleteOwnedScenario(deps)))
+
+	// A scenario's stations, and the segment run times between them. Together
+	// with its routes and services these are what make an owned scenario
+	// compilable — without stations there is nothing for a service to stop at,
+	// and without segments the compiler has no path to place those stops on.
+	//
+	// Stations are addressed by (scenario, slug) because stations.slug is
+	// unique per scenario rather than globally.
+	mux.Handle("GET /api/me/scenarios/{slug}/stations", authenticated(handler.ListOwnedStations(deps)))
+	mux.Handle("POST /api/me/scenarios/{slug}/stations", authenticated(handler.CreateOwnedStation(deps)))
+	mux.Handle("PUT /api/me/scenarios/{slug}/stations/{stationSlug}", authenticated(handler.UpdateOwnedStation(deps)))
+	mux.Handle("DELETE /api/me/scenarios/{slug}/stations/{stationSlug}", authenticated(handler.DeleteOwnedStation(deps)))
+
+	// Travel times are written as a whole set rather than per segment: a
+	// segment has no identity a client can address, and the set is meaningful
+	// only entire — the compiler walks it as one graph.
+	mux.Handle("GET /api/me/scenarios/{slug}/travel-times", authenticated(handler.GetOwnedTravelTimes(deps)))
+	mux.Handle("PUT /api/me/scenarios/{slug}/travel-times", authenticated(handler.ReplaceOwnedTravelTimes(deps)))
+
+	// Owner-scoped CRUD over the seeded service model. Addressed by id, not
+	// slug: the services table has no slug column, which removes slug minting
+	// from this model entirely.
+	//
+	// Distinct from /api/services, which is the self-contained UserService with
+	// its own inline vehicle and embedded stops. These are seeded services:
+	// they reference a scenario's stations and the shared vehicle-type catalog,
+	// and compile through the same path the ca-hsr baseline does.
+	mux.Handle("POST /api/me/services", authenticated(handler.CreateOwnedService(deps, cfg.BoardingWait)))
+	mux.Handle("GET /api/me/services/{id}", authenticated(handler.GetOwnedService(deps, cfg.BoardingWait)))
+	mux.Handle("PUT /api/me/services/{id}", authenticated(handler.UpdateOwnedService(deps, cfg.BoardingWait)))
+	mux.Handle("DELETE /api/me/services/{id}", authenticated(handler.DeleteOwnedService(deps)))
 
 	// User-authored services: owner-scoped CRUD. Reads are owner-scoped too —
 	// unlike the curated scenario data these are a user's own drafts, so they

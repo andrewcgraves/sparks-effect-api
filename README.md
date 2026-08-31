@@ -300,8 +300,52 @@ auth endpoints answer `503` rather than pretending to work.
 | `GET /api/auth/me` | authenticated | The caller's identity and admin flag |
 | `GET /api/me/scenarios` | authenticated | Scenarios the caller owns |
 | `GET /api/me/services` | authenticated | Services the caller owns |
+| `POST /api/me/routes` | authenticated | Author an alignment of your own |
+| `GET`/`PUT`/`DELETE /api/me/routes/{slug}` | authenticated | Read, edit, or remove one |
+| `POST /api/me/scenarios` | authenticated | Author a scenario of your own |
+| `GET`/`PUT`/`DELETE /api/me/scenarios/{slug}` | authenticated | Read, edit, or remove one |
+| `GET`/`POST /api/me/scenarios/{slug}/stations` | authenticated | Its stations |
+| `PUT`/`DELETE /api/me/scenarios/{slug}/stations/{stationSlug}` | authenticated | Edit or remove one |
+| `GET`/`PUT /api/me/scenarios/{slug}/travel-times` | authenticated | Its segment run times, read and replaced whole |
+| `POST /api/me/services` | authenticated | Author a service inside a scenario you own |
+| `GET`/`PUT`/`DELETE /api/me/services/{id}` | authenticated | Read, edit, or remove one |
 | `POST /api/admin/users` | admin | Provision an account |
 | `POST /api/scenarios/{slug}/prerendered-isochrones` | admin | Curate a ready-to-display isochrone for a scenario |
+
+### Owning the seeded models
+
+Scenarios, routes, stations, and services all carry a nullable `owner_id`. No
+owner means **curated**: the seeded ca-hsr baseline and the admin-ingested
+alignments, served by the public reads and writable only by an admin. An owner
+means someone authored it, and it is theirs.
+
+Authoring works through `/api/me`, and an owned scenario is a real one — give it
+routes, stations, and segment run times and it compiles through the same path
+the baseline does, via `POST /api/scenarios/{slug}/compile`. It just never
+appears on a public surface.
+
+One invariant holds that together: **a scenario and all of its children share
+one owner.** A curated scenario has curated children; an owned scenario's
+routes, stations, services, and segments belong to the same person. The sole
+exception is a standalone route (no scenario), which carries its own owner. The
+create and update handlers enforce it by refusing to attach a child to a
+scenario the caller does not own.
+
+That invariant is why containment is cheap. Only two reads filter on ownership —
+`ListCuratedScenarios` and `ListCuratedRouteSummaries`, named for what they
+return so the contract is visible at the call site. Everything scenario-scoped
+stays unfiltered, because scoping to a scenario has already scoped to its owner.
+`LoadStore` and `CompileSeededIfNeeded` read the curated list and nothing else,
+so no owned row is ever compiled into the public store or served by
+`GET /api/scenarios`.
+
+By-slug reads cannot filter — slugs are globally unique across curated and owned
+rows, so minting one has to see the whole namespace — so those paths check
+ownership themselves and the public ones (`GET /api/routes/{slug}`,
+`GET /api/scenarios/{slug}/graph`, `POST /api/isochrone`) sit behind
+`auth.OptionalAuth`: still public for the curated data they exist for, while an
+owner reaches their own draft and everyone else gets a 404 rather than
+confirmation that the slug exists.
 
 The existing `GET /api/scenarios/...` reads stay public — they serve curated
 data and are unauthenticated by design. That includes the two prerendered
@@ -334,6 +378,11 @@ Two rules, both enforced server-side:
   curated seed data) are admin-only. Owner-scoped reads resolve ownership in
   SQL, so rows the caller does not own are never loaded — and scoping always
   comes from the token's identity, never from a client-supplied parameter.
+- **Referencing** — `auth.CanReference` is its counterpart, and the two answer
+  differently for the same unowned row. A curated alignment is a public building
+  block anyone may point a service at, but admin-only to *mutate*. So
+  referencing a route uses `CanReference`; authoring into a scenario uses
+  `CanAccess`, because adding to a scenario is changing it.
 
 ### Database integration tests
 

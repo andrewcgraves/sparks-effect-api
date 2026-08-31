@@ -23,11 +23,13 @@ import (
 // apart"; until this migration the database enforced nothing, so that was a
 // statement about Go code only.
 
-// rewindTravelModeTransitMigration unwinds 00021 and is the current tail of the
-// rewind chain that starts in snapmigration_test.go. Goose refuses to re-apply
-// a migration older than the highest version recorded, so anything rewinding a
-// migration below this one must unrecord 00021 first —
-// rewindBoardingWaitOverrideMigration does that by calling this.
+// rewindTravelModeTransitMigration unwinds 00021, unwinding the migration above
+// it first the way every link in this chain does. 00022 sits above it, so the
+// tail of the rewind chain that starts in snapmigration_test.go is now
+// rewindOwnedDomainModelsMigration. Goose refuses to re-apply a migration older
+// than the highest version recorded, so anything rewinding a migration below
+// this one must unrecord both — rewindBoardingWaitOverrideMigration does that
+// by calling this.
 //
 // 00021 adds constraints, so unwinding it drops them as well as unrecording the
 // version. Leaving them behind would let the next Migrate's DROP-then-ADD
@@ -38,6 +40,7 @@ import (
 // a rewind helper must not depend on the order it is reached in.
 func rewindTravelModeTransitMigration(t *testing.T, url string) {
 	t.Helper()
+	rewindOwnedDomainModelsMigration(t, url)
 	exec(t, url,
 		`ALTER TABLE IF EXISTS routing_jobs
 		   DROP CONSTRAINT IF EXISTS routing_jobs_mode_valid`,
@@ -250,8 +253,11 @@ func TestTravelModeCheckMigrationIsSafeToReRun(t *testing.T) {
 	seedCompileJob(t, repo, routingCompileJobID)
 
 	// Forget that it ran while keeping the constraints it added, so the second
-	// pass meets exactly the state a deployed database presents.
-	execSQL(t, url, `DELETE FROM goose_db_version WHERE version_id = 21`)
+	// pass meets exactly the state a deployed database presents. 00022 is
+	// unrecorded with it: goose applies only versions above the highest one
+	// recorded, so leaving it would make this re-run skip 00021 and prove
+	// nothing.
+	execSQL(t, url, `DELETE FROM goose_db_version WHERE version_id IN (21, 22)`)
 	if err := postgres.Migrate(context.Background(), url); err != nil {
 		t.Fatalf("00021 re-run over the constraints it already added: %v", err)
 	}

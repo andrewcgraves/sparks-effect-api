@@ -20,7 +20,7 @@ import (
 // which is the only way the idempotency and skip behaviour below get exercised
 // at all. *postgres.Repo satisfies it.
 type PrerenderedSeedStore interface {
-	ListScenarios(ctx context.Context) ([]Scenario, error)
+	ListCuratedScenarios(ctx context.Context) ([]Scenario, error)
 	ListServiceMembershipByScenario(ctx context.Context, scenarioID string) ([]ServiceMembership, error)
 	ListPrerenderedIsochronesByScenario(ctx context.Context, scenarioSlug string) ([]PrerenderedIsochrone, error)
 	CreatePrerenderedIsochrone(ctx context.Context, p *PrerenderedIsochrone) error
@@ -81,7 +81,7 @@ type prerenderedSeedFile struct {
 // — this is repo-authored data, so a bad file is a mistake to surface loudly
 // rather than a condition to tolerate.
 func SeedPrerenderedIsochrones(ctx context.Context, fsys fs.FS, store PrerenderedSeedStore) error {
-	scenarios, err := store.ListScenarios(ctx)
+	scenarios, err := store.ListCuratedScenarios(ctx)
 	if err != nil {
 		return fmt.Errorf("transit: listing scenarios to seed prerendered isochrones: %w", err)
 	}

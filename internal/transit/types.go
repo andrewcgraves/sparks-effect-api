@@ -51,10 +51,17 @@ type RouteSegment struct {
 // authored for, but a route ingested through the admin endpoint is a standalone
 // alignment addressed by its slug, so it has no scenario until one adopts it.
 type Route struct {
-	ID            string        `yaml:"id"                     json:"id"`
-	ScenarioID    *string       `yaml:"scenario_id,omitempty"  json:"scenario_id,omitempty"`
+	ID         string  `yaml:"id"                     json:"id"`
+	ScenarioID *string `yaml:"scenario_id,omitempty"  json:"scenario_id,omitempty"`
+	// OwnerID is nil for a curated route — the seeded alignments and the
+	// admin-ingested ones alike. A route a user authored carries their id, and
+	// is reachable only by them (see auth.CanAccess). Both fields are omitted
+	// from JSON when empty, so a curated route reads back exactly as it did
+	// before ownership existed.
+	OwnerID       *string       `yaml:"owner_id,omitempty"     json:"owner_id,omitempty"`
 	Slug          string        `yaml:"slug"                   json:"slug"`
 	Name          string        `yaml:"name"                   json:"name"`
+	Description   string        `yaml:"description,omitempty"  json:"description,omitempty"`
 	Mode          string        `yaml:"mode"                   json:"mode"`
 	Geometry      GeoLineString `yaml:"geometry"               json:"geometry"`
 	Bidirectional bool          `yaml:"bidirectional"          json:"bidirectional"`
@@ -72,7 +79,30 @@ type Route struct {
 type RouteSummary struct {
 	Slug string `json:"slug"`
 	Name string `json:"name"`
-	Mode string `json:"mode"`
+	// Description is omitted when empty, which every curated route's is: the
+	// field exists so an owner's own route list reads as more than a slug.
+	Description string `json:"description,omitempty"`
+	Mode        string `json:"mode"`
+}
+
+// RouteDependents counts the rows that reference a route, so a delete can be
+// refused before it fires a cascade.
+//
+// The three FKs disagree about what should happen: services.route_id is
+// RESTRICT, user_services.route_id is ON DELETE CASCADE (00005), and
+// segments.route_id is ON DELETE CASCADE (00011). A raw delete therefore either
+// errors opaquely or silently destroys a user's saved services. Counting first
+// lets the API answer 409 and makes the destructive cascade unreachable through
+// it.
+type RouteDependents struct {
+	Services     int `json:"services"`
+	UserServices int `json:"user_services"`
+	Segments     int `json:"segments"`
+}
+
+// Any reports whether anything references the route at all.
+func (d RouteDependents) Any() bool {
+	return d.Services > 0 || d.UserServices > 0 || d.Segments > 0
 }
 
 // Station is a named boarding point owned by a scenario.
@@ -90,8 +120,12 @@ type RouteSummary struct {
 // correcting again once the real thing opens (see migration 00015 and SPA-222,
 // which did exactly that correction the other way).
 type Station struct {
-	ID              string    `yaml:"id"              json:"id"`
-	ScenarioID      string    `yaml:"scenario_id"     json:"scenario_id"`
+	ID         string `yaml:"id"              json:"id"`
+	ScenarioID string `yaml:"scenario_id"     json:"scenario_id"`
+	// OwnerID mirrors Scenario.OwnerID: a station belongs to its scenario, so
+	// under the ownership-uniformity invariant the two always agree. It is
+	// stored rather than derived so an owner-scoped read never has to join.
+	OwnerID         *string   `yaml:"owner_id,omitempty" json:"owner_id,omitempty"`
 	Slug            string    `yaml:"slug"            json:"slug"`
 	Name            string    `yaml:"name"            json:"name"`
 	Location        GeoPoint  `yaml:"location"        json:"location"`

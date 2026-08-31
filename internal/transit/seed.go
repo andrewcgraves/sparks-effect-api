@@ -11,7 +11,7 @@ import (
 // the first run against an empty database populates it; subsequent runs are
 // no-ops. This is the "seed lands on first migration" path.
 func SeedIfEmpty(ctx context.Context, repo Repository) (bool, error) {
-	existing, err := repo.ListScenarios(ctx)
+	existing, err := repo.ListCuratedScenarios(ctx)
 	if err != nil {
 		return false, fmt.Errorf("transit: checking for existing scenarios: %w", err)
 	}

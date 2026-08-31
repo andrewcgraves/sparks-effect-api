@@ -17,7 +17,6 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
 
-	"github.com/andrewcgraves/sparks-effect-api/internal/ids"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
@@ -119,13 +118,26 @@ func (r *Repo) GetScenarioBySlug(ctx context.Context, slug string) (transit.Scen
 	return sc, true, nil
 }
 
-func (r *Repo) ListScenarios(ctx context.Context) ([]transit.Scenario, error) {
+// ListCuratedScenarios returns the platform's own scenarios — those with no
+// owner — and deliberately not the ones users have authored.
+//
+// The filter is the containment boundary for owned content. This read feeds
+// LoadStore, which compiles every scenario it returns into the public in-memory
+// store at boot, and CompileSeededIfNeeded, which recompiles them on drift. An
+// owned scenario reaching either would be published to the unauthenticated
+// /api/scenarios reads, and a malformed one would abort the boot; an owned
+// scenario compiles on explicit request instead (POST /api/scenarios/{slug}/compile).
+//
+// It is named for what it returns rather than left as ListScenarios so the
+// contract is legible at the call site: a caller that genuinely wants every row
+// has to say so, and there is no unfiltered variant to reach by accident.
+func (r *Repo) ListCuratedScenarios(ctx context.Context) ([]transit.Scenario, error) {
 	rows, err := r.pool.Query(ctx,
-		`SELECT `+scenarioColumns+` FROM scenarios ORDER BY slug`)
+		`SELECT `+scenarioColumns+` FROM scenarios WHERE owner_id IS NULL ORDER BY slug`)
 	if err != nil {
-		return nil, wrap("ListScenarios", err)
+		return nil, wrap("ListCuratedScenarios", err)
 	}
-	return scanScenarios(rows, "ListScenarios")
+	return scanScenarios(rows, "ListCuratedScenarios")
 }
 
 // ListScenariosByOwner backs "my scenarios". As with services, ownership is
@@ -157,7 +169,8 @@ func scanScenarios(rows pgx.Rows, op string) ([]transit.Scenario, error) {
 
 // --- Routes ---
 
-const routeColumns = `id, scenario_id, slug, name, mode, geometry, bidirectional, segments`
+const routeColumns = `id, scenario_id, owner_id, slug, name, description, mode,
+	geometry, bidirectional, segments`
 
 func (r *Repo) CreateRoute(ctx context.Context, rt transit.Route) error {
 	// segments is NOT NULL, so a route with no authored physics stores an empty
@@ -167,9 +180,12 @@ func (r *Repo) CreateRoute(ctx context.Context, rt transit.Route) error {
 		segments = []transit.RouteSegment{}
 	}
 	_, err := r.pool.Exec(ctx,
-		`INSERT INTO routes (id, scenario_id, slug, name, mode, geometry, bidirectional, segments)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		rt.ID, rt.ScenarioID, rt.Slug, rt.Name, rt.Mode, rt.Geometry, rt.Bidirectional, segments)
+		`INSERT INTO routes
+		   (id, scenario_id, owner_id, slug, name, description, mode,
+		    geometry, bidirectional, segments)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+		rt.ID, rt.ScenarioID, rt.OwnerID, rt.Slug, rt.Name, rt.Description, rt.Mode,
+		rt.Geometry, rt.Bidirectional, segments)
 	return wrap("CreateRoute", err)
 }
 
@@ -189,26 +205,50 @@ func (r *Repo) GetRouteBySlug(ctx context.Context, slug string) (transit.Route, 
 	return rt, true, nil
 }
 
-// ListRouteSummaries returns every route reduced to the fields needed to choose
-// one. The projection is done in SQL rather than after the fact: geometry and
+// ListCuratedRouteSummaries returns the unowned routes — seeded alignments and
+// admin-ingested ones — reduced to the fields needed to choose one. This is the
+// public picker at GET /api/routes, so an owner's draft alignment is
+// deliberately absent; they reach their own through ListRouteSummariesByOwner.
+//
+// The projection is done in SQL rather than after the fact: geometry and
 // segments are the bulk of a route row and no caller of this list wants them.
 // Ordered by slug so the list a client renders is stable between calls.
-func (r *Repo) ListRouteSummaries(ctx context.Context) ([]transit.RouteSummary, error) {
-	rows, err := r.pool.Query(ctx, `SELECT slug, name, mode FROM routes ORDER BY slug`)
+func (r *Repo) ListCuratedRouteSummaries(ctx context.Context) ([]transit.RouteSummary, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT `+routeSummaryColumns+` FROM routes WHERE owner_id IS NULL ORDER BY slug`)
 	if err != nil {
-		return nil, wrap("ListRouteSummaries", err)
+		return nil, wrap("ListCuratedRouteSummaries", err)
 	}
+	return scanRouteSummaries(rows, "ListCuratedRouteSummaries")
+}
+
+// ListRouteSummariesByOwner is the complement: the caller's own alignments,
+// standalone and scenario-bound alike. Ownership is a WHERE clause rather than
+// a post-query filter, so a route the caller does not own never leaves the
+// database.
+func (r *Repo) ListRouteSummariesByOwner(ctx context.Context, ownerID string) ([]transit.RouteSummary, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT `+routeSummaryColumns+` FROM routes WHERE owner_id = $1 ORDER BY slug`, ownerID)
+	if err != nil {
+		return nil, wrap("ListRouteSummariesByOwner", err)
+	}
+	return scanRouteSummaries(rows, "ListRouteSummariesByOwner")
+}
+
+const routeSummaryColumns = `slug, name, description, mode`
+
+func scanRouteSummaries(rows pgx.Rows, op string) ([]transit.RouteSummary, error) {
 	defer rows.Close()
 
 	var out []transit.RouteSummary
 	for rows.Next() {
 		var rs transit.RouteSummary
-		if err := rows.Scan(&rs.Slug, &rs.Name, &rs.Mode); err != nil {
-			return nil, wrap("ListRouteSummaries scan", err)
+		if err := rows.Scan(&rs.Slug, &rs.Name, &rs.Description, &rs.Mode); err != nil {
+			return nil, wrap(op+" scan", err)
 		}
 		out = append(out, rs)
 	}
-	return out, wrap("ListRouteSummaries rows", rows.Err())
+	return out, wrap(op+" rows", rows.Err())
 }
 
 func (r *Repo) ListRoutesByScenario(ctx context.Context, scenarioID string) ([]transit.Route, error) {
@@ -264,39 +304,51 @@ func (r *Repo) ListRoutesByIDs(ctx context.Context, ids []string) ([]transit.Rou
 // single-row and multi-row readers share one column order.
 func scanRoute(row pgx.Row) (transit.Route, error) {
 	var rt transit.Route
-	err := row.Scan(&rt.ID, &rt.ScenarioID, &rt.Slug, &rt.Name, &rt.Mode,
-		&rt.Geometry, &rt.Bidirectional, &rt.Segments)
+	err := row.Scan(&rt.ID, &rt.ScenarioID, &rt.OwnerID, &rt.Slug, &rt.Name,
+		&rt.Description, &rt.Mode, &rt.Geometry, &rt.Bidirectional, &rt.Segments)
 	return rt, err
 }
 
 // --- Stations ---
 
+const stationColumns = `id, scenario_id, owner_id, slug, name, location,
+	routing_location, platform_height`
+
 func (r *Repo) CreateStation(ctx context.Context, st transit.Station) error {
 	_, err := r.pool.Exec(ctx,
-		`INSERT INTO stations (id, scenario_id, slug, name, location, routing_location, platform_height)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		st.ID, st.ScenarioID, st.Slug, st.Name, st.Location, st.RoutingLocation, st.PlatformHeight)
+		`INSERT INTO stations
+		   (id, scenario_id, owner_id, slug, name, location, routing_location, platform_height)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		st.ID, st.ScenarioID, st.OwnerID, st.Slug, st.Name, st.Location,
+		st.RoutingLocation, st.PlatformHeight)
 	return wrap("CreateStation", err)
 }
 
+// ListStationsByScenario is deliberately not filtered by owner: under the
+// ownership-uniformity invariant a scenario's stations always share its owner,
+// so scoping to the scenario has already scoped to the owner.
 func (r *Repo) ListStationsByScenario(ctx context.Context, scenarioID string) ([]transit.Station, error) {
 	rows, err := r.pool.Query(ctx,
-		`SELECT id, scenario_id, slug, name, location, routing_location, platform_height
-		 FROM stations WHERE scenario_id = $1 ORDER BY slug`, scenarioID)
+		`SELECT `+stationColumns+` FROM stations WHERE scenario_id = $1 ORDER BY slug`, scenarioID)
 	if err != nil {
 		return nil, wrap("ListStationsByScenario", err)
 	}
+	return scanStations(rows, "ListStationsByScenario")
+}
+
+func scanStations(rows pgx.Rows, op string) ([]transit.Station, error) {
 	defer rows.Close()
 
 	var out []transit.Station
 	for rows.Next() {
 		var st transit.Station
-		if err := rows.Scan(&st.ID, &st.ScenarioID, &st.Slug, &st.Name, &st.Location, &st.RoutingLocation, &st.PlatformHeight); err != nil {
-			return nil, wrap("ListStationsByScenario scan", err)
+		if err := rows.Scan(&st.ID, &st.ScenarioID, &st.OwnerID, &st.Slug, &st.Name,
+			&st.Location, &st.RoutingLocation, &st.PlatformHeight); err != nil {
+			return nil, wrap(op+" scan", err)
 		}
 		out = append(out, st)
 	}
-	return out, wrap("ListStationsByScenario rows", rows.Err())
+	return out, wrap(op+" rows", rows.Err())
 }
 
 // --- Vehicle types ---
@@ -358,29 +410,8 @@ func (r *Repo) CreateService(ctx context.Context, svc transit.Service) error {
 		return wrap("CreateService", err)
 	}
 
-	for _, stop := range svc.Stops {
-		if _, err := tx.Exec(ctx,
-			`INSERT INTO service_stops (service_id, station_id, sequence, dwell_s)
-			 VALUES ($1, $2, $3, $4)`,
-			svc.ID, stop.StationID, stop.Sequence, stop.DwellS); err != nil {
-			return wrap("CreateService stops", err)
-		}
-	}
-
-	for _, fw := range svc.FrequencyWindows {
-		// The row PK is persistence identity, not domain data: nothing
-		// references a frequency window by id, so it is minted here rather
-		// than carried on the type.
-		fwID, err := ids.NewUUID()
-		if err != nil {
-			return wrap("CreateService frequency window id", err)
-		}
-		if _, err := tx.Exec(ctx,
-			`INSERT INTO frequency_windows (id, service_id, start_time, end_time, headway_s)
-			 VALUES ($1, $2, $3, $4, $5)`,
-			fwID, svc.ID, fw.StartTime, fw.EndTime, fw.HeadwayS); err != nil {
-			return wrap("CreateService frequency windows", err)
-		}
+	if err := insertServiceChildren(ctx, tx, svc); err != nil {
+		return err
 	}
 
 	return wrap("CreateService commit", tx.Commit(ctx))

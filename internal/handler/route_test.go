@@ -58,7 +58,7 @@ func (f *fakeRouteStore) GetScenarioBySlug(_ context.Context, slug string) (tran
 	return sc, ok, nil
 }
 
-func (f *fakeRouteStore) ListRouteSummaries(_ context.Context) ([]transit.RouteSummary, error) {
+func (f *fakeRouteStore) ListCuratedRouteSummaries(_ context.Context) ([]transit.RouteSummary, error) {
 	if f.listErr != nil {
 		return nil, f.listErr
 	}

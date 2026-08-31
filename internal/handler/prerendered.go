@@ -255,7 +255,12 @@ func lookupScenario(w http.ResponseWriter, r *http.Request, store PrerenderedSto
 		writeInternalError(r.Context(), w, "looking up scenario", err)
 		return transit.Scenario{}, false
 	}
-	if !found {
+	// Curated scenarios only. A prerendered isochrone is editorial content on a
+	// public page — authored by an admin, served to anyone — so an owned
+	// scenario is simply not a place one can hang. Reported as not found rather
+	// than refused, so this endpoint cannot be used to probe which owned slugs
+	// exist.
+	if !found || sc.OwnerID != nil {
 		writeError(w, http.StatusNotFound, "scenario not found")
 		return transit.Scenario{}, false
 	}

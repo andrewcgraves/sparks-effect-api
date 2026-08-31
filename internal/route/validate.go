@@ -64,6 +64,10 @@ type Segment struct {
 // Properties carries the non-geometric half of the ingestion payload.
 type Properties struct {
 	Name string `json:"name"`
+	// Description is free prose about the alignment. It is optional and
+	// unvalidated beyond the length cap: unlike the physics fields, there is no
+	// wrong value for it, only a missing one.
+	Description string `json:"description"`
 	// Slug is optional; when empty the handler derives one from Name via
 	// Slugify. When present it must already be in slug form.
 	Slug string `json:"slug"`

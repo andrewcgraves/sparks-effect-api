@@ -17,11 +17,21 @@ import "github.com/andrewcgraves/sparks-effect-api/internal/transit"
 //
 // SPA-80 (UserService) and SPA-81 (UserScenario) both resolved the risk this
 // comment used to warn about — a user-authored row leaking into the public
-// compiled store — the same way: by keeping user-authored content in its own
-// type and table, entirely outside the seeded Scenario/Service pair that
-// GET /api/scenarios compiles and serves. Nothing user-owned ever reaches
-// LoadStore, so the compiled store and its public reads are unaffected by
-// either feature.
+// compiled store — by keeping user-authored content in its own type and table,
+// entirely outside the seeded Scenario/Service pair that GET /api/scenarios
+// compiles and serves.
+//
+// Ownership on the seeded models themselves cannot buy safety that cheaply,
+// since owned and curated rows now share tables. Two things hold the line
+// instead. First, the ownership-uniformity invariant: a scenario and all of its
+// children share one owner, so scoping a read to a scenario has already scoped
+// it to that scenario's owner. Second, Repository.ListCuratedScenarios and
+// ListCuratedRouteSummaries filter on owner_id IS NULL — the boot compile
+// (LoadStore, CompileSeededIfNeeded) and the public route picker read those and
+// nothing else, so no owned row reaches the compiled store or the
+// unauthenticated surface. The invariant is enforced by the create and update
+// handlers, which refuse to attach an owned child to a scenario the caller does
+// not own.
 func CanAccess(user transit.User, ownerID *string) bool {
 	if user.IsAdmin {
 		return true
@@ -35,4 +45,17 @@ func CanAccess(user transit.User, ownerID *string) bool {
 		return false
 	}
 	return *ownerID == user.ID
+}
+
+// CanReference reports whether user may build owned content on top of a row
+// owned by ownerID — pointing a service at a route, or authoring inside a
+// scenario.
+//
+// Deliberately not CanAccess. The two ask different questions about the same
+// nil owner: an unowned row is curated platform data, which is a public
+// building block anyone may reference, but admin-only to *mutate*. Reusing
+// CanAccess here would make the curated ca-hsr alignments unreferenceable by
+// everyone but admins, which is the opposite of what curated data is for.
+func CanReference(user transit.User, ownerID *string) bool {
+	return ownerID == nil || CanAccess(user, ownerID)
 }

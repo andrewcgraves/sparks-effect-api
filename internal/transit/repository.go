@@ -14,35 +14,79 @@ import "context"
 type Repository interface {
 	// Scenarios.
 	CreateScenario(ctx context.Context, sc Scenario) error
+	UpdateScenario(ctx context.Context, sc Scenario) error
+	DeleteScenario(ctx context.Context, id string) error
+	// CountUnownedScenarioChildren reports curated rows living under a scenario.
+	// Deleting a scenario cascades to its children, which is safe exactly while
+	// the uniformity invariant holds; a non-zero count means it does not, and
+	// the delete is refused rather than cascading over someone else's rows.
+	CountUnownedScenarioChildren(ctx context.Context, scenarioID string) (int, error)
 	// GetScenarioByID resolves a scenario the way a compile job names its
 	// target; GetScenarioBySlug is how every request-facing path addresses one.
 	GetScenarioByID(ctx context.Context, id string) (Scenario, bool, error)
 	GetScenarioBySlug(ctx context.Context, slug string) (Scenario, bool, error)
-	ListScenarios(ctx context.Context) ([]Scenario, error)
+	// ListCuratedScenarios returns only the scenarios with no owner — the
+	// platform's own curated data. It is the containment boundary for owned
+	// content: LoadStore compiles everything this returns into the public
+	// in-memory store, so a user-authored scenario must never appear in it.
+	ListCuratedScenarios(ctx context.Context) ([]Scenario, error)
 
 	// Routes. A route is addressed globally by slug, since an admin-ingested
 	// alignment belongs to no scenario; ListRoutesByScenario covers the seeded
-	// routes that do. ListRouteSummaries spans both, and is the only route read
-	// that is not whole-aggregate: choosing a route needs none of its bulk.
+	// routes that do. The two summary reads are the only route reads that are
+	// not whole-aggregate: choosing a route needs none of its bulk.
+	//
+	// GetRouteBySlug is deliberately unfiltered. routes.slug is globally UNIQUE
+	// across curated and owned rows, so slug minting has to be able to probe the
+	// whole namespace; filtering here would hand a user a constraint violation
+	// instead of the next free slug. Ownership is checked by the handler.
 	CreateRoute(ctx context.Context, r Route) error
 	GetRouteBySlug(ctx context.Context, slug string) (Route, bool, error)
-	ListRouteSummaries(ctx context.Context) ([]RouteSummary, error)
+	UpdateRoute(ctx context.Context, r Route) error
+	DeleteRoute(ctx context.Context, id string) error
+	// ListCuratedRouteSummaries backs the public picker: unowned routes only.
+	// ListRouteSummariesByOwner is its complement, backing GET /api/me/routes.
+	ListCuratedRouteSummaries(ctx context.Context) ([]RouteSummary, error)
+	ListRouteSummariesByOwner(ctx context.Context, ownerID string) ([]RouteSummary, error)
+	// CountRouteDependents reports what would break if this route were deleted,
+	// so the API can refuse with a 409 rather than let user_services.route_id's
+	// ON DELETE CASCADE silently destroy a user's saved services.
+	CountRouteDependents(ctx context.Context, routeID string) (RouteDependents, error)
 	ListRoutesByScenario(ctx context.Context, scenarioID string) ([]Route, error)
 	// ListRoutesByIDs loads routes by id, the whole aggregate — how a
 	// user-authored compile resolves the alignments its services run on.
 	ListRoutesByIDs(ctx context.Context, ids []string) ([]Route, error)
 
-	// Stations.
+	// Stations are addressed by (scenario, slug): stations.slug is unique per
+	// scenario, not globally, so there is no station read that is not
+	// scenario-scoped.
 	CreateStation(ctx context.Context, st Station) error
+	GetStationBySlug(ctx context.Context, scenarioID, slug string) (Station, bool, error)
+	UpdateStation(ctx context.Context, st Station) error
+	DeleteStation(ctx context.Context, id string) error
+	// CountStationDependents reports the service stops referencing this station.
+	// service_stops.station_id is RESTRICT, so without this the delete surfaces
+	// as an opaque 500 instead of a 409.
+	CountStationDependents(ctx context.Context, stationID string) (int, error)
 	ListStationsByScenario(ctx context.Context, scenarioID string) ([]Station, error)
 
 	// VehicleTypes are global (not scenario-scoped); CreateVehicleType is
 	// idempotent on ID so shared seed rows can be written once per scenario.
+	// They carry no owner: rolling stock is a shared catalog any authored
+	// service may reference.
 	CreateVehicleType(ctx context.Context, vt VehicleType) error
+	GetVehicleTypeByID(ctx context.Context, id string) (VehicleType, bool, error)
 	ListVehicleTypes(ctx context.Context) ([]VehicleType, error)
 
 	// Services, persisted with their embedded stops and frequency windows.
+	//
+	// ListServicesByScenario is deliberately unfiltered, for
+	// ListStationsByScenario's reason: the uniformity invariant means scoping to
+	// a scenario has already scoped to its owner.
 	CreateService(ctx context.Context, svc Service) error
+	GetServiceByID(ctx context.Context, id string) (Service, bool, error)
+	UpdateService(ctx context.Context, svc Service) error
+	DeleteService(ctx context.Context, id string) error
 	ListServicesByScenario(ctx context.Context, scenarioID string) ([]Service, error)
 
 	// ScenarioService is the curated membership join: which services a scenario
@@ -85,7 +129,9 @@ type Repository interface {
 	// round trip rather than one GetUserServiceByID call per id.
 	UserServiceIDsOwnedBy(ctx context.Context, ownerID string, ids []string) (map[string]bool, error)
 
-	// TravelTimes (adjacent segment run times) per scenario.
+	// TravelTimes (adjacent segment run times) per scenario. Written whole:
+	// a segment has no identity a client can address, so an edit replaces the
+	// set rather than diffing it.
 	UpsertTravelTimes(ctx context.Context, tt TravelTimes) error
 	GetTravelTimes(ctx context.Context, scenarioSlug string) (TravelTimes, bool, error)
 
