@@ -26,9 +26,10 @@ import "fmt"
 //
 // pairs is the owning UserScenario's declared interchange (SPA-120), passed
 // through to CompileServices rather than looked up here — the caller already
-// has the UserScenario in hand (see worker.compileUserScenario) and this
-// stays a pure function of routes and services otherwise.
-func CompileUserScenario(routes []Route, services []UserService, pairs []InterchangePair, boardingWait BoardingWaitPolicy) (TransitGraph, error) {
+// has the UserScenario in hand (see worker.compileUserScenario).
+// scenarioWait is that scenario's boarding-wait override (SPA-237); nil
+// means members inherit from the global default unless they have their own.
+func CompileUserScenario(routes []Route, services []UserService, pairs []InterchangePair, scenarioWait *BoardingWaitOverride, boardingWait BoardingWaitPolicy) (TransitGraph, error) {
 	routesByID := make(map[string]Route, len(routes))
 	for _, rt := range routes {
 		routesByID[rt.ID] = rt
@@ -44,6 +45,7 @@ func CompileUserScenario(routes []Route, services []UserService, pairs []Interch
 		if err != nil {
 			return TransitGraph{}, err
 		}
+		cs.ScenarioBoardingWait = scenarioWait
 		compilables = append(compilables, cs)
 	}
 	return CompileServices(compilables, pairs, boardingWait)

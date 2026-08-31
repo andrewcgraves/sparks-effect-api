@@ -39,6 +39,8 @@ func TestCheckOriginReach_theBoundaryPerMode(t *testing.T) {
 		{"walk 240", TravelModeWalk, 240, 20},
 		{"bike 60", TravelModeBike, 60, 15},
 		{"drive 120", TravelModeDrive, 120, 160},
+		{"transit 60", TravelModeTransit, 60, 40},
+		{"transit 90", TravelModeTransit, 90, 60},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			inside := stationsAt(northOf(tc.reachKm * 0.99))
@@ -144,10 +146,14 @@ func TestCheckOriginReach_unanswerableWhenThereIsNothingToMeasureAgainst(t *test
 }
 
 // Every mode TravelMode.Valid accepts has a speed here. Without this, adding a
-// fourth mode would silently make the check unanswerable for it — permissive,
-// so nothing would break loudly, and the guard would just stop applying.
+// mode would silently make the check unanswerable for it — permissive, so
+// nothing would break loudly, and the guard would just stop applying.
+//
+// It walks travelModes rather than a list written out here, because a list
+// written out here is one more thing a new mode has to be added to, and
+// forgetting it is exactly the failure this test exists to catch.
 func TestCheckOriginReach_coversEveryValidMode(t *testing.T) {
-	for _, mode := range []TravelMode{TravelModeWalk, TravelModeBike, TravelModeDrive} {
+	for _, mode := range travelModes {
 		if !mode.Valid() {
 			t.Fatalf("%q is not a valid mode; fix the test, not the code", mode)
 		}

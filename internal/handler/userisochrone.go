@@ -50,7 +50,7 @@ func validateIsochroneParams(w http.ResponseWriter, budgetMins int, mode string)
 		return false
 	}
 	if !transit.TravelMode(mode).Valid() {
-		writeError(w, http.StatusBadRequest, "invalid mode: must be walk, bike, or drive")
+		writeError(w, http.StatusBadRequest, "invalid mode: must be one of "+transit.TravelModeList())
 		return false
 	}
 	return true
@@ -144,7 +144,8 @@ func authoredTargetIsochrone(w http.ResponseWriter, r *http.Request, target auth
 		writeInternalError(r.Context(), w, "loading member services", err)
 		return
 	}
-	if transit.GraphStale(job, memberIDs, updatedAtByID(members), boardingWait) {
+	if transit.GraphStale(job, memberIDs, updatedAtByID(members),
+		resolvedBoardingWaitByService(members, owned.scenarioBoardingWait(), boardingWait)) {
 		writeErrorCode(w, http.StatusConflict, StaleGraphErrorCode,
 			"compiled graph is stale; recompile the "+noun+" and retry")
 		return

@@ -2,6 +2,8 @@ package transit
 
 import (
 	"encoding/json"
+	"slices"
+	"strings"
 	"time"
 )
 
@@ -49,10 +51,17 @@ type RouteSegment struct {
 // authored for, but a route ingested through the admin endpoint is a standalone
 // alignment addressed by its slug, so it has no scenario until one adopts it.
 type Route struct {
-	ID            string        `yaml:"id"                     json:"id"`
-	ScenarioID    *string       `yaml:"scenario_id,omitempty"  json:"scenario_id,omitempty"`
+	ID         string  `yaml:"id"                     json:"id"`
+	ScenarioID *string `yaml:"scenario_id,omitempty"  json:"scenario_id,omitempty"`
+	// OwnerID is nil for a curated route — the seeded alignments and the
+	// admin-ingested ones alike. A route a user authored carries their id, and
+	// is reachable only by them (see auth.CanAccess). Both fields are omitted
+	// from JSON when empty, so a curated route reads back exactly as it did
+	// before ownership existed.
+	OwnerID       *string       `yaml:"owner_id,omitempty"     json:"owner_id,omitempty"`
 	Slug          string        `yaml:"slug"                   json:"slug"`
 	Name          string        `yaml:"name"                   json:"name"`
+	Description   string        `yaml:"description,omitempty"  json:"description,omitempty"`
 	Mode          string        `yaml:"mode"                   json:"mode"`
 	Geometry      GeoLineString `yaml:"geometry"               json:"geometry"`
 	Bidirectional bool          `yaml:"bidirectional"          json:"bidirectional"`
@@ -70,7 +79,30 @@ type Route struct {
 type RouteSummary struct {
 	Slug string `json:"slug"`
 	Name string `json:"name"`
-	Mode string `json:"mode"`
+	// Description is omitted when empty, which every curated route's is: the
+	// field exists so an owner's own route list reads as more than a slug.
+	Description string `json:"description,omitempty"`
+	Mode        string `json:"mode"`
+}
+
+// RouteDependents counts the rows that reference a route, so a delete can be
+// refused before it fires a cascade.
+//
+// The three FKs disagree about what should happen: services.route_id is
+// RESTRICT, user_services.route_id is ON DELETE CASCADE (00005), and
+// segments.route_id is ON DELETE CASCADE (00011). A raw delete therefore either
+// errors opaquely or silently destroys a user's saved services. Counting first
+// lets the API answer 409 and makes the destructive cascade unreachable through
+// it.
+type RouteDependents struct {
+	Services     int `json:"services"`
+	UserServices int `json:"user_services"`
+	Segments     int `json:"segments"`
+}
+
+// Any reports whether anything references the route at all.
+func (d RouteDependents) Any() bool {
+	return d.Services > 0 || d.UserServices > 0 || d.Segments > 0
 }
 
 // Station is a named boarding point owned by a scenario.
@@ -89,8 +121,12 @@ type RouteSummary struct {
 // correcting again once the real thing opens (see migration 00015 and SPA-222,
 // which did exactly that correction the other way).
 type Station struct {
-	ID              string    `yaml:"id"              json:"id"`
-	ScenarioID      string    `yaml:"scenario_id"     json:"scenario_id"`
+	ID         string `yaml:"id"              json:"id"`
+	ScenarioID string `yaml:"scenario_id"     json:"scenario_id"`
+	// OwnerID mirrors Scenario.OwnerID: a station belongs to its scenario, so
+	// under the ownership-uniformity invariant the two always agree. It is
+	// stored rather than derived so an owner-scoped read never has to join.
+	OwnerID         *string   `yaml:"owner_id,omitempty" json:"owner_id,omitempty"`
 	Slug            string    `yaml:"slug"            json:"slug"`
 	Name            string    `yaml:"name"            json:"name"`
 	Location        GeoPoint  `yaml:"location"        json:"location"`
@@ -156,19 +192,33 @@ type Service struct {
 	OwnerID          *string           `yaml:"owner_id,omitempty" json:"owner_id,omitempty"`
 	Stops            []ServiceStop     `yaml:"stops"            json:"stops"`
 	FrequencyWindows []FrequencyWindow `yaml:"frequency_windows" json:"frequency_windows"`
-	// BoardingWaitPolicy and BoardingWaitSecs are the resolved boarding wait
-	// that would be compiled into this service's graph under the current global
-	// policy (SPA-236). They are response-only — never persisted — and filled
-	// by the read handlers so a client never has to re-derive them.
+	// BoardingWait is the stored override; nil means inherit. Seeded YAML
+	// uses the nested object boarding_wait: {policy, secs}.
+	BoardingWait *BoardingWaitOverride `yaml:"boarding_wait,omitempty" json:"boarding_wait,omitempty"`
+	// BoardingWaitPolicy, BoardingWaitSecs, and BoardingWaitSource are the
+	// resolved boarding wait that would be compiled into this service's graph
+	// (SPA-236, SPA-237). They are response-only — filled by the read handlers
+	// so a client never has to re-derive them. Source is service, scenario, or
+	// global, matching ResolveBoardingWait.
 	BoardingWaitPolicy string `yaml:"-" json:"boarding_wait_policy,omitempty"`
 	BoardingWaitSecs   int    `yaml:"-" json:"boarding_wait_secs"`
+	BoardingWaitSource string `yaml:"-" json:"boarding_wait_source,omitempty"`
 }
 
-// ResolveBoardingWait fills the response-only boarding-wait fields from policy
-// and this service's own frequency windows. Both service models expose this,
-// so a caller can fill either without a parallel implementation.
-func (s *Service) ResolveBoardingWait(policy BoardingWaitPolicy) error {
-	return policy.resolveInto(s.FrequencyWindows, &s.BoardingWaitPolicy, &s.BoardingWaitSecs)
+// ResolveBoardingWait fills the response-only boarding-wait fields from the
+// precedence chain (this service's override, the optional scenario override,
+// then global) and this service's own frequency windows. Both service models
+// expose this, so a caller can fill either without a parallel implementation.
+func (s *Service) ResolveBoardingWait(scenario *BoardingWaitOverride, global BoardingWaitPolicy) error {
+	policy, source, err := ResolveBoardingWait(s.BoardingWait, scenario, global)
+	if err != nil {
+		return err
+	}
+	if err := policy.resolveInto(s.FrequencyWindows, &s.BoardingWaitPolicy, &s.BoardingWaitSecs); err != nil {
+		return err
+	}
+	s.BoardingWaitSource = source
+	return nil
 }
 
 // SegmentTime is the run-time-only seconds for one adjacent station pair along a service.
@@ -283,26 +333,70 @@ type Job struct {
 // the domain's own vocabulary, and what the routing_jobs row stores.
 //
 // Valhalla calls the same concept "costing" and spells it pedestrian /
-// bicycle / auto. That translation belongs at the routing client's boundary, in
-// the worker; persisting both would be two columns that must agree forever.
+// bicycle / auto / multimodal. That translation belongs at the routing client's
+// boundary, in the worker; persisting both would be two columns that must agree
+// forever.
 type TravelMode string
 
 const (
 	TravelModeWalk  TravelMode = "walk"
 	TravelModeBike  TravelMode = "bike"
 	TravelModeDrive TravelMode = "drive"
+	// TravelModeTransit is walking plus scheduled local transit, which is why
+	// it is an access/egress mode and not a rival to the compiled service
+	// itself: it is how a rider gets to and from a station, not how they ride
+	// the authored line (that leg is physics-compiled here, never routed).
+	//
+	// Valhalla spells it "multimodal". Its own "transit" costing is a different
+	// thing — transit-only, stop to stop — and is useless for an access leg
+	// that starts at a house rather than a stop, so the worker must not map
+	// this mode to the identically-spelled costing (SPA-246).
+	TravelModeTransit TravelMode = "transit"
 )
 
-// Valid reports whether m is one of the three modes. It is the single
-// definition of the set, so the request validator, the queue message, and the
-// database cannot drift apart on what a mode is.
+// travelModes is every mode there is, and the single definition of the set:
+// Valid, the error messages that name the set for a client, and the test that
+// holds every mode to having an assumed speed all read it, so the request
+// validator, the queue message, and the database cannot drift apart on what a
+// mode is.
+//
+// A Postgres CHECK constraint holds the same list (migration 00021). That is
+// the one copy no compiler can check, so a mode added here needs a migration
+// with it.
+var travelModes = []TravelMode{
+	TravelModeWalk,
+	TravelModeBike,
+	TravelModeDrive,
+	TravelModeTransit,
+}
+
+// Valid reports whether m is a mode at all.
 func (m TravelMode) Valid() bool {
-	switch m {
-	case TravelModeWalk, TravelModeBike, TravelModeDrive:
-		return true
-	default:
-		return false
+	return slices.Contains(travelModes, m)
+}
+
+// TravelModes returns every mode, for a caller outside this package that has to
+// hold something to the whole set rather than to one member — the test that
+// checks the Postgres CHECK accepts everything Valid does, most of it. Without
+// it such a test writes the set out a third time, and a mode added here would
+// simply not be covered by it.
+//
+// A copy, because a caller must not be able to edit the set by editing what it
+// was handed.
+func TravelModes() []TravelMode {
+	return slices.Clone(travelModes)
+}
+
+// TravelModeList names every mode as a comma-separated string, for the error
+// messages that tell a client what it should have sent. Derived from the set
+// rather than written out, so a message cannot come to disagree with what
+// Valid accepts.
+func TravelModeList() string {
+	names := make([]string, len(travelModes))
+	for i, m := range travelModes {
+		names[i] = string(m)
 	}
+	return strings.Join(names, ", ")
 }
 
 // RoutingJob is one isochrone the API has handed to the routing worker: a

@@ -67,7 +67,7 @@ func LoadStore(ctx context.Context, repo Repository, boardingWait BoardingWaitPo
 	}
 	s.vehicleTypes = vts
 
-	scenarios, err := repo.ListScenarios(ctx)
+	scenarios, err := repo.ListCuratedScenarios(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("transit: listing scenarios: %w", err)
 	}
@@ -136,6 +136,14 @@ func (s *Store) loadScenario(slug string, boardingWait BoardingWaitPolicy) error
 	var services []Service
 	if err := unmarshalFile(dataFS, base+"/services.yaml", &services); err != nil {
 		return err
+	}
+	for i, svc := range services {
+		if svc.BoardingWait != nil {
+			if _, err := svc.BoardingWait.Parse(); err != nil {
+				return fmt.Errorf("service %q: %w", svc.ID, err)
+			}
+		}
+		services[i] = svc
 	}
 	s.services = append(s.services, services...)
 

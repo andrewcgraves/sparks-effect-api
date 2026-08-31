@@ -25,11 +25,12 @@ type Edge struct {
 // at the path origin (see graphDijkstra).
 //
 // WaitSecs is that boarding wait in seconds — not a transfer penalty. How it
-// is derived is controlled by the global BoardingWaitPolicy (default none → 0);
-// WaitPolicy records which policy produced it so GraphStale and the API read
-// surface can tell a stored graph from the current setting without re-deriving.
-// WaitPolicy is additive and optional on decode: a jobs.result row written
-// before it unmarshals with WaitPolicy empty.
+// is derived is controlled by BoardingWaitPolicy, resolved per service through
+// ResolveBoardingWait (service override > scenario override > global default >
+// none). WaitPolicy records which policy produced it so GraphStale and the API
+// read surface can tell a stored graph from the current setting without
+// re-deriving. WaitPolicy is additive and optional on decode: a jobs.result
+// row written before it unmarshals with WaitPolicy empty.
 type ServiceGraph struct {
 	ServiceID  string `json:"service_id"`
 	Edges      []Edge `json:"edges"`
@@ -157,7 +158,11 @@ func Compile(
 		}
 
 		sg := ServiceGraph{ServiceID: svc.ID}
-		if err := sg.applyBoardingWait(boardingWait, svc.FrequencyWindows); err != nil {
+		policy, _, err := ResolveBoardingWait(svc.BoardingWait, nil, boardingWait)
+		if err != nil {
+			return nil, fmt.Errorf("compile: service %q: %w", svc.ID, err)
+		}
+		if err := sg.applyBoardingWait(policy, svc.FrequencyWindows); err != nil {
 			return nil, fmt.Errorf("compile: service %q: %w", svc.ID, err)
 		}
 		for i := 0; i+1 < len(slugs); i++ {

@@ -69,9 +69,9 @@ func resetSchema(t *testing.T, url string) {
 
 func TestMigrationsRunCleanlyOnEmptyDB(t *testing.T) {
 	repo, _ := freshRepo(t)
-	scenarios, err := repo.ListScenarios(context.Background())
+	scenarios, err := repo.ListCuratedScenarios(context.Background())
 	if err != nil {
-		t.Fatalf("ListScenarios: %v", err)
+		t.Fatalf("ListCuratedScenarios: %v", err)
 	}
 	if len(scenarios) != 0 {
 		t.Fatalf("expected empty database after migrate, got %d scenarios", len(scenarios))
@@ -380,6 +380,7 @@ func TestWritableDomainRoundTrip(t *testing.T) {
 	}
 
 	dwell := 45
+	waitSecs := 90
 	svc := transit.Service{
 		ID: serviceID, ScenarioID: scenarioID, RouteID: routeID, VehicleTypeID: vehicleID,
 		Name: "Test Service", Direction: "both", Active: true, Provenance: transit.ProvenanceCalibrated,
@@ -389,6 +390,10 @@ func TestWritableDomainRoundTrip(t *testing.T) {
 		},
 		FrequencyWindows: []transit.FrequencyWindow{
 			{StartTime: "06:00", EndTime: "22:00", HeadwayS: 600},
+		},
+		BoardingWait: &transit.BoardingWaitOverride{
+			Policy: transit.BoardingWaitFixed,
+			Secs:   &waitSecs,
 		},
 	}
 	if err := repo.CreateService(ctx, svc); err != nil {
@@ -420,6 +425,12 @@ func TestWritableDomainRoundTrip(t *testing.T) {
 	}
 	if len(rs.FrequencyWindows) != 1 || rs.FrequencyWindows[0].HeadwayS != 600 {
 		t.Errorf("frequency windows did not round-trip: %+v", rs.FrequencyWindows)
+	}
+	if rs.BoardingWait == nil || rs.BoardingWait.Policy != transit.BoardingWaitFixed {
+		t.Errorf("boarding wait: got %+v, want fixed", rs.BoardingWait)
+	}
+	if rs.BoardingWait == nil || rs.BoardingWait.Secs == nil || *rs.BoardingWait.Secs != 90 {
+		t.Errorf("boarding wait secs: got %v, want 90", rs.BoardingWait)
 	}
 }
 
@@ -486,15 +497,15 @@ func TestIngestedRouteRoundTrip(t *testing.T) {
 	}
 }
 
-// ListRouteSummaries backs the route picker (SPA-104): every route, in a
+// ListCuratedRouteSummaries backs the route picker (SPA-104): every route, in a
 // stable order, reduced to the three fields a picker needs. Scenario-attached
 // and standalone routes are both listed — a picker offers whatever exists.
 func TestListRouteSummariesReturnsEveryRouteInSlugOrder(t *testing.T) {
 	ctx := context.Background()
 	repo, _ := freshRepo(t)
 
-	if empty, err := repo.ListRouteSummaries(ctx); err != nil || len(empty) != 0 {
-		t.Fatalf("ListRouteSummaries on an empty database: got %+v err=%v", empty, err)
+	if empty, err := repo.ListCuratedRouteSummaries(ctx); err != nil || len(empty) != 0 {
+		t.Fatalf("ListCuratedRouteSummaries on an empty database: got %+v err=%v", empty, err)
 	}
 
 	geom := transit.GeoLineString{
@@ -510,16 +521,16 @@ func TestListRouteSummariesReturnsEveryRouteInSlugOrder(t *testing.T) {
 		}
 	}
 
-	got, err := repo.ListRouteSummaries(ctx)
+	got, err := repo.ListCuratedRouteSummaries(ctx)
 	if err != nil {
-		t.Fatalf("ListRouteSummaries: %v", err)
+		t.Fatalf("ListCuratedRouteSummaries: %v", err)
 	}
 	want := []transit.RouteSummary{
 		{Slug: "a-alignment", Name: "A Alignment", Mode: "metro"},
 		{Slug: "z-alignment", Name: "Z Alignment", Mode: "rail"},
 	}
 	if len(got) != len(want) {
-		t.Fatalf("ListRouteSummaries = %+v, want %+v", got, want)
+		t.Fatalf("ListCuratedRouteSummaries = %+v, want %+v", got, want)
 	}
 	for i := range want {
 		if got[i] != want[i] {

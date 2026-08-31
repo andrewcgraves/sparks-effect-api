@@ -11,7 +11,7 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-const caHSRRoutingAnchorsMigrationPath = "migrations/00020_ca_hsr_routing_locations.sql"
+const caHSRRoutingAnchorsMigrationPath = "migrations/00023_ca_hsr_routing_locations.sql"
 
 const (
 	maderaID      = "00000000-0000-4005-8001-000000000006"
@@ -19,7 +19,7 @@ const (
 	bakersfieldID = "00000000-0000-4005-8001-000000000009"
 )
 
-// The three stations 00020 anchors, with the `location` each must keep. The
+// The three stations 00023 anchors, with the `location` each must keep. The
 // anchors themselves are deliberately absent: the seed is the single source
 // for those, and TestCAHSRRoutingAnchorsMigrationMatchesTheSeed reads them from
 // it rather than restating them here, so a third copy cannot drift from the
@@ -58,7 +58,7 @@ func seededRoutingLocation(t *testing.T, slug string) *transit.GeoPoint {
 }
 
 // Each anchor is written down twice — once in the YAML seed for databases the
-// seed reaches, once as an UPDATE literal in 00020 for the deployed ones it
+// seed reaches, once as an UPDATE literal in 00023 for the deployed ones it
 // does not — for the same reason TestLasVegasRoutingLocationMigrationMatchesTheSeed
 // pins 00016: two copies of the same data drift, and the drift is invisible,
 // since both databases still compile and both still answer.
@@ -76,21 +76,21 @@ func TestCAHSRRoutingAnchorsMigrationMatchesTheSeed(t *testing.T) {
 			t.Fatalf("marshal %s routing_location: %v", st.slug, err)
 		}
 		if !bytes.Contains(sql, want) {
-			t.Errorf("00020 does not carry %s routing_location at %s", st.slug, want)
+			t.Errorf("00023 does not carry %s routing_location at %s", st.slug, want)
 		}
 	}
 }
 
-// rewindCAHSRRoutingAnchorsMigration unwinds 00020 and is the current tail of
-// the rewind chain that starts in snapmigration_test.go — 00020 is the highest
+// rewindCAHSRRoutingAnchorsMigration unwinds 00023 and is the current tail of
+// the rewind chain that starts in snapmigration_test.go — 00023 is the highest
 // migration today, so nothing needs unwinding above it the way every other link
 // in the chain unwinds the one above. Any migration added after this one must
 // extend the chain here, or every rewinding test in this package starts failing
 // with goose's "missing migrations before current version".
 //
-// 00020 changes no schema, so unwinding it is its own Down: clear the three
+// 00023 changes no schema, so unwinding it is its own Down: clear the three
 // anchors it set, then unrecord the version. Clearing matters even though a
-// re-run of the UPDATEs would be harmless — a test that stages a pre-00020
+// re-run of the UPDATEs would be harmless — a test that stages a pre-00023
 // database wants rows that genuinely have no anchor, not rows that already
 // hold the value the migration is supposed to write.
 func rewindCAHSRRoutingAnchorsMigration(t *testing.T, url string) {
@@ -98,11 +98,11 @@ func rewindCAHSRRoutingAnchorsMigration(t *testing.T, url string) {
 	exec(t, url,
 		`UPDATE stations SET routing_location = NULL
 		   WHERE id IN ('`+maderaID+`', '`+kingsTulareID+`', '`+bakersfieldID+`')`,
-		`DELETE FROM goose_db_version WHERE version_id = 20`)
+		`DELETE FROM goose_db_version WHERE version_id = 23`)
 }
 
 // insertPreFixCAHSRAnchoredStations stages ca-hsr as a deployed database held
-// it before 00020 existed: the scenario and the three stations, each carrying
+// it before 00023 existed: the scenario and the three stations, each carrying
 // its surveyed location and no routing anchor at all.
 func insertPreFixCAHSRAnchoredStations(t *testing.T, url string) {
 	t.Helper()
@@ -138,7 +138,7 @@ func assertAnchored(t *testing.T, url string) {
 		if got := scalarCount(t, url,
 			`SELECT count(*) FROM stations WHERE id = '`+st.id+`'
 			   AND location = '`+st.location+`'::jsonb`); got != 1 {
-			t.Errorf("%s station's location moved; 00020 must only touch routing_location", st.slug)
+			t.Errorf("%s station's location moved; 00023 must only touch routing_location", st.slug)
 		}
 	}
 }
@@ -183,8 +183,8 @@ func TestCAHSRRoutingAnchorsMigrationIsSafeToReRun(t *testing.T) {
 
 	// Forget that it ran while keeping the data it wrote, so the second pass
 	// meets exactly the state a YAML-seeded database would present. Nothing
-	// sits above 00020 yet, so unrecording it is enough on its own.
-	exec(t, url, `DELETE FROM goose_db_version WHERE version_id = 20`)
+	// sits above 00023 yet, so unrecording it is enough on its own.
+	exec(t, url, `DELETE FROM goose_db_version WHERE version_id = 23`)
 	if err := postgres.Migrate(context.Background(), url); err != nil {
 		t.Fatalf("migration re-run over the data it already wrote: %v", err)
 	}

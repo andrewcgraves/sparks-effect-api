@@ -11,7 +11,7 @@ import (
 // the first run against an empty database populates it; subsequent runs are
 // no-ops. This is the "seed lands on first migration" path.
 func SeedIfEmpty(ctx context.Context, repo Repository) (bool, error) {
-	existing, err := repo.ListScenarios(ctx)
+	existing, err := repo.ListCuratedScenarios(ctx)
 	if err != nil {
 		return false, fmt.Errorf("transit: checking for existing scenarios: %w", err)
 	}
@@ -90,6 +90,11 @@ func seedScenario(ctx context.Context, repo Repository, slug string) error {
 		return err
 	}
 	for _, svc := range services {
+		if svc.BoardingWait != nil {
+			if _, err := svc.BoardingWait.Parse(); err != nil {
+				return fmt.Errorf("service %q: %w", svc.ID, err)
+			}
+		}
 		if err := repo.CreateService(ctx, svc); err != nil {
 			return fmt.Errorf("creating service %q: %w", svc.ID, err)
 		}

@@ -74,7 +74,11 @@ func CompileServicePhysics(svc CompilableService, boardingWait BoardingWaitPolic
 	}
 
 	sg := ServiceGraph{ServiceID: svc.ID}
-	if err := sg.applyBoardingWait(boardingWait, svc.Windows); err != nil {
+	policy, _, err := ResolveBoardingWait(svc.BoardingWait, svc.ScenarioBoardingWait, boardingWait)
+	if err != nil {
+		return ServiceGraph{}, fmt.Errorf("compile: service %q: %w", svc.ID, err)
+	}
+	if err := sg.applyBoardingWait(policy, svc.Windows); err != nil {
 		return ServiceGraph{}, fmt.Errorf("compile: service %q: %w", svc.ID, err)
 	}
 	for _, span := range spans {

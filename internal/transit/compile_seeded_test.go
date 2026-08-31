@@ -26,7 +26,7 @@ func newSeededCompileFake(t *testing.T) *seededCompileFake {
 	return &seededCompileFake{store: mustNewStore(t)}
 }
 
-func (f *seededCompileFake) ListScenarios(context.Context) ([]Scenario, error) {
+func (f *seededCompileFake) ListCuratedScenarios(context.Context) ([]Scenario, error) {
 	return f.store.GetScenarios(), nil
 }
 

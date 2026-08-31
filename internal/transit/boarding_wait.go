@@ -35,6 +35,59 @@ type BoardingWaitPolicy struct {
 	FixedSecs int
 }
 
+// BoardingWaitOverride is a stored per-entity policy. A nil pointer means
+// inherit from the next level of ResolveBoardingWait rather than a resolved
+// copy, so changing the global default still moves everything that has not
+// deliberately opted out.
+//
+// On the wire and in services.yaml this is an object: {"policy":"fixed","secs":120}.
+// secs is required only for fixed; omitted or null secs with any other policy
+// is ignored.
+type BoardingWaitOverride struct {
+	Policy BoardingWaitKind `json:"policy" yaml:"policy"`
+	Secs   *int             `json:"secs,omitempty" yaml:"secs,omitempty"`
+}
+
+// Where a resolved boarding wait came from, most specific first. These are
+// the values of boarding_wait_source on service and scenario reads.
+const (
+	BoardingWaitSourceService  = "service"
+	BoardingWaitSourceScenario = "scenario"
+	BoardingWaitSourceGlobal   = "global"
+)
+
+// Parse converts a stored override into the compile-time policy. Empty policy
+// is rejected — inherit is represented by a nil override, never by an empty
+// object — and fixed still requires a non-negative secs companion.
+func (o BoardingWaitOverride) Parse() (BoardingWaitPolicy, error) {
+	if o.Policy == "" {
+		return BoardingWaitPolicy{}, fmt.Errorf("boarding wait: policy is required")
+	}
+	return ParseBoardingWaitPolicy(string(o.Policy), o.Secs)
+}
+
+// ResolveBoardingWait picks the boarding-wait policy a compile will bake in.
+//
+// Precedence, most specific wins:
+//
+//	service override  >  scenario override  >  global default  >  none
+//
+// A nil override inherits from the next level. The global is the last
+// configured value (SPA-236); if even that is unset it is none
+// (DefaultBoardingWaitPolicy). This is the only copy of that rule: both
+// compilers and the API read surface call it rather than reimplementing it.
+func ResolveBoardingWait(service, scenario *BoardingWaitOverride, global BoardingWaitPolicy) (BoardingWaitPolicy, string, error) {
+	if service != nil {
+		p, err := service.Parse()
+		return p, BoardingWaitSourceService, err
+	}
+	if scenario != nil {
+		p, err := scenario.Parse()
+		return p, BoardingWaitSourceScenario, err
+	}
+	return global, BoardingWaitSourceGlobal, nil
+}
+
 // DefaultBoardingWaitPolicy is the unset configuration: no boarding wait.
 func DefaultBoardingWaitPolicy() BoardingWaitPolicy {
 	return BoardingWaitPolicy{Kind: BoardingWaitNone}

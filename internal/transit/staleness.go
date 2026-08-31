@@ -22,13 +22,16 @@ import "time"
 // the one question timestamps are actually good at: whether a still-present
 // member changed since compile, via currentServiceUpdatedAt.
 //
-// currentPolicy is the boarding-wait policy the next compile would bake in.
-// A global policy change touches neither membership nor updated_at, so without
-// this check a user-authored graph would silently keep charging the old wait.
-// Each ServiceGraph records the policy that produced its WaitSecs; any mismatch
-// (including a pre-SPA-236 graph with an empty WaitPolicy) is stale. For fixed
-// policies the seconds are compared too, so changing BOARDING_WAIT_FIXED_SECS
-// alone is caught.
+// currentPolicies is the boarding-wait policy the next compile would bake in,
+// keyed by service id. A global policy change touches neither membership nor
+// updated_at, and a per-scenario override change does not bump member
+// timestamps, so without this check a user-authored graph would silently keep
+// charging the old wait. Each ServiceGraph records the policy that produced
+// its WaitSecs; any mismatch (including a pre-SPA-236 graph with an empty
+// WaitPolicy) is stale. For fixed policies the seconds are compared too, so
+// changing BOARDING_WAIT_FIXED_SECS or a stored override's secs alone is
+// caught. The map is per-service because SPA-237 lets each member resolve
+// independently (service override > scenario override > global).
 //
 // The membership half of that rule — the set comparison and the
 // still-present-member timestamp fallback — lives in MembershipStale below,
@@ -43,11 +46,11 @@ import "time"
 // silently so. Comparing against created_at can produce one spurious 409 and
 // recompile in the narrow window before the worker's read, which converges
 // harmlessly; comparing against completion cannot detect the edit at all.
-func GraphStale(job Job, currentServiceIDs []string, currentServiceUpdatedAt map[string]time.Time, currentPolicy BoardingWaitPolicy) bool {
+func GraphStale(job Job, currentServiceIDs []string, currentServiceUpdatedAt map[string]time.Time, currentPolicies map[string]BoardingWaitPolicy) bool {
 	if MembershipStale(job.CompiledServiceIDs, job.CreatedAt, currentServiceIDs, currentServiceUpdatedAt) {
 		return true
 	}
-	if job.Result != nil && boardingWaitStale(*job.Result, currentPolicy) {
+	if job.Result != nil && boardingWaitStale(*job.Result, currentPolicies) {
 		return true
 	}
 	return false
@@ -121,10 +124,15 @@ func MembershipIDs(members []ServiceMembership) []string {
 }
 
 // boardingWaitStale reports whether any service graph was compiled under a
-// different boarding-wait policy (or fixed seconds) than currentPolicy.
-func boardingWaitStale(graph TransitGraph, current BoardingWaitPolicy) bool {
-	wantKind := current.kindOrNone()
+// different boarding-wait policy (or fixed seconds) than the policy the next
+// compile would resolve for that service.
+func boardingWaitStale(graph TransitGraph, currentPolicies map[string]BoardingWaitPolicy) bool {
 	for _, sg := range graph.Services {
+		current, ok := currentPolicies[sg.ServiceID]
+		if !ok {
+			current = DefaultBoardingWaitPolicy()
+		}
+		wantKind := current.kindOrNone()
 		// WaitPolicy is a string on the wire (jobs.result JSON); compare it as
 		// the kind it represents so an unknown value cannot pass for a valid one.
 		if BoardingWaitKind(sg.WaitPolicy) != wantKind {

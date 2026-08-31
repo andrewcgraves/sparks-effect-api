@@ -59,6 +59,6 @@ func MyServices(store OwnerStore, boardingWait transit.BoardingWaitPolicy) http.
 		if services == nil {
 			services = []transit.Service{}
 		}
-		writeJSON(w, http.StatusOK, withBoardingWaits(r.Context(), services, boardingWait))
+		writeJSON(w, http.StatusOK, withBoardingWaits(r.Context(), services, nil, boardingWait))
 	}
 }

@@ -89,10 +89,14 @@ func Isochrone(store SeededGraphStore, publisher routing.Publisher, log *slog.Lo
 // the second is a deployment that has not finished coming up, and only the
 // second is worth retrying.
 func loadSeededCompile(w http.ResponseWriter, r *http.Request, store SeededGraphStore, slug string) (transit.Job, bool) {
-	if _, found, err := store.GetScenarioBySlug(r.Context(), slug); err != nil {
+	sc, found, err := store.GetScenarioBySlug(r.Context(), slug)
+	if err != nil {
 		writeInternalError(r.Context(), w, "looking up scenario", err)
 		return transit.Job{}, false
-	} else if !found {
+	}
+	// An owned scenario is plottable by its owner and invisible to everyone
+	// else, the same gate its graph read applies.
+	if !found || !mayReachScenario(r.Context(), sc) {
 		writeError(w, http.StatusNotFound, "scenario not found")
 		return transit.Job{}, false
 	}
