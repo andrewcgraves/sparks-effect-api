@@ -121,13 +121,24 @@ jobs:
           # which needs the full history.
           fetch-depth: 0
 
-      - name: Skip if the staging pipeline key is not configured
-        if: ${{ secrets.LINEAR_ACCESS_KEY_STAGING == '' }}
+      # Secrets cannot be referenced in `if:` (GitHub treats that as a
+      # workflow-file error), so the empty check lives in a shell step and
+      # gates the action via an output, same idea as RAILWAY_TOKEN.
+      - name: Check for the staging pipeline key
+        id: linear
+        env:
+          LINEAR_ACCESS_KEY_STAGING: ${{ secrets.LINEAR_ACCESS_KEY_STAGING }}
         run: |
-          echo "::notice::LINEAR_ACCESS_KEY_STAGING is not set — create the 'API staging' pipeline in Linear and add its access key as this repository secret"
+          set -euo pipefail
+          if [[ -z "${LINEAR_ACCESS_KEY_STAGING:-}" ]]; then
+            echo "::notice::LINEAR_ACCESS_KEY_STAGING is not set — create the 'API staging' pipeline in Linear and add its access key as this repository secret"
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Sync Linear staging release
-        if: ${{ secrets.LINEAR_ACCESS_KEY_STAGING != '' }}
+        if: steps.linear.outputs.configured == 'true'
         uses: linear/linear-release-action@v0
         with:
           access_key: ${{ secrets.LINEAR_ACCESS_KEY_STAGING }}
