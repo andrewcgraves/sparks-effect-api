@@ -128,6 +128,26 @@ jobs:
             railway redeploy --yes
           fi
 
+      # Production is a different Linear pipeline from staging: the same issue
+      # can sit on staging for a while before a tag promotes it, and staging
+      # can already be several commits ahead. See docs/releases.md.
+      - name: Skip if the production pipeline key is not configured
+        if: ${{ secrets.LINEAR_ACCESS_KEY_PRODUCTION == '' }}
+        run: |
+          echo "::notice::LINEAR_ACCESS_KEY_PRODUCTION is not set — create the 'API production' pipeline in Linear and add its access key as a secret on the production environment"
+
+      - name: Sync Linear production release
+        if: ${{ secrets.LINEAR_ACCESS_KEY_PRODUCTION != '' }}
+        uses: linear/linear-release-action@v0
+        with:
+          access_key: ${{ secrets.LINEAR_ACCESS_KEY_PRODUCTION }}
+          name: ${{ steps.target.outputs.tag }}
+          version: ${{ steps.target.outputs.tag }}
+          links: |
+            Commit=${{ github.server_url }}/${{ github.repository }}/commit/${{ steps.target.outputs.sha }}
+            CI run=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            Image=https://github.com/${{ github.repository }}/pkgs/container/sparks-effect-api
+
       - name: Summarise
         env:
           IMAGE: ghcr.io/${{ github.repository }}

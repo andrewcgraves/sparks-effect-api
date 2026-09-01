@@ -103,3 +103,34 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+  # Staging is whatever `main` last published. Linear's staging pipeline is a
+  # separate stream from production because the two environments can (and do)
+  # hold different commits at the same time — see docs/releases.md.
+  linear-staging:
+    name: Record staging release in Linear
+    needs: [check, build, publish]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # linear-release-action scans commits since the last Linear release,
+          # which needs the full history.
+          fetch-depth: 0
+
+      - name: Skip if the staging pipeline key is not configured
+        if: ${{ secrets.LINEAR_ACCESS_KEY_STAGING == '' }}
+        run: |
+          echo "::notice::LINEAR_ACCESS_KEY_STAGING is not set — create the 'API staging' pipeline in Linear and add its access key as this repository secret"
+
+      - name: Sync Linear staging release
+        if: ${{ secrets.LINEAR_ACCESS_KEY_STAGING != '' }}
+        uses: linear/linear-release-action@v0
+        with:
+          access_key: ${{ secrets.LINEAR_ACCESS_KEY_STAGING }}
+          links: |
+            CI run=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            Image=https://github.com/${{ github.repository }}/pkgs/container/sparks-effect-api

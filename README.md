@@ -161,7 +161,9 @@ via the scenario API as that contract lands.
 ## Branching and releases
 
 One trunk: `main`. Branch from it, PR into it. Production runs an image promoted
-from the Actions tab — see [`docs/releases.md`](docs/releases.md).
+from the Actions tab — see [`docs/releases.md`](docs/releases.md). Linear
+records which issues landed on staging vs production from those same publishes
+and tags.
 
 ## Requirements
 
