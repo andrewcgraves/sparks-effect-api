@@ -8,11 +8,11 @@ import (
 )
 
 // rewindOwnedDomainModelsMigration unwinds 00022, unwinding the migration above
-// it first the way every link in this chain does. 00023 sits above it, so the
-// tail of the rewind chain that starts in snapmigration_test.go is now
-// rewindCAHSRRoutingAnchorsMigration. Goose refuses to re-apply a migration
+// it first the way every link in this chain does. 00023 and 00024 sit above it,
+// so the tail of the rewind chain that starts in snapmigration_test.go is now
+// rewindIsochroneCacheDepartsOnMigration. Goose refuses to re-apply a migration
 // older than the highest version recorded, so anything rewinding a migration
-// below this one must unrecord both — rewindTravelModeTransitMigration does
+// below this one must unrecord those — rewindTravelModeTransitMigration does
 // that by calling this.
 //
 // It genuinely undoes the migration rather than merely unrecording it, for
@@ -131,10 +131,10 @@ func TestOwnedDomainModelsMigrationLeavesExistingRowsCurated(t *testing.T) {
 func TestOwnedDomainModelsMigrationIsSafeToReRun(t *testing.T) {
 	_, url := freshRepo(t)
 
-	// 00023 is unrecorded too: goose applies only versions above the highest
-	// one recorded, so leaving it would make this re-run skip 00022 and prove
-	// nothing. 00023 is re-runnable over the UPDATEs it already wrote.
-	exec(t, url, `DELETE FROM goose_db_version WHERE version_id IN (22, 23)`)
+	// 00023 and 00024 are unrecorded too: goose applies only versions above the
+	// highest one recorded, so leaving either would make this re-run skip 00022
+	// and prove nothing. Both are re-runnable over the schema they already wrote.
+	exec(t, url, `DELETE FROM goose_db_version WHERE version_id IN (22, 23, 24)`)
 	if err := postgres.Migrate(context.Background(), url); err != nil {
 		t.Fatalf("re-running 00022 over the schema it already created: %v", err)
 	}

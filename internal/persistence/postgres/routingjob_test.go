@@ -264,9 +264,11 @@ func TestRoutingJobCascadesWithItsOwnerRatherThanBecomingPublic(t *testing.T) {
 
 // The cache table is written only by the worker, so nothing in this repository
 // exercises it. Its schema is still defined here, and the worker's correctness
-// depends on the key being exactly these four columns — with the tileset
-// timestamp deliberately outside it, so a tile rebuild does not silently
-// invalidate every cached polygon.
+// depends on uniqueness being exactly these five columns — graph, station, mode,
+// contour, and departs_on — with the tileset timestamp still outside it. A
+// rebuild is a miss on read (SPA-269), not a new key. Walk/bike/drive store
+// NULL departs_on; NULLS NOT DISTINCT keeps those colliding the way the old
+// four-column primary key did.
 func TestIsochroneCacheSchema(t *testing.T) {
 	ctx := context.Background()
 	repo, url := freshRepo(t)
@@ -280,12 +282,12 @@ func TestIsochroneCacheSchema(t *testing.T) {
 
 	rows, err := conn.Query(ctx, `
 		SELECT a.attname
-		FROM pg_index i
-		JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY (i.indkey)
-		WHERE i.indrelid = 'isochrone_cache'::regclass AND i.indisprimary
+		FROM pg_constraint c
+		JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey)
+		WHERE c.conrelid = 'isochrone_cache'::regclass AND c.conname = 'isochrone_cache_key'
 		ORDER BY a.attname`)
 	if err != nil {
-		t.Fatalf("query primary key: %v", err)
+		t.Fatalf("query unique key: %v", err)
 	}
 	defer rows.Close()
 	var key []string
@@ -300,19 +302,19 @@ func TestIsochroneCacheSchema(t *testing.T) {
 		t.Fatalf("rows: %v", err)
 	}
 
-	want := []string{"compile_job_id", "contour_mins", "mode", "station_slug"}
+	want := []string{"compile_job_id", "contour_mins", "departs_on", "mode", "station_slug"}
 	if len(key) != len(want) {
-		t.Fatalf("primary key = %v, want %v", key, want)
+		t.Fatalf("unique key = %v, want %v", key, want)
 	}
 	for i := range want {
 		if key[i] != want[i] {
-			t.Fatalf("primary key = %v, want %v", key, want)
+			t.Fatalf("unique key = %v, want %v", key, want)
 		}
 	}
 
-	// A row keyed on those four goes in, tileset timestamp and all; a second row
-	// differing only in tileset timestamp collides, which is what "diagnostic
-	// only, not part of the key" means in practice.
+	// A row keyed on those five goes in, tileset timestamp and all; a second
+	// row differing only in tileset timestamp collides, which is what
+	// "compared on read, not part of the key" means in practice.
 	geometry := json.RawMessage(`{"type":"Polygon","coordinates":[]}`)
 	insert := `INSERT INTO isochrone_cache
 		(compile_job_id, station_slug, mode, contour_mins, geometry, tileset_at)
@@ -325,7 +327,8 @@ func TestIsochroneCacheSchema(t *testing.T) {
 	}
 
 	// It is nullable, so a worker that cannot determine the tileset date still
-	// caches the polygon rather than failing the write.
+	// caches the polygon rather than failing the write. departs_on is likewise
+	// nullable so walk/bike/drive rows need not invent a service date.
 	if _, err := conn.Exec(ctx, `INSERT INTO isochrone_cache
 		(compile_job_id, station_slug, mode, contour_mins, geometry)
 		VALUES ($1, 'sf-transbay', 'bike', 30, $2)`, routingCompileJobID, geometry); err != nil {

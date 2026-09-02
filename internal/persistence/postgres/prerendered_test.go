@@ -38,9 +38,9 @@ func bigPayload(t *testing.T, marker string) json.RawMessage {
 	return b
 }
 
-// rewindPrerenderedIsochronesMigration unwinds 00019. 00020–00023 sit above
+// rewindPrerenderedIsochronesMigration unwinds 00019. 00020–00024 sit above
 // it, so this is not the tail of the rewind chain that starts in
-// snapmigration_test.go — rewindCAHSRRoutingAnchorsMigration is. Goose refuses
+// snapmigration_test.go — rewindIsochroneCacheDepartsOnMigration is. Goose refuses
 // to re-apply an earlier migration while a later version is still recorded, so
 // anything rewinding 00019 must unrecord those first, which the link below
 // does by delegating to the next one up.
