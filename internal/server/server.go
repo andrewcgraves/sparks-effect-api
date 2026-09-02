@@ -270,9 +270,15 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 	authenticated := auth.RequireAuth(deps.GetSessionUser)
 	adminOnly := auth.RequireAdmin(deps.GetSessionUser)
 
+	// One hasher for both password paths. Login's constant-time padding has to
+	// spend the same work provisioning does, so they must not be built with
+	// different costs. cfg.PasswordHashCost is zero everywhere but the tests,
+	// where it is bcrypt.MinCost.
+	hasher := auth.NewHasher(cfg.PasswordHashCost)
+
 	// Public: the only unauthenticated auth route. There is deliberately no
 	// registration endpoint — accounts come from POST /api/admin/users.
-	mux.HandleFunc("POST /api/auth/login", handler.Login(deps, cfg.SessionTTL))
+	mux.HandleFunc("POST /api/auth/login", handler.Login(deps, cfg.SessionTTL, hasher))
 
 	// Authenticated.
 	mux.Handle("POST /api/auth/logout", authenticated(handler.Logout(deps)))
@@ -383,7 +389,7 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 			capBacklog(handler.UserScenarioIsochrone(deps, publisher, lg, cfg.BoardingWait)))))
 
 	// Admin-only.
-	mux.Handle("POST /api/admin/users", adminOnly(handler.CreateUser(deps)))
+	mux.Handle("POST /api/admin/users", adminOnly(handler.CreateUser(deps, hasher)))
 	mux.Handle("POST /api/admin/routes", adminOnly(handler.CreateRoute(deps)))
 	// Curating a prerendered isochrone is editorial content on a public page,
 	// so it sits behind the same admin gate — even though it hangs off the

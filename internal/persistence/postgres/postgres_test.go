@@ -2,12 +2,10 @@ package postgres_test
 
 import (
 	"context"
-	"os"
 	"testing"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/andrewcgraves/sparks-effect-api/internal/persistence/postgres"
+	"github.com/andrewcgraves/sparks-effect-api/internal/testdb"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
@@ -15,34 +13,35 @@ import (
 // domain types — scenario ids on routes, owner ids on services.
 func ptr[T any](v T) *T { return &v }
 
-// testDBURL resolves the throwaway Postgres connection string. It reads
-// TEST_DATABASE_URL (falling back to DATABASE_URL). When neither is set the
-// integration tests skip locally so `go test ./...` stays green without a DB —
-// but in CI (where the CI env var is present) a missing URL is a hard failure,
-// so a misconfigured pipeline can never pass green by silently skipping.
-func testDBURL(t *testing.T) string {
-	t.Helper()
-	url := os.Getenv("TEST_DATABASE_URL")
-	if url == "" {
-		url = os.Getenv("DATABASE_URL")
-	}
-	if url == "" {
-		if os.Getenv("CI") != "" {
-			t.Fatal("TEST_DATABASE_URL (or DATABASE_URL) must be set for integration tests in CI")
-		}
-		t.Skip("set TEST_DATABASE_URL to run Postgres integration tests (see `make db-up`)")
-	}
-	return url
-}
+// TestMain drops the migrated template database this package's tests are all
+// cloned from. See internal/testdb.
+func TestMain(m *testing.M) { testdb.Main(m) }
 
-// freshRepo returns a Repo against a freshly-reset, freshly-migrated database.
-// It drops and recreates the public schema so every test starts from an empty
-// database — which also exercises the "migrations run cleanly from empty" path.
+// freshRepo returns a Repo against a migrated database that belongs to this
+// test alone. It is a clone of the package's template rather than a
+// freshly-migrated database, which is both faster and — because no two tests
+// share a database any more — what lets this package run alongside the other
+// integration package instead of behind it.
+//
+// The "migrations apply cleanly to an empty database" property that the old
+// reset-and-migrate-per-test setup asserted incidentally is now asserted
+// directly, once, by TestMigrationsRunCleanlyOnEmptyDB.
 func freshRepo(t *testing.T) (*postgres.Repo, string) {
 	t.Helper()
-	url := testDBURL(t)
+	url := testdb.Fresh(t)
+	repo, err := postgres.Connect(context.Background(), url, 0)
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	t.Cleanup(repo.Close)
+	return repo, url
+}
+
+func TestMigrationsRunCleanlyOnEmptyDB(t *testing.T) {
+	// The one test that must not start from the migrated template: it is about
+	// the migrations themselves running against a database with no schema.
 	ctx := context.Background()
-	resetSchema(t, url)
+	url := testdb.Empty(t)
 	if err := postgres.Migrate(ctx, url); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
@@ -51,24 +50,7 @@ func freshRepo(t *testing.T) (*postgres.Repo, string) {
 		t.Fatalf("Connect: %v", err)
 	}
 	t.Cleanup(repo.Close)
-	return repo, url
-}
 
-func resetSchema(t *testing.T, url string) {
-	t.Helper()
-	ctx := context.Background()
-	conn, err := pgx.Connect(ctx, url)
-	if err != nil {
-		t.Fatalf("reset connect: %v", err)
-	}
-	defer func() { _ = conn.Close(ctx) }()
-	if _, err := conn.Exec(ctx, `DROP SCHEMA public CASCADE; CREATE SCHEMA public;`); err != nil {
-		t.Fatalf("reset schema: %v", err)
-	}
-}
-
-func TestMigrationsRunCleanlyOnEmptyDB(t *testing.T) {
-	repo, _ := freshRepo(t)
 	scenarios, err := repo.ListCuratedScenarios(context.Background())
 	if err != nil {
 		t.Fatalf("ListCuratedScenarios: %v", err)

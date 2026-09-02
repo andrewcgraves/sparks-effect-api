@@ -5,7 +5,11 @@ Use the Makefile for all build/test tasks (Go project).
 - `make dev-workflow` — run before pushing: test, vet, lint, build (single verification step)
 - `make build` — compile to `./bin/sparks-effect-api`
 - `make run` — build and run
-- `make test` — `go test ./... -race -cover`
+- `make test` — `go test ./... -cover` (no race detector; the fast loop)
+- `make test-race` — the same suite with `-race`. Run it when a change touches
+  concurrency; CI runs it against real services regardless.
+- `make itest` — the full raced integration suite against throwaway Postgres and
+  RabbitMQ containers, which is what CI gates on
 - `make vet` / `make lint` — static checks
 - `make tidy` — `go mod tidy`
 - `make clean` — remove build artifacts
