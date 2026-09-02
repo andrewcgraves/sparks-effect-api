@@ -197,6 +197,21 @@ Check it's up:
 curl localhost:8080/healthz
 ```
 
+## CORS
+
+Cross-origin requests are allowed from the project's own frontends, always and
+regardless of any flag:
+
+- `https://sparks-effect.app` and any subdomain of it (`https://dev.sparks-effect.app`,
+  and whatever comes next — the whole domain matches, so a new subdomain needs
+  no code change)
+- `https://sparks-effect-website.vercel.app`, the production Vercel alias
+- Vercel preview deployments on the `andrewcgraves-projects` team
+
+Everything else is refused. The match is HTTPS-only and requires a real
+subdomain boundary, so a lookalike such as `notsparks-effect.app` does not get
+in.
+
 ## Local SPA testing (CORS)
 
 When running the Vue frontend locally (e.g. `npm run dev` on `http://localhost:5173`), the browser will block cross-origin requests unless CORS headers are present. Enable them for localhost origins only:

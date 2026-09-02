@@ -226,6 +226,83 @@ func TestCORS_flagOff_localhostOrigin(t *testing.T) {
 	}
 }
 
+// The project's own domain is allowed whole: the apex and dev. are the two
+// hosts in use today, but the point of the domain match is that a third does
+// not need a code change to reach the API.
+func TestCORS_sparksEffectOrigin_allowedRegardlessOfFlag(t *testing.T) {
+	for _, origin := range []string{
+		"https://sparks-effect.app",
+		"https://dev.sparks-effect.app",
+	} {
+		store, err := transit.NewStore(transit.DefaultBoardingWaitPolicy())
+		if err != nil {
+			t.Fatalf("NewStore: %v", err)
+		}
+		srv := New(config.Config{Port: "8080", AllowLocalhostCORS: false}, store, nil, &routing.FakePublisher{}, logger.Discard())
+
+		req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+		req.Header.Set("Origin", origin)
+		rec := httptest.NewRecorder()
+		srv.Handler.ServeHTTP(rec, req)
+
+		if got := rec.Header().Get("Access-Control-Allow-Origin"); got != origin {
+			t.Errorf("Access-Control-Allow-Origin: want %q, got %q", origin, got)
+		}
+	}
+}
+
+// The preflight is the half that matters for an authenticated POST from the
+// SPA: without a 204 on OPTIONS the browser never sends the real request.
+func TestCORS_sparksEffectOrigin_OPTIONS(t *testing.T) {
+	store, err := transit.NewStore(transit.DefaultBoardingWaitPolicy())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: false}, store, nil, &routing.FakePublisher{}, logger.Discard())
+
+	const origin = "https://dev.sparks-effect.app"
+	req := httptest.NewRequest(http.MethodOptions, "/api/isochrone", nil)
+	req.Header.Set("Origin", origin)
+	rec := httptest.NewRecorder()
+	srv.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Errorf("status: want %d, got %d", http.StatusNoContent, rec.Code)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != origin {
+		t.Errorf("Access-Control-Allow-Origin: want %q, got %q", origin, got)
+	}
+}
+
+func TestIsSparksEffectOrigin(t *testing.T) {
+	tests := []struct {
+		origin string
+		want   bool
+	}{
+		{origin: "https://sparks-effect.app", want: true},
+		{origin: "https://dev.sparks-effect.app", want: true},
+		{origin: "https://api.dev.sparks-effect.app", want: true},
+		// Port and case are part of the Origin a browser may send.
+		{origin: "https://sparks-effect.app:443", want: true},
+		{origin: "https://DEV.Sparks-Effect.app", want: true},
+		// The domain is served over TLS; a plaintext claim on it is not ours.
+		{origin: "http://sparks-effect.app", want: false},
+		// A lookalike registration must not match on a bare string suffix.
+		{origin: "https://notsparks-effect.app", want: false},
+		{origin: "https://evil-sparks-effect.app", want: false},
+		// Nor a host that only carries the domain as a prefix of its own.
+		{origin: "https://sparks-effect.app.evil.com", want: false},
+		{origin: "https://evil.com", want: false},
+		{origin: "", want: false},
+		{origin: "null", want: false},
+	}
+	for _, tt := range tests {
+		if got := isSparksEffectOrigin(tt.origin); got != tt.want {
+			t.Errorf("isSparksEffectOrigin(%q) = %v, want %v", tt.origin, got, tt.want)
+		}
+	}
+}
+
 func TestIsVercelPreviewOrigin(t *testing.T) {
 	tests := []struct {
 		origin string

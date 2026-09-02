@@ -470,6 +470,16 @@ var allowedOrigins = map[string]bool{
 // alias already in allowedOrigins.
 const vercelPreviewHost = "andrewcgraves-projects.vercel.app"
 
+// sparksEffectHost is the project's own domain. Every host under it — the
+// apex, dev., and whatever subdomain comes next — serves this project's own
+// frontend against this API, so the domain is allowed as a whole rather than
+// re-listed in allowedOrigins each time one appears.
+//
+// Unlike the Vercel team slug above, the match here requires a real subdomain
+// boundary: the dot is part of the suffix, so a lookalike registration such as
+// notsparks-effect.app cannot slip in on a bare string suffix.
+const sparksEffectHost = "sparks-effect.app"
+
 func cors(next http.Handler, allowLocalhost bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
@@ -496,10 +506,27 @@ func originAllowed(origin string, allowLocalhost bool) bool {
 	if origin == "" {
 		return false
 	}
-	if allowedOrigins[origin] || isVercelPreviewOrigin(origin) {
+	if allowedOrigins[origin] || isSparksEffectOrigin(origin) || isVercelPreviewOrigin(origin) {
 		return true
 	}
 	return allowLocalhost && isLocalhostOrigin(origin)
+}
+
+// isSparksEffectOrigin reports whether origin is an HTTPS host on the project's
+// own domain — the apex sparks-effect.app or any subdomain of it, such as
+// dev.sparks-effect.app. HTTPS only, matching the rest of the allowlist: the
+// domain is served over TLS, so a plaintext Origin claiming it is not one of
+// ours.
+func isSparksEffectOrigin(origin string) bool {
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	if u.Scheme != "https" || u.User != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	return host == sparksEffectHost || strings.HasSuffix(host, "."+sparksEffectHost)
 }
 
 // isVercelPreviewOrigin reports whether origin is an HTTPS deployment on the
