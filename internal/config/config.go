@@ -64,6 +64,12 @@ type Config struct {
 	// A malformed or incomplete setting falls back to none — same soft-default
 	// pattern as other env knobs; see loadBoardingWait.
 	BoardingWait transit.BoardingWaitPolicy
+	// WorkerToken is the shared bearer token the routing worker presents on
+	// /api/internal/... endpoints (SPA-273). Empty means those routes are
+	// registered as 503s rather than left unauthenticated — a missing
+	// credential must not open the writes that used to require a database
+	// connection.
+	WorkerToken string
 }
 
 // defaultSessionTTL bounds how long a stolen token stays useful. A day is short
@@ -124,6 +130,7 @@ func Load() Config {
 		BootstrapAdminPassword: os.Getenv("BOOTSTRAP_ADMIN_PASSWORD"),
 		MaxInFlightIsochrones:  loadMaxInFlightIsochrones(),
 		BoardingWait:           loadBoardingWait(),
+		WorkerToken:            os.Getenv("WORKER_TOKEN"),
 	}
 }
 

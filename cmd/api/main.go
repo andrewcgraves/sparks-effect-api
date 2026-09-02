@@ -79,6 +79,10 @@ func main() {
 		lg.Info("AMQP_URL not set; the isochrone endpoints will answer 503")
 	}
 
+	if cfg.DatabaseURL != "" && cfg.WorkerToken == "" {
+		lg.Info("WORKER_TOKEN not set; the routing worker endpoints will answer 503")
+	}
+
 	srv := server.New(cfg, store, deps, publisher, lg)
 
 	go func() {

@@ -171,3 +171,73 @@ func TestUserFromEmptyContext(t *testing.T) {
 		t.Error("UserFrom on a bare context must report no identity")
 	}
 }
+
+func TestRequireWorkerTokenAcceptsTheSharedSecret(t *testing.T) {
+	var reached bool
+	h := auth.RequireWorkerToken("worker-secret")(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		reached = true
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/internal/worker", nil)
+	req.Header.Set("Authorization", "Bearer worker-secret")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", rec.Code)
+	}
+	if !reached {
+		t.Error("handler was not reached")
+	}
+}
+
+func TestRequireWorkerTokenRejectsBadCredentials(t *testing.T) {
+	tests := []struct {
+		name   string
+		header string
+	}{
+		{"no Authorization header", ""},
+		{"wrong token", "Bearer other-secret"},
+		{"user-looking token", "Bearer good-token"},
+		{"wrong scheme", "Basic worker-secret"},
+		{"scheme with no token", "Bearer "},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var reached bool
+			h := auth.RequireWorkerToken("worker-secret")(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				reached = true
+			}))
+			req := httptest.NewRequest(http.MethodGet, "/api/internal/worker", nil)
+			if tt.header != "" {
+				req.Header.Set("Authorization", tt.header)
+			}
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			if rec.Code != http.StatusUnauthorized {
+				t.Errorf("status = %d, want 401", rec.Code)
+			}
+			if reached {
+				t.Error("handler ran despite a rejected token")
+			}
+		})
+	}
+}
+
+func TestRequireWorkerTokenRejectsWhenUnset(t *testing.T) {
+	var reached bool
+	h := auth.RequireWorkerToken("")(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		reached = true
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/api/internal/worker", nil)
+	req.Header.Set("Authorization", "Bearer worker-secret")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503 when the expected token is empty", rec.Code)
+	}
+	if reached {
+		t.Error("handler ran with no worker token configured")
+	}
+}

@@ -13,6 +13,7 @@ func TestLoad_defaults(t *testing.T) {
 	t.Setenv("ROUTING_QUEUE", "")
 	t.Setenv("BOARDING_WAIT_POLICY", "")
 	t.Setenv("BOARDING_WAIT_FIXED_SECS", "")
+	t.Setenv("WORKER_TOKEN", "")
 
 	cfg := Load()
 	if cfg.Port != "8080" {
@@ -29,12 +30,16 @@ func TestLoad_defaults(t *testing.T) {
 	if cfg.RoutingQueue != "routing.jobs" {
 		t.Errorf("RoutingQueue: want routing.jobs, got %q", cfg.RoutingQueue)
 	}
+	if cfg.WorkerToken != "" {
+		t.Errorf("WorkerToken: want empty, got %q", cfg.WorkerToken)
+	}
 }
 
 func TestLoad_fromEnv(t *testing.T) {
 	t.Setenv("PORT", "9090")
 	t.Setenv("AMQP_URL", "amqp://guest:guest@broker:5672/")
 	t.Setenv("ROUTING_QUEUE", "custom.queue")
+	t.Setenv("WORKER_TOKEN", "shared-secret")
 
 	cfg := Load()
 	if cfg.Port != "9090" {
@@ -45,6 +50,9 @@ func TestLoad_fromEnv(t *testing.T) {
 	}
 	if cfg.RoutingQueue != "custom.queue" {
 		t.Errorf("RoutingQueue: want custom.queue, got %q", cfg.RoutingQueue)
+	}
+	if cfg.WorkerToken != "shared-secret" {
+		t.Errorf("WorkerToken: want shared-secret, got %q", cfg.WorkerToken)
 	}
 }
 

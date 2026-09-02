@@ -873,11 +873,11 @@ func scanJobInto(row pgx.Row, j *transit.Job) error {
 
 // --- Routing jobs ---
 //
-// Only three of these exist because only three are this repository's to do. A
-// routing job is inserted here, polled here, and — in the one case the API can
-// diagnose itself, a publish the broker never confirmed — failed here. Every
-// other transition belongs to the worker in the other repository, which owns
-// the running, succeeded, and result-bearing writes.
+// The API inserts a routing job, polls it, and — in the one case it can
+// diagnose itself, a publish the broker never confirmed — fails it. The
+// worker's transitions (running, succeeded, the result, the egress cache)
+// used to be SQL this repository did not run; since SPA-273 they arrive as
+// authenticated HTTP and the SQL lives in worker.go.
 
 const routingJobColumns = `id, status, compile_job_id, owner_id, lat, lng,
 	budget_mins, mode, result, error, created_at, updated_at`
@@ -943,16 +943,9 @@ func (r *Repo) CountInFlightRoutingJobs(ctx context.Context, within time.Duratio
 // worker will ever see the message. Leaving it queued would strand a client
 // polling something that is never coming.
 func (r *Repo) FailRoutingJob(ctx context.Context, id, errMsg string) error {
-	tag, err := r.pool.Exec(ctx,
+	return r.execRoutingJob(ctx, "FailRoutingJob", id,
 		`UPDATE routing_jobs SET status = $2, error = $3, updated_at = now() WHERE id = $1`,
 		id, transit.JobStatusFailed, errMsg)
-	if err != nil {
-		return wrap("FailRoutingJob", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("postgres: FailRoutingJob: routing job %q not found", id)
-	}
-	return nil
 }
 
 func wrap(op string, err error) error {
