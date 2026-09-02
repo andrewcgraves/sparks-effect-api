@@ -103,3 +103,45 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+  # Staging is whatever `main` last published. Linear's staging pipeline is a
+  # separate stream from production because the two environments can (and do)
+  # hold different commits at the same time — see docs/releases.md.
+  linear-staging:
+    name: Record staging release in Linear
+    needs: [check, build, publish]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # linear-release-action scans commits since the last Linear release,
+          # which needs the full history.
+          fetch-depth: 0
+
+      # Secrets cannot be referenced in `if:` (GitHub treats that as a
+      # workflow-file error), so the empty check lives in a shell step and
+      # gates the action via an output, same idea as RAILWAY_TOKEN.
+      - name: Check for the staging pipeline key
+        id: linear
+        env:
+          LINEAR_ACCESS_KEY_STAGING: ${{ secrets.LINEAR_ACCESS_KEY_STAGING }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${LINEAR_ACCESS_KEY_STAGING:-}" ]]; then
+            echo "::notice::LINEAR_ACCESS_KEY_STAGING is not set — create the 'API staging' pipeline in Linear and add its access key as this repository secret"
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Sync Linear staging release
+        if: steps.linear.outputs.configured == 'true'
+        uses: linear/linear-release-action@v0
+        with:
+          access_key: ${{ secrets.LINEAR_ACCESS_KEY_STAGING }}
+          links: |
+            CI run=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            Image=https://github.com/${{ github.repository }}/pkgs/container/sparks-effect-api

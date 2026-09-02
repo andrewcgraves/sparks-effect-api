@@ -72,9 +72,47 @@ workflow run:
 | --- | --- | --- |
 | `RAILWAY_TOKEN` | secret | Railway **project token** scoped to the production environment. The token is what makes the redeploy hit production and nothing else. |
 | `RAILWAY_SERVICE` | variable | Name (or id) of the production API service. Optional if the token's project has a single service. |
+| `LINEAR_ACCESS_KEY_PRODUCTION` | secret | Access key for the **API production** Linear release pipeline. Lives on this environment so only a promotion can write a production release. |
+
+And at the repository level (Settings → Secrets and variables → Actions), not
+on the `production` environment — staging records every trunk publish:
+
+| name | kind | what it is |
+| --- | --- | --- |
+| `LINEAR_ACCESS_KEY_STAGING` | secret | Access key for the **API staging** Linear release pipeline. |
 
 Without `RAILWAY_TOKEN` the release still re-tags `:prd`; it just leaves the
 redeploy to be clicked in Railway. `GITHUB_TOKEN` covers GHCR — nothing to set.
+Without either Linear key the matching sync step is skipped rather than failed,
+so a missing pipeline does not block a publish or a promotion.
 
 Adding required reviewers to that `production` environment is what puts a human
 approval in front of a promotion, if that is wanted later.
+
+## Linear
+
+Linear Releases answer "which issues are on staging, and which made it to
+production?" — not by reading a branch, but by scanning the commits this repo
+already ships.
+
+Two **continuous** pipelines, not one pipeline with stages. Staging auto-deploys
+every commit on `main` while production lags on a tagged SHA, so the two
+environments hold different commits at the same time. Linear's rule for that
+shape is two pipelines:
+
+| Pipeline | Created when | Version |
+| --- | --- | --- |
+| API staging | `main` publishes `sha-<commit>` + `:staging` | short SHA |
+| API production | a `vMAJOR.MINOR.PATCH` tag promotes that image as `:prd` | the git tag |
+
+The action scans commits since the last release in **that** pipeline, pulls
+`SPA-123` identifiers out of subjects and squash messages (`SPA-258: … (#69)`),
+and attaches those issues to the new release. An issue that merged to `main`
+shows up on API staging immediately; it only appears on API production when a
+tag that contains it is promoted.
+
+Create both pipelines in Linear (Settings → Releases), generate an access key
+per pipeline, and paste them into the secrets in the table above. The first
+sync in each pipeline only sees the current commit — there is no previous SHA
+to bound the range from. To backfill, re-run with an explicit `--base-ref`
+pointing at the last commit that should count as already released.
