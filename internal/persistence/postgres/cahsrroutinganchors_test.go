@@ -81,12 +81,13 @@ func TestCAHSRRoutingAnchorsMigrationMatchesTheSeed(t *testing.T) {
 	}
 }
 
-// rewindCAHSRRoutingAnchorsMigration unwinds 00023 and is the current tail of
-// the rewind chain that starts in snapmigration_test.go — 00023 is the highest
-// migration today, so nothing needs unwinding above it the way every other link
-// in the chain unwinds the one above. Any migration added after this one must
-// extend the chain here, or every rewinding test in this package starts failing
-// with goose's "missing migrations before current version".
+// rewindCAHSRRoutingAnchorsMigration unwinds 00023, unwinding the migration
+// above it first the way every link in this chain does. 00024 sits above it, so
+// the tail of the rewind chain that starts in snapmigration_test.go is now
+// rewindIsochroneCacheDepartsOnMigration. Goose refuses to re-apply a migration
+// older than the highest version recorded, so anything rewinding a migration
+// below this one must unrecord that too — rewindOwnedDomainModelsMigration does
+// that by calling this.
 //
 // 00023 changes no schema, so unwinding it is its own Down: clear the three
 // anchors it set, then unrecord the version. Clearing matters even though a
@@ -95,6 +96,7 @@ func TestCAHSRRoutingAnchorsMigrationMatchesTheSeed(t *testing.T) {
 // hold the value the migration is supposed to write.
 func rewindCAHSRRoutingAnchorsMigration(t *testing.T, url string) {
 	t.Helper()
+	rewindIsochroneCacheDepartsOnMigration(t, url)
 	exec(t, url,
 		`UPDATE stations SET routing_location = NULL
 		   WHERE id IN ('`+maderaID+`', '`+kingsTulareID+`', '`+bakersfieldID+`')`,
@@ -182,9 +184,11 @@ func TestCAHSRRoutingAnchorsMigrationIsSafeToReRun(t *testing.T) {
 	}
 
 	// Forget that it ran while keeping the data it wrote, so the second pass
-	// meets exactly the state a YAML-seeded database would present. Nothing
-	// sits above 00023 yet, so unrecording it is enough on its own.
-	exec(t, url, `DELETE FROM goose_db_version WHERE version_id = 23`)
+	// meets exactly the state a YAML-seeded database would present. 00024 is
+	// unrecorded too: goose applies only versions above the highest one
+	// recorded, so leaving it would make this re-run skip 00023 and prove
+	// nothing. 00024 is re-runnable over the schema it already wrote.
+	exec(t, url, `DELETE FROM goose_db_version WHERE version_id IN (23, 24)`)
 	if err := postgres.Migrate(context.Background(), url); err != nil {
 		t.Fatalf("migration re-run over the data it already wrote: %v", err)
 	}
