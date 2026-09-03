@@ -64,6 +64,16 @@ type Config struct {
 	// A malformed or incomplete setting falls back to none — same soft-default
 	// pattern as other env knobs; see loadBoardingWait.
 	BoardingWait transit.BoardingWaitPolicy
+	// PasswordHashCost is the bcrypt cost new passwords are hashed at. Zero —
+	// which is what Load always leaves it as — means auth's default cost.
+	//
+	// Deliberately not read from the environment. Its only caller is the test
+	// suite, which sets bcrypt.MinCost so that provisioning and logging in
+	// dozens of accounts does not cost dozens of deliberately-slow hashes. An
+	// env knob would put that same lever within reach of a production deploy,
+	// where a mistyped value silently weakens every stored password; a field
+	// the loader never populates cannot be set by accident.
+	PasswordHashCost int
 }
 
 // defaultSessionTTL bounds how long a stolen token stays useful. A day is short

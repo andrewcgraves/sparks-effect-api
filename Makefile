@@ -27,7 +27,7 @@ TEST_MQ_CONTAINER := sparks-effect-test-mq
 TEST_MQ_PORT     := 5672
 TEST_AMQP_URL    := amqp://guest:guest@localhost:$(TEST_MQ_PORT)/
 
-.PHONY: all deps build run test test-integration itest \
+.PHONY: all deps build run test test-race test-integration itest \
 	db-up db-wait db-down mq-up mq-wait mq-down vet lint tidy clean dev-workflow
 
 all: build
@@ -35,6 +35,11 @@ all: build
 # dev-workflow runs everything a change needs to pass before it's pushed:
 # tests, vet, lint, and a build. Meant to be run end-to-end by humans or
 # agents as a single verification step.
+#
+# It runs the unraced `test`, so that a step meant to be run on every change
+# stays fast enough to actually be run on every change. The raced suite against
+# real services is what gates the merge — CI runs it on the PR, and `make itest`
+# reproduces it locally.
 dev-workflow: test vet lint build
 
 deps:
@@ -49,7 +54,18 @@ run: build
 # test runs the full suite. The Postgres and RabbitMQ integration tests skip
 # themselves unless TEST_DATABASE_URL / TEST_AMQP_URL are set, so this stays
 # green with neither service running.
+#
+# Deliberately not raced: the detector costs roughly a second of process
+# overhead per test binary and slows the Go code inside them severalfold, which
+# on this repository is the difference between a ~6s edit loop and a ~56s one.
+# It is not skipped, only moved — `make test-race` below, and CI, still run it.
 test: deps
+	go test ./... -cover
+
+# test-race is `test` with the race detector, for when a change touches
+# concurrency (internal/worker and internal/routing above all) and for CI. Run
+# it before pushing anything that adds a goroutine, a channel, or shared state.
+test-race: deps
 	go test ./... -race -cover
 
 # test-integration runs the full suite with both backing services' URLs
@@ -57,13 +73,17 @@ test: deps
 # or broker via TEST_DATABASE_URL / TEST_AMQP_URL; defaults to the `make db-up`
 # and `make mq-up` containers. Used by both `make itest` and CI.
 #
-# -p 1 runs one package at a time. More than one package's integration tests
-# reset the shared throwaway database to a known-empty state, and Go otherwise
-# runs packages in parallel — so without this they wipe each other's schema
-# mid-test and fail spuriously.
+# Raced, because this is the run that gates a merge and it is the one that
+# exercises the queue and worker paths against real services.
+#
+# This used to need -p 1. Every package's integration tests reset one shared
+# database globally, so two packages running at once wiped each other's schema
+# mid-test — which meant the two slowest packages in the repository could never
+# overlap. They now take a database apiece from internal/testdb and share
+# nothing, so Go's default per-package parallelism is safe again.
 test-integration: deps
 	TEST_DATABASE_URL="$(TEST_DATABASE_URL)" TEST_AMQP_URL="$(TEST_AMQP_URL)" \
-		go test ./... -race -cover -p 1
+		go test ./... -race -cover
 
 # itest brings up a throwaway Postgres and RabbitMQ, runs the integration suite,
 # and tears them down again — the one-command local equivalent of the CI job.

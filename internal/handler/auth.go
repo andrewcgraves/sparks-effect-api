@@ -40,7 +40,7 @@ const invalidCredentials = "invalid email or password"
 //
 // There is deliberately no counterpart registration handler: accounts exist
 // only via the admin-gated CreateUser endpoint.
-func Login(store AuthStore, ttl time.Duration) http.HandlerFunc {
+func Login(store AuthStore, ttl time.Duration, hasher auth.Hasher) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req loginRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -60,7 +60,7 @@ func Login(store AuthStore, ttl time.Duration) http.HandlerFunc {
 		// failure modes cost the same time as well as returning the same body.
 		// Skipping the work here would leak account existence through latency.
 		if !found {
-			auth.VerifyNothing(req.Password)
+			hasher.VerifyNothing(req.Password)
 			writeError(w, http.StatusUnauthorized, invalidCredentials)
 			return
 		}

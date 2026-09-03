@@ -14,7 +14,7 @@ import (
 // is what stands in for a signup route in an invite-only system.
 func TestCreateUserProvisionsALoggableAccount(t *testing.T) {
 	store := newFakeAuthStore(t)
-	rec := postJSON(t, handler.CreateUser(store), "/api/admin/users",
+	rec := postJSON(t, handler.CreateUser(store, testHasher), "/api/admin/users",
 		`{"email":"new@example.com","name":"New Person","password":"their-password"}`)
 
 	if rec.Code != http.StatusCreated {
@@ -36,7 +36,7 @@ func TestCreateUserProvisionsALoggableAccount(t *testing.T) {
 	}
 
 	// The provisioned account must actually be able to log in.
-	login := postJSON(t, handler.Login(store, timeHour), "/api/auth/login",
+	login := postJSON(t, handler.Login(store, timeHour, testHasher), "/api/auth/login",
 		`{"email":"new@example.com","password":"their-password"}`)
 	if login.Code != http.StatusOK {
 		t.Errorf("provisioned account could not log in: status %d, body %s",
@@ -48,13 +48,13 @@ func TestCreateUserProvisionsALoggableAccount(t *testing.T) {
 // normalized form — otherwise an account created with capitals is unreachable.
 func TestProvisionedEmailIsCaseInsensitiveAtLogin(t *testing.T) {
 	store := newFakeAuthStore(t)
-	rec := postJSON(t, handler.CreateUser(store), "/api/admin/users",
+	rec := postJSON(t, handler.CreateUser(store, testHasher), "/api/admin/users",
 		`{"email":"  Mixed.Case@Example.com ","password":"pw"}`)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201", rec.Code)
 	}
 
-	login := postJSON(t, handler.Login(store, timeHour), "/api/auth/login",
+	login := postJSON(t, handler.Login(store, timeHour, testHasher), "/api/auth/login",
 		`{"email":"MIXED.CASE@example.com","password":"pw"}`)
 	if login.Code != http.StatusOK {
 		t.Errorf("mixed-case login failed: status %d, body %s", login.Code, login.Body.String())
@@ -63,7 +63,7 @@ func TestProvisionedEmailIsCaseInsensitiveAtLogin(t *testing.T) {
 
 func TestCreateUserStoresOnlyAHash(t *testing.T) {
 	store := newFakeAuthStore(t)
-	postJSON(t, handler.CreateUser(store), "/api/admin/users",
+	postJSON(t, handler.CreateUser(store, testHasher), "/api/admin/users",
 		`{"email":"new@example.com","password":"their-password"}`)
 
 	rec := store.users["new@example.com"]
@@ -77,7 +77,7 @@ func TestCreateUserStoresOnlyAHash(t *testing.T) {
 
 func TestCreateUserCanGrantAdmin(t *testing.T) {
 	store := newFakeAuthStore(t)
-	rec := postJSON(t, handler.CreateUser(store), "/api/admin/users",
+	rec := postJSON(t, handler.CreateUser(store, testHasher), "/api/admin/users",
 		`{"email":"admin2@example.com","password":"pw","is_admin":true}`)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201", rec.Code)
@@ -104,7 +104,7 @@ func TestCreateUserValidatesInput(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			store := newFakeAuthStore(t)
 			before := len(store.created)
-			rec := postJSON(t, handler.CreateUser(store), "/api/admin/users", tt.body)
+			rec := postJSON(t, handler.CreateUser(store, testHasher), "/api/admin/users", tt.body)
 			if rec.Code != tt.want {
 				t.Errorf("status = %d, want %d; body %s", rec.Code, tt.want, rec.Body.String())
 			}
