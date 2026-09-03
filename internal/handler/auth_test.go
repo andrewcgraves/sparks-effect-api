@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
@@ -30,13 +32,13 @@ type userRecord struct {
 
 func newFakeAuthStore(t *testing.T) *fakeAuthStore {
 	t.Helper()
-	hash, err := auth.HashPassword("correct-password")
+	hash, err := testHasher.Hash("correct-password")
 	if err != nil {
-		t.Fatalf("HashPassword: %v", err)
+		t.Fatalf("Hash: %v", err)
 	}
-	adminHash, err := auth.HashPassword("admin-password")
+	adminHash, err := testHasher.Hash("admin-password")
 	if err != nil {
-		t.Fatalf("HashPassword: %v", err)
+		t.Fatalf("Hash: %v", err)
 	}
 	return &fakeAuthStore{
 		users: map[string]userRecord{
@@ -99,6 +101,12 @@ func (f *fakeAuthStore) CreateUser(_ context.Context, u transit.User, hash strin
 	return nil
 }
 
+// testHasher is the bcrypt cost every handler test hashes at. These tests care
+// that the password path is wired up, not that it is slow, so they pay
+// bcrypt.MinCost (~1ms) instead of DefaultCost (~46ms). The properties that do
+// depend on the real cost are asserted in the auth package's own tests.
+var testHasher = auth.NewHasher(bcrypt.MinCost)
+
 func postJSON(t *testing.T, h http.Handler, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
@@ -110,7 +118,7 @@ func postJSON(t *testing.T, h http.Handler, path, body string) *httptest.Respons
 
 func TestLoginSuccessReturnsUsableToken(t *testing.T) {
 	store := newFakeAuthStore(t)
-	h := handler.Login(store, time.Hour)
+	h := handler.Login(store, time.Hour, testHasher)
 
 	rec := postJSON(t, h, "/api/auth/login",
 		`{"email":"user@example.com","password":"correct-password"}`)
@@ -150,7 +158,7 @@ func TestLoginSuccessReturnsUsableToken(t *testing.T) {
 // reads it.
 func TestLoginResponseOmitsPasswordHash(t *testing.T) {
 	store := newFakeAuthStore(t)
-	rec := postJSON(t, handler.Login(store, time.Hour), "/api/auth/login",
+	rec := postJSON(t, handler.Login(store, time.Hour, testHasher), "/api/auth/login",
 		`{"email":"user@example.com","password":"correct-password"}`)
 
 	body := rec.Body.String()
@@ -175,7 +183,7 @@ func TestLoginRejectsBadCredentials(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			store := newFakeAuthStore(t)
-			rec := postJSON(t, handler.Login(store, time.Hour), "/api/auth/login", tt.body)
+			rec := postJSON(t, handler.Login(store, time.Hour, testHasher), "/api/auth/login", tt.body)
 
 			if rec.Code != http.StatusUnauthorized {
 				t.Errorf("status = %d, want 401; body %s", rec.Code, rec.Body.String())
@@ -191,7 +199,7 @@ func TestLoginRejectsBadCredentials(t *testing.T) {
 // endpoint becomes an account-enumeration oracle.
 func TestLoginDoesNotRevealWhetherAccountExists(t *testing.T) {
 	store := newFakeAuthStore(t)
-	h := handler.Login(store, time.Hour)
+	h := handler.Login(store, time.Hour, testHasher)
 
 	known := postJSON(t, h, "/api/auth/login", `{"email":"user@example.com","password":"wrong"}`)
 	unknown := postJSON(t, h, "/api/auth/login", `{"email":"ghost@example.com","password":"wrong"}`)
@@ -206,7 +214,7 @@ func TestLoginDoesNotRevealWhetherAccountExists(t *testing.T) {
 
 func TestLoginRejectsMalformedJSON(t *testing.T) {
 	store := newFakeAuthStore(t)
-	rec := postJSON(t, handler.Login(store, time.Hour), "/api/auth/login", `{"email":`)
+	rec := postJSON(t, handler.Login(store, time.Hour, testHasher), "/api/auth/login", `{"email":`)
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", rec.Code)
 	}
@@ -217,7 +225,7 @@ func TestLoginRejectsMalformedJSON(t *testing.T) {
 func TestLoginSurfacesStoreErrors(t *testing.T) {
 	store := newFakeAuthStore(t)
 	store.failWith = errors.New("db is down")
-	rec := postJSON(t, handler.Login(store, time.Hour), "/api/auth/login",
+	rec := postJSON(t, handler.Login(store, time.Hour, testHasher), "/api/auth/login",
 		`{"email":"user@example.com","password":"correct-password"}`)
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("status = %d, want 500", rec.Code)

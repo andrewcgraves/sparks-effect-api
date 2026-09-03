@@ -195,7 +195,7 @@ func bootstrapAdmin(ctx context.Context, cfg config.Config, repo *postgres.Repo,
 		return nil
 	}
 
-	hash, err := auth.HashPassword(cfg.BootstrapAdminPassword)
+	hash, err := auth.NewHasher(cfg.PasswordHashCost).Hash(cfg.BootstrapAdminPassword)
 	if err != nil {
 		return err
 	}

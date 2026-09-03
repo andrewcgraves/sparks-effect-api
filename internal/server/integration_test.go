@@ -5,12 +5,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
@@ -18,6 +17,7 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/logger"
 	"github.com/andrewcgraves/sparks-effect-api/internal/persistence/postgres"
 	"github.com/andrewcgraves/sparks-effect-api/internal/routing"
+	"github.com/andrewcgraves/sparks-effect-api/internal/testdb"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
@@ -25,6 +25,19 @@ import (
 // database and the real mux: an admin-provisioned account logs in, its token
 // works on protected routes, admin gating holds, and ownership scoping is
 // enforced server-side.
+
+// TestMain drops the migrated template database every test here is cloned
+// from. See internal/testdb.
+func TestMain(m *testing.M) { testdb.Main(m) }
+
+// testHasher is the bcrypt cost these tests provision and log in at. Every one
+// of them creates at least one account and logs into it, and several do so
+// three or four times over; at bcrypt.DefaultCost that is ~46ms of deliberate
+// key-stretching per operation, which was the single largest thing this file
+// spent its time on. Nothing hashed here outlives the throwaway database, so
+// the cost buys nothing. auth's own tests still cover the properties that do
+// depend on the production cost.
+var testHasher = auth.NewHasher(bcrypt.MinCost)
 
 func integrationServer(t *testing.T) (http.Handler, *postgres.Repo) {
 	t.Helper()
@@ -37,31 +50,12 @@ func integrationServer(t *testing.T) (http.Handler, *postgres.Repo) {
 // written against.
 func integrationServerCapped(t *testing.T, maxInFlight int) (http.Handler, *postgres.Repo) {
 	t.Helper()
-	url := os.Getenv("TEST_DATABASE_URL")
-	if url == "" {
-		url = os.Getenv("DATABASE_URL")
-	}
-	if url == "" {
-		if os.Getenv("CI") != "" {
-			t.Fatal("TEST_DATABASE_URL (or DATABASE_URL) must be set for integration tests in CI")
-		}
-		t.Skip("set TEST_DATABASE_URL to run auth integration tests (see `make db-up`)")
-	}
-
 	ctx := context.Background()
-	conn, err := pgx.Connect(ctx, url)
-	if err != nil {
-		t.Fatalf("reset connect: %v", err)
-	}
-	if _, err := conn.Exec(ctx, `DROP SCHEMA public CASCADE; CREATE SCHEMA public;`); err != nil {
-		t.Fatalf("reset schema: %v", err)
-	}
-	_ = conn.Close(ctx)
 
-	if err := postgres.Migrate(ctx, url); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
-	repo, err := postgres.Connect(ctx, url, 0)
+	// A migrated database of this test's own, rather than a global reset of one
+	// shared with every other test in the repository. See internal/testdb for
+	// why that sharing was what forced `go test -p 1`.
+	repo, err := postgres.Connect(ctx, testdb.Fresh(t), 0)
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -71,16 +65,21 @@ func integrationServerCapped(t *testing.T, maxInFlight int) (http.Handler, *post
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	cfg := config.Config{Port: "8080", SessionTTL: time.Hour, MaxInFlightIsochrones: maxInFlight}
+	cfg := config.Config{
+		Port:                  "8080",
+		SessionTTL:            time.Hour,
+		MaxInFlightIsochrones: maxInFlight,
+		PasswordHashCost:      testHasher.Cost(),
+	}
 	return New(cfg, store, repo, &routing.FakePublisher{}, logger.Discard()).Handler, repo
 }
 
 // provisionAdmin stands in for the bootstrap-admin path in main.
 func provisionAdmin(t *testing.T, repo *postgres.Repo, email, password string) string {
 	t.Helper()
-	hash, err := auth.HashPassword(password)
+	hash, err := testHasher.Hash(password)
 	if err != nil {
-		t.Fatalf("HashPassword: %v", err)
+		t.Fatalf("Hash: %v", err)
 	}
 	id, err := ids.NewUUID()
 	if err != nil {

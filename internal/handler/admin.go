@@ -28,7 +28,9 @@ type createUserRequest struct {
 // CreateUser provisions an account. This is the system's only account-creation
 // path — it is registered behind RequireAdmin, which is what makes the API
 // invite-only: without an existing admin, no account can come into being.
-func CreateUser(store UserStore) http.HandlerFunc {
+//
+// hasher fixes the bcrypt cost new passwords are stored at; see auth.Hasher.
+func CreateUser(store UserStore, hasher auth.Hasher) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req createUserRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -58,7 +60,7 @@ func CreateUser(store UserStore) http.HandlerFunc {
 			return
 		}
 
-		hash, err := auth.HashPassword(req.Password)
+		hash, err := hasher.Hash(req.Password)
 		if err != nil {
 			slog.ErrorContext(r.Context(), "handler: hashing password failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "internal error")

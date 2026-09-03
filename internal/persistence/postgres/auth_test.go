@@ -7,6 +7,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
@@ -36,9 +38,9 @@ func mustCreateUser(t *testing.T, repo interface {
 	CreateUser(context.Context, transit.User, string) error
 }, u transit.User, password string) {
 	t.Helper()
-	hash, err := auth.HashPassword(password)
+	hash, err := auth.NewHasher(bcrypt.MinCost).Hash(password)
 	if err != nil {
-		t.Fatalf("HashPassword: %v", err)
+		t.Fatalf("Hash: %v", err)
 	}
 	if err := repo.CreateUser(context.Background(), u, hash); err != nil {
 		t.Fatalf("CreateUser %s: %v", u.Email, err)

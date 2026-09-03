@@ -9,9 +9,9 @@ import (
 )
 
 func TestHashPasswordVerifies(t *testing.T) {
-	hash, err := auth.HashPassword("correct horse battery staple")
+	hash, err := auth.DefaultHasher.Hash("correct horse battery staple")
 	if err != nil {
-		t.Fatalf("HashPassword: %v", err)
+		t.Fatalf("Hash: %v", err)
 	}
 	if strings.Contains(hash, "correct horse") {
 		t.Fatal("hash must not contain the plaintext password")
@@ -27,13 +27,13 @@ func TestHashPasswordVerifies(t *testing.T) {
 // Equal passwords must produce different hashes — bcrypt salts per call, so a
 // leaked table can't be attacked by grouping identical hashes.
 func TestHashPasswordIsSalted(t *testing.T) {
-	a, err := auth.HashPassword("same-password")
+	a, err := auth.DefaultHasher.Hash("same-password")
 	if err != nil {
-		t.Fatalf("HashPassword: %v", err)
+		t.Fatalf("Hash: %v", err)
 	}
-	b, err := auth.HashPassword("same-password")
+	b, err := auth.DefaultHasher.Hash("same-password")
 	if err != nil {
-		t.Fatalf("HashPassword: %v", err)
+		t.Fatalf("Hash: %v", err)
 	}
 	if a == b {
 		t.Error("two hashes of the same password must differ (missing salt)")
@@ -56,7 +56,7 @@ func TestVerifyPasswordRejectsEmptyHash(t *testing.T) {
 // work — a stub returning false immediately would reintroduce the timing leak.
 func TestVerifyNothingAlwaysFailsAndCostsRealWork(t *testing.T) {
 	for _, pw := range []string{"", "anything", "no account has this password"} {
-		if auth.VerifyNothing(pw) {
+		if auth.DefaultHasher.VerifyNothing(pw) {
 			t.Errorf("VerifyNothing(%q) = true, must always be false", pw)
 		}
 	}
@@ -65,14 +65,14 @@ func TestVerifyNothingAlwaysFailsAndCostsRealWork(t *testing.T) {
 	// bare return. This threshold is loose enough not to flake on slow CI but
 	// tight enough to catch the work being skipped entirely.
 	start := time.Now()
-	auth.VerifyNothing("some-password")
+	auth.DefaultHasher.VerifyNothing("some-password")
 	if elapsed := time.Since(start); elapsed < time.Millisecond {
 		t.Errorf("VerifyNothing returned in %v — too fast to have hashed anything", elapsed)
 	}
 }
 
 func TestHashPasswordRejectsEmptyPassword(t *testing.T) {
-	if _, err := auth.HashPassword(""); err == nil {
-		t.Error("HashPassword(\"\"): want error, got nil")
+	if _, err := auth.DefaultHasher.Hash(""); err == nil {
+		t.Error("Hash(\"\"): want error, got nil")
 	}
 }
