@@ -34,7 +34,7 @@ POST /api/isochrone  →  202 + routing job
 routing worker (separate repo, inside the cluster)
   • Valhalla: access matrix + origin/egress isochrones
   • TransitGraph: Dijkstra over union of service edges (seconds)
-  • writes the result back onto the routing job
+  • records the result through authenticated /api/internal/... endpoints
         │
         ▼
 GET /api/routing-jobs/{id}  →  status, then the result
@@ -78,6 +78,13 @@ confirms are required: without them the API could insert a routing job, fail to
 publish, and strand it in `queued` while a client polls work no worker will ever
 see. On a failed confirm the job is marked failed immediately and the caller
 gets a 502 carrying the `publish_failed` code.
+
+The worker does not connect to Postgres (SPA-273). Job transitions and the
+egress-polygon cache go through `/api/internal/...`, gated by `WORKER_TOKEN`
+(a shared bearer secret, not a user session). Unset, those routes answer 503
+rather than being left unauthenticated. Deploy this side before the worker:
+its startup ping is `GET /api/internal/worker`. Transit cache rows also carry
+`departs_on` (SPA-269); walk/bike/drive omit it.
 
 Travel mode is stored in the domain's own vocabulary — `walk` / `bike` /
 `drive` / `transit`. "Costing" is Valhalla's word for the same concept and stays

@@ -3,19 +3,21 @@ package postgres_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// The two tables SPA-182 adds are co-owned with a repository this test suite
-// cannot see: the API inserts and polls routing_jobs, the worker transitions
-// them and fills isochrone_cache. What is testable here is this side's half —
-// the writes and reads the API performs — plus the schema itself, since the
-// worker's correctness depends on a shape only this repository defines.
+// The two tables SPA-182 adds are co-owned with the routing worker: the API
+// inserts and polls routing_jobs, and since SPA-273 the worker's transitions
+// and cache writes also land here, over authenticated HTTP rather than a
+// shared DATABASE_URL. What is testable here is both halves of that SQL,
+// plus the schema itself.
 
 const (
 	routingCompileJobID = "00000000-0000-400a-8002-000000000001"
@@ -188,8 +190,8 @@ func TestFailRoutingJob(t *testing.T) {
 		t.Error("updated_at should be >= created_at")
 	}
 
-	if err := repo.FailRoutingJob(ctx, "00000000-0000-400b-8002-0000000000ff", "x"); err == nil {
-		t.Error("FailRoutingJob on a missing job: want error, got nil")
+	if err := repo.FailRoutingJob(ctx, "00000000-0000-400b-8002-0000000000ff", "x"); !errors.Is(err, handler.ErrJobNotFound) {
+		t.Errorf("FailRoutingJob on a missing job: %v, want ErrJobNotFound", err)
 	}
 }
 
@@ -262,13 +264,12 @@ func TestRoutingJobCascadesWithItsOwnerRatherThanBecomingPublic(t *testing.T) {
 	}
 }
 
-// The cache table is written only by the worker, so nothing in this repository
-// exercises it. Its schema is still defined here, and the worker's correctness
-// depends on uniqueness being exactly these five columns — graph, station, mode,
-// contour, and departs_on — with the tileset timestamp still outside it. A
-// rebuild is a miss on read (SPA-269), not a new key. Walk/bike/drive store
-// NULL departs_on; NULLS NOT DISTINCT keeps those colliding the way the old
-// four-column primary key did.
+// The cache table is written by the worker through WorkerStore (SPA-273). Its
+// schema is still defined here, and uniqueness must stay exactly these five
+// columns — graph, station, mode, contour, and departs_on — with the tileset
+// timestamp still outside it. A rebuild is a miss on read (SPA-269), not a
+// new key. Walk/bike/drive store NULL departs_on; NULLS NOT DISTINCT keeps
+// those colliding the way the old four-column primary key did.
 func TestIsochroneCacheSchema(t *testing.T) {
 	ctx := context.Background()
 	repo, url := freshRepo(t)
@@ -389,5 +390,228 @@ func TestCountInFlightRoutingJobs(t *testing.T) {
 	}
 	if n := count(time.Hour); n != 2 {
 		t.Errorf("in flight within 1h = %d, want 2: the backdated job is still inside this window", n)
+	}
+}
+
+func TestMarkRoutingJobRunning(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := freshRepo(t)
+	seedCompileJob(t, repo, routingCompileJobID)
+
+	j := transit.RoutingJob{
+		ID: routingJobID, Status: transit.JobStatusQueued,
+		CompileJobID: routingCompileJobID, Mode: transit.TravelModeWalk, BudgetMins: 30,
+	}
+	if err := repo.CreateRoutingJob(ctx, &j); err != nil {
+		t.Fatalf("CreateRoutingJob: %v", err)
+	}
+
+	if err := repo.MarkRoutingJobRunning(ctx, j.ID); err != nil {
+		t.Fatalf("MarkRoutingJobRunning: %v", err)
+	}
+	got, ok, err := repo.GetRoutingJobByID(ctx, j.ID)
+	if err != nil || !ok {
+		t.Fatalf("GetRoutingJobByID: ok=%v err=%v", ok, err)
+	}
+	if got.Status != transit.JobStatusRunning {
+		t.Errorf("status = %q, want running", got.Status)
+	}
+
+	// Redelivery: already running is a no-op, not an error.
+	if err := repo.MarkRoutingJobRunning(ctx, j.ID); err != nil {
+		t.Errorf("second MarkRoutingJobRunning: %v", err)
+	}
+
+	if err := repo.MarkRoutingJobRunning(ctx, "00000000-0000-400b-8002-0000000000ff"); !errors.Is(err, handler.ErrJobNotFound) {
+		t.Errorf("missing job: %v, want ErrJobNotFound", err)
+	}
+}
+
+func TestSucceedRoutingJob(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := freshRepo(t)
+	seedCompileJob(t, repo, routingCompileJobID)
+
+	j := transit.RoutingJob{
+		ID: routingJobID, Status: transit.JobStatusQueued,
+		CompileJobID: routingCompileJobID, Mode: transit.TravelModeWalk, BudgetMins: 30,
+	}
+	if err := repo.CreateRoutingJob(ctx, &j); err != nil {
+		t.Fatalf("CreateRoutingJob: %v", err)
+	}
+
+	want := json.RawMessage(`{"type":"FeatureCollection","features":[]}`)
+	if err := repo.SucceedRoutingJob(ctx, j.ID, want); err != nil {
+		t.Fatalf("SucceedRoutingJob: %v", err)
+	}
+	got, ok, err := repo.GetRoutingJobByID(ctx, j.ID)
+	if err != nil || !ok {
+		t.Fatalf("GetRoutingJobByID: ok=%v err=%v", ok, err)
+	}
+	if got.Status != transit.JobStatusSucceeded {
+		t.Errorf("status = %q, want succeeded", got.Status)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(got.Result, &parsed); err != nil {
+		t.Fatalf("result: %v", err)
+	}
+	if parsed["type"] != "FeatureCollection" {
+		t.Errorf("result = %s", got.Result)
+	}
+
+	if err := repo.MarkRoutingJobRunning(ctx, j.ID); !errors.Is(err, handler.ErrJobNotFound) {
+		t.Errorf("MarkRunning on succeeded job: %v, want ErrJobNotFound", err)
+	}
+}
+
+func TestMarkRoutingJobRunningWillNotReopenAFailedJob(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := freshRepo(t)
+	seedCompileJob(t, repo, routingCompileJobID)
+
+	j := transit.RoutingJob{
+		ID: routingJobID, Status: transit.JobStatusQueued,
+		CompileJobID: routingCompileJobID, Mode: transit.TravelModeWalk, BudgetMins: 30,
+	}
+	if err := repo.CreateRoutingJob(ctx, &j); err != nil {
+		t.Fatalf("CreateRoutingJob: %v", err)
+	}
+	if err := repo.FailRoutingJob(ctx, j.ID, "gave up"); err != nil {
+		t.Fatalf("FailRoutingJob: %v", err)
+	}
+	if err := repo.MarkRoutingJobRunning(ctx, j.ID); !errors.Is(err, handler.ErrJobNotFound) {
+		t.Errorf("MarkRunning on failed job: %v, want ErrJobNotFound", err)
+	}
+	got, ok, err := repo.GetRoutingJobByID(ctx, j.ID)
+	if err != nil || !ok {
+		t.Fatalf("GetRoutingJobByID: ok=%v err=%v", ok, err)
+	}
+	if got.Status != transit.JobStatusFailed {
+		t.Errorf("status = %q, want it to stay failed", got.Status)
+	}
+}
+
+func TestIsochroneCacheGetPut(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := freshRepo(t)
+	seedCompileJob(t, repo, routingCompileJobID)
+
+	stored := handler.IsochroneKey{
+		CompileJobID: routingCompileJobID, StationSlug: "station-a",
+		Mode: "walk", ContourMins: 30,
+	}
+	missing := stored
+	missing.StationSlug = "station-b"
+	geom := json.RawMessage(`{"type":"FeatureCollection","features":[]}`)
+
+	if err := repo.PutIsochroneCache(ctx, []handler.CachedIsochrone{
+		{Key: stored, Geometry: geom, TilesetAt: time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)},
+	}); err != nil {
+		t.Fatalf("PutIsochroneCache: %v", err)
+	}
+
+	got, err := repo.GetIsochroneCache(ctx, []handler.IsochroneKey{stored, missing})
+	if err != nil {
+		t.Fatalf("GetIsochroneCache: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("Get returned %d entries, want 1", len(got))
+	}
+	if _, ok := got[stored]; !ok {
+		t.Fatal("stored key missing from Get")
+	}
+	if _, ok := got[missing]; ok {
+		t.Error("missing key was served")
+	}
+
+	// Repeated put of a different geometry is not an error and does not overwrite.
+	if err := repo.PutIsochroneCache(ctx, []handler.CachedIsochrone{
+		{Key: stored, Geometry: json.RawMessage(`{"type":"Point"}`)},
+	}); err != nil {
+		t.Fatalf("second Put: %v", err)
+	}
+	got, err = repo.GetIsochroneCache(ctx, []handler.IsochroneKey{stored})
+	if err != nil {
+		t.Fatalf("Get after second Put: %v", err)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(got[stored], &parsed); err != nil {
+		t.Fatalf("geometry: %v", err)
+	}
+	if parsed["type"] != "FeatureCollection" {
+		t.Errorf("second Put overwrote the row: %s", got[stored])
+	}
+
+	if err := repo.PutIsochroneCache(ctx, nil); err != nil {
+		t.Fatalf("Put(nil): %v", err)
+	}
+	empty, err := repo.GetIsochroneCache(ctx, nil)
+	if err != nil {
+		t.Fatalf("Get(nil): %v", err)
+	}
+	if len(empty) != 0 {
+		t.Errorf("Get(nil) = %d, want 0", len(empty))
+	}
+}
+
+func TestIsochroneCacheGetPutKeepsTransitDatesApart(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := freshRepo(t)
+	seedCompileJob(t, repo, routingCompileJobID)
+
+	sep := handler.IsochroneKey{
+		CompileJobID: routingCompileJobID, StationSlug: "station-a",
+		Mode: "transit", ContourMins: 30, DepartsOn: "2026-09-01",
+	}
+	oct := sep
+	oct.DepartsOn = "2026-09-02"
+	walk := handler.IsochroneKey{
+		CompileJobID: routingCompileJobID, StationSlug: "station-a",
+		Mode: "walk", ContourMins: 30,
+	}
+	sepGeom := json.RawMessage(`{"day":"sep"}`)
+	octGeom := json.RawMessage(`{"day":"oct"}`)
+	walkGeom := json.RawMessage(`{"day":"walk"}`)
+
+	if err := repo.PutIsochroneCache(ctx, []handler.CachedIsochrone{
+		{Key: sep, Geometry: sepGeom},
+		{Key: oct, Geometry: octGeom},
+		{Key: walk, Geometry: walkGeom},
+	}); err != nil {
+		t.Fatalf("PutIsochroneCache: %v", err)
+	}
+
+	got, err := repo.GetIsochroneCache(ctx, []handler.IsochroneKey{sep, oct, walk})
+	if err != nil {
+		t.Fatalf("GetIsochroneCache: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("Get returned %d entries, want 3", len(got))
+	}
+	assertDay := func(k handler.IsochroneKey, want string) {
+		t.Helper()
+		var parsed map[string]any
+		if err := json.Unmarshal(got[k], &parsed); err != nil {
+			t.Fatalf("%s: %v", want, err)
+		}
+		if parsed["day"] != want {
+			t.Errorf("%+v geometry day = %v, want %s", k, parsed["day"], want)
+		}
+	}
+	assertDay(sep, "sep")
+	assertDay(oct, "oct")
+	assertDay(walk, "walk")
+
+	// A walk lookup must not pick up a transit row just because they share
+	// the other four key parts; NULL departs_on is not "any date".
+	onlyWalk, err := repo.GetIsochroneCache(ctx, []handler.IsochroneKey{walk})
+	if err != nil {
+		t.Fatalf("Get walk: %v", err)
+	}
+	if len(onlyWalk) != 1 {
+		t.Fatalf("walk lookup returned %d entries, want 1", len(onlyWalk))
+	}
+	if _, ok := onlyWalk[walk]; !ok {
+		t.Error("walk lookup missed the NULL-date row")
 	}
 }

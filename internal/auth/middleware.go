@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -151,6 +152,34 @@ func unauthorized(w http.ResponseWriter) {
 	// Advertise the scheme so clients know how to authenticate (RFC 7235 §4.1).
 	w.Header().Set("WWW-Authenticate", `Bearer realm="sparks-effect"`)
 	writeErr(w, http.StatusUnauthorized, "authentication required")
+}
+
+// RequireWorkerToken gates the routing worker's write surface.
+//
+// It is a shared secret, not a user session: the worker is a service, not a
+// person, and looking the token up in the sessions table would either mint a
+// fake user for it or reject a credential that was never a login. Comparison
+// is constant-time so a timing oracle cannot walk the token a byte at a time.
+//
+// An empty expected token rejects every request rather than matching an empty
+// Authorization header. The routes that sit behind this gate used to require
+// a database connection; leaving them open when WORKER_TOKEN is unset would
+// be worse than not registering them.
+func RequireWorkerToken(expected string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if expected == "" {
+				writeErr(w, http.StatusServiceUnavailable, "worker API is not configured")
+				return
+			}
+			token, ok := BearerToken(r)
+			if !ok || subtle.ConstantTimeCompare([]byte(token), []byte(expected)) != 1 {
+				unauthorized(w)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func writeErr(w http.ResponseWriter, status int, msg string) {

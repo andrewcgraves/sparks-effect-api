@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
+	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/logger"
 	"github.com/andrewcgraves/sparks-effect-api/internal/routing"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
@@ -181,6 +183,17 @@ func (s *stubAuthDeps) GetRoutingJobByID(context.Context, string) (transit.Routi
 	return transit.RoutingJob{}, false, nil
 }
 
+func (s *stubAuthDeps) MarkRoutingJobRunning(context.Context, string) error { return nil }
+func (s *stubAuthDeps) SucceedRoutingJob(context.Context, string, json.RawMessage) error {
+	return nil
+}
+func (s *stubAuthDeps) GetIsochroneCache(context.Context, []handler.IsochroneKey) (map[handler.IsochroneKey]json.RawMessage, error) {
+	return map[handler.IsochroneKey]json.RawMessage{}, nil
+}
+func (s *stubAuthDeps) PutIsochroneCache(context.Context, []handler.CachedIsochrone) error {
+	return nil
+}
+
 // inFlight is what the enqueue cap sees (SPA-219). Zero by default, so the cap
 // admits every request and the gate each isochrone route sits behind stays the
 // only thing this file's assertions turn on.
@@ -209,8 +222,9 @@ func (s *stubAuthDeps) CreatePrerenderedIsochrone(context.Context, *transit.Prer
 }
 
 const (
-	adminToken = "admin-token"
-	userToken  = "user-token"
+	adminToken  = "admin-token"
+	userToken   = "user-token"
+	workerToken = "worker-token"
 )
 
 func newTestServer(t *testing.T, deps AuthDeps) http.Handler {
@@ -219,7 +233,7 @@ func newTestServer(t *testing.T, deps AuthDeps) http.Handler {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	cfg := config.Config{Port: "8080", SessionTTL: time.Hour}
+	cfg := config.Config{Port: "8080", SessionTTL: time.Hour, WorkerToken: workerToken}
 	return New(cfg, store, deps, &routing.FakePublisher{}, logger.Discard()).Handler
 }
 
@@ -512,6 +526,7 @@ func TestAuthRoutesReportUnavailableWithoutADatabase(t *testing.T) {
 		// Asserted rather than assumed, since the failure mode is a silent 404.
 		{http.MethodGet, "/api/services/some-slug/graph"},
 		{http.MethodPost, "/api/services/some-slug/isochrone"},
+		{http.MethodGet, "/api/internal/worker"},
 	} {
 		t.Run(p.method+" "+p.path, func(t *testing.T) {
 			rec := request(t, h, p.method, p.path, adminToken)
@@ -564,5 +579,59 @@ func TestAuthRoutesReportUnavailableWithoutADatabase(t *testing.T) {
 			t.Errorf("%s %s status = %d, want 503 with no database configured",
 				p.method, p.path, rec.Code)
 		}
+	}
+}
+
+// The worker write surface is a shared secret, not a user session. A valid
+// login token must not open it, an absent token must not, and the worker
+// token must (SPA-273).
+func TestWorkerRoutesRequireTheWorkerToken(t *testing.T) {
+	h := newTestServer(t, newStubDeps())
+
+	paths := []struct{ method, path, body string }{
+		{http.MethodGet, "/api/internal/worker", ""},
+		{http.MethodPost, "/api/internal/routing-jobs/some-id/running", ""},
+		{http.MethodPost, "/api/internal/routing-jobs/some-id/succeeded", `{"result":{}}`},
+		{http.MethodPost, "/api/internal/routing-jobs/some-id/failed", `{"error":"x"}`},
+		{http.MethodPost, "/api/internal/isochrone-cache/lookup", `{"keys":[]}`},
+		{http.MethodPost, "/api/internal/isochrone-cache", `{"entries":[]}`},
+	}
+
+	for _, p := range paths {
+		t.Run("no token "+p.method+" "+p.path, func(t *testing.T) {
+			rec := request(t, h, p.method, p.path, "", p.body)
+			if rec.Code != http.StatusUnauthorized {
+				t.Errorf("status = %d, want 401 without a token", rec.Code)
+			}
+		})
+		t.Run("user token "+p.method+" "+p.path, func(t *testing.T) {
+			rec := request(t, h, p.method, p.path, userToken, p.body)
+			if rec.Code != http.StatusUnauthorized {
+				t.Errorf("status = %d, want 401 with a user session token", rec.Code)
+			}
+		})
+		t.Run("worker token "+p.method+" "+p.path, func(t *testing.T) {
+			rec := request(t, h, p.method, p.path, workerToken, p.body)
+			if rec.Code == http.StatusUnauthorized || rec.Code == http.StatusForbidden {
+				t.Errorf("status = %d, the worker token must be accepted", rec.Code)
+			}
+			if rec.Code == http.StatusNotFound {
+				t.Errorf("status = 404; the route is not registered")
+			}
+		})
+	}
+}
+
+func TestWorkerRoutesUnavailableWithoutATokenConfigured(t *testing.T) {
+	store, err := transit.NewStore(transit.DefaultBoardingWaitPolicy())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	cfg := config.Config{Port: "8080", SessionTTL: time.Hour} // no WorkerToken
+	h := New(cfg, store, newStubDeps(), &routing.FakePublisher{}, logger.Discard()).Handler
+
+	rec := request(t, h, http.MethodGet, "/api/internal/worker", workerToken)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503 when WORKER_TOKEN is unset", rec.Code)
 	}
 }

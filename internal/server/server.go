@@ -52,6 +52,9 @@ type AuthDeps interface {
 	handler.OwnedRouteStore
 	// RoutingStore backs the isochrone enqueue surface and the routing job poll.
 	handler.RoutingStore
+	// WorkerStore backs the authenticated write surface the routing worker
+	// uses instead of a database connection (SPA-273).
+	handler.WorkerStore
 	// RoutingBacklogStore backs the enqueue cap that refuses isochrones once
 	// too much routing work is already outstanding (SPA-219).
 	handler.RoutingBacklogStore
@@ -103,6 +106,7 @@ func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routi
 	registerCompileRoutes(mux, deps, publisher, capBacklog, lg)
 	registerPrerenderedRoutes(mux, deps)
 	registerAuthRoutes(mux, cfg, deps, publisher, capBacklog, lg)
+	registerWorkerRoutes(mux, cfg, deps)
 
 	h := cors(mux, cfg.AllowLocalhostCORS)
 
@@ -398,6 +402,36 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 	// this path comes from there too, so the list above needs no entry.
 	mux.Handle("POST /api/scenarios/{slug}/prerendered-isochrones",
 		adminOnly(handler.CreatePrerenderedIsochrone(deps)))
+}
+
+// registerWorkerRoutes wires the authenticated write surface the routing
+// worker uses to record job results and reuse egress polygons (SPA-273).
+//
+// These used to be SQL the worker ran against a DATABASE_URL. Exposing that
+// database past the API's private network is what this gate exists to stop:
+// the worker presents a shared bearer token, not a user session, and the
+// SQL stays in this process.
+//
+// A missing database or a missing WORKER_TOKEN both 503 rather than 404, and
+// rather than leaving the writes unauthenticated. An empty token matching an
+// empty Authorization header would be worse than not registering the routes.
+func registerWorkerRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps) {
+	const unavailable = "worker API is unavailable"
+	if deps == nil {
+		mux.HandleFunc("/api/internal/", noDatabase(unavailable))
+		return
+	}
+	if cfg.WorkerToken == "" {
+		mux.HandleFunc("/api/internal/", serviceUnavailable(unavailable+": no WORKER_TOKEN configured"))
+		return
+	}
+	gate := auth.RequireWorkerToken(cfg.WorkerToken)
+	mux.Handle("GET /api/internal/worker", gate(handler.WorkerReady()))
+	mux.Handle("POST /api/internal/routing-jobs/{id}/running", gate(handler.WorkerMarkRunning(deps)))
+	mux.Handle("POST /api/internal/routing-jobs/{id}/succeeded", gate(handler.WorkerMarkSucceeded(deps)))
+	mux.Handle("POST /api/internal/routing-jobs/{id}/failed", gate(handler.WorkerMarkFailed(deps)))
+	mux.Handle("POST /api/internal/isochrone-cache/lookup", gate(handler.WorkerCacheLookup(deps)))
+	mux.Handle("POST /api/internal/isochrone-cache", gate(handler.WorkerCachePut(deps)))
 }
 
 // noDatabase answers 503 for a route whose backing store is Postgres when no
