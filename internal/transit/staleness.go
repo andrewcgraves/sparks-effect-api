@@ -53,6 +53,9 @@ func GraphStale(job Job, currentServiceIDs []string, currentServiceUpdatedAt map
 	if job.Result != nil && boardingWaitStale(*job.Result, currentPolicies) {
 		return true
 	}
+	if job.Result != nil && edgeRoutesStale(*job.Result) {
+		return true
+	}
 	return false
 }
 
@@ -140,6 +143,34 @@ func boardingWaitStale(graph TransitGraph, currentPolicies map[string]BoardingWa
 		}
 		if current.Kind == BoardingWaitFixed && sg.WaitSecs != current.FixedSecs {
 			return true
+		}
+	}
+	return false
+}
+
+// edgeRoutesStale reports whether a compiled graph predates SPA-264, which gave
+// every edge the route it runs over.
+//
+// This is the sibling of boardingWaitStale above and rests on the same
+// reasoning: an invariant that a freshly compiled graph always carries is only
+// actually true if a graph lacking it is declared out of date. The author pays
+// one invisible recompile — the authored-graph composable already recovers from
+// a stale-graph refusal by recompiling and retrying — and their existing
+// isochrones keep working in the meantime, because a graph with no edge routes
+// is still a perfectly good graph to compute one from.
+//
+// It applies to authored graphs only, which is all GraphStale is asked about.
+// That matters, because an authored edge can never legitimately lack a route:
+// CompileServicePhysics compiles one service against the one alignment it
+// references, and a route whose geometry it cannot use fails the compile
+// outright rather than yielding a placeless edge. The tolerate-and-omit shape
+// belongs to the seeded table compiler, whose graphs this rule never sees.
+func edgeRoutesStale(graph TransitGraph) bool {
+	for _, sg := range graph.Services {
+		for _, e := range sg.Edges {
+			if e.RouteID == "" {
+				return true
+			}
 		}
 	}
 	return false

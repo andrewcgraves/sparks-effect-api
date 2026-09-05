@@ -212,3 +212,51 @@ func TestGraphStale_preSPA236GraphMissingWaitPolicyIsStale(t *testing.T) {
 		t.Error("GraphStale = false, want true: empty WaitPolicy must not silently match none")
 	}
 }
+
+// SPA-264 gives every compiled edge the route it runs over. A graph compiled
+// before that carries none, which is the same shape an authored graph can never
+// legitimately have — the physics compiler always knows its service's one
+// alignment — so an edge with no route means the graph predates the feature.
+//
+// This is the sibling of TestGraphStale_preSPA236GraphMissingWaitPolicyIsStale:
+// both make an invariant a fresh graph carries actually true, rather than hoped
+// for, by declaring an old graph out of date. The author pays one recompile,
+// which the authored-graph composable already performs on its own when a stale
+// graph is refused.
+func TestGraphStale_preSPA264GraphMissingEdgeRoutesIsStale(t *testing.T) {
+	created := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	current := []string{"svc-1"}
+	updatedAt := map[string]time.Time{"svc-1": created.Add(-time.Hour)}
+	policies := map[string]transit.BoardingWaitPolicy{"svc-1": transit.DefaultBoardingWaitPolicy()}
+
+	graphWith := func(edges ...transit.Edge) transit.Job {
+		return transit.Job{
+			CreatedAt:          created,
+			CompiledServiceIDs: []string{"svc-1"},
+			Result: &transit.TransitGraph{Services: []transit.ServiceGraph{{
+				ServiceID:  "svc-1",
+				WaitPolicy: string(transit.BoardingWaitNone),
+				Edges:      edges,
+			}}},
+		}
+	}
+
+	stale := graphWith(transit.Edge{FromSlug: "a", ToSlug: "b", Seconds: 600})
+	if !transit.GraphStale(stale, current, updatedAt, policies) {
+		t.Error("GraphStale = false, want true: an edge with no route id predates SPA-264")
+	}
+
+	fresh := graphWith(transit.Edge{
+		FromSlug: "a", ToSlug: "b", Seconds: 600,
+		RouteID: "rt-1", FromChainageM: 0, ToChainageM: 1200,
+	})
+	if transit.GraphStale(fresh, current, updatedAt, policies) {
+		t.Error("GraphStale = true, want false: every edge names the route it runs over")
+	}
+
+	// A service with no edges at all — a single-stop service — has nothing to
+	// carry a route, and must not be read as out of date forever.
+	if transit.GraphStale(graphWith(), current, updatedAt, policies) {
+		t.Error("GraphStale = true, want false: a service with no edges cannot be missing edge routes")
+	}
+}

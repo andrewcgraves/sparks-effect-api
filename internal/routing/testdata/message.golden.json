@@ -10,7 +10,10 @@
           {
             "from_slug": "north",
             "to_slug": "south",
-            "seconds": 1800
+            "seconds": 1800,
+            "route_id": "rt-spine",
+            "from_chainage_m": 27798.4,
+            "to_chainage_m": 8123.9
           }
         ],
         "wait_secs": 300,

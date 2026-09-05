@@ -91,9 +91,28 @@ func CompileServicePhysics(svc CompilableService, boardingWait BoardingWaitPolic
 
 		from, to := stopBySlug[span.FromStopID], stopBySlug[span.ToStopID]
 
+		// The route is svc.Route outright — a CompilableService is one service
+		// on one alignment, so unlike the seeded table compiler there is nothing
+		// to resolve. The chainages come from the projection that produced this
+		// span rather than from any stored value: a stop's persisted chainage
+		// (ServiceStopPoint.ChainageM) was measured against the alignment as it
+		// stood when the stop was last saved, and an author who redraws a route
+		// afterwards would otherwise get a stub following a shape that no longer
+		// exists (SPA-264).
+		//
+		// The reverse edge carries the same two chainages swapped, which is
+		// descending and needs no special case at either end.
 		sg.Edges = append(sg.Edges,
-			Edge{FromSlug: from.Slug, ToSlug: to.Slug, Seconds: runSecs + to.DwellS, DwellS: to.DwellS},
-			Edge{FromSlug: to.Slug, ToSlug: from.Slug, Seconds: runSecs + from.DwellS, DwellS: from.DwellS},
+			Edge{
+				FromSlug: from.Slug, ToSlug: to.Slug,
+				Seconds: runSecs + to.DwellS, DwellS: to.DwellS,
+				RouteID: svc.Route.ID, FromChainageM: span.FromChainageM, ToChainageM: span.ToChainageM,
+			},
+			Edge{
+				FromSlug: to.Slug, ToSlug: from.Slug,
+				Seconds: runSecs + from.DwellS, DwellS: from.DwellS,
+				RouteID: svc.Route.ID, FromChainageM: span.ToChainageM, ToChainageM: span.FromChainageM,
+			},
 		)
 	}
 	return sg, nil

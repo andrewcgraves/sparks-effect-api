@@ -13,11 +13,37 @@ import (
 // recover it instead of watching it disappear into the total. It is additive and
 // omitted when zero — a graph compiled before this field existed decodes with
 // DwellS zero, which is indistinguishable on the wire from a hop with no dwell.
+//
+// RouteID, FromChainageM and ToChainageM (SPA-264) say where the hop runs: the
+// corridor it is carried by, and how far along that corridor's alignment each of
+// its two endpoint stations sits, in metres. They exist so a consumer can draw
+// the part of a hop a rider's budget covers without holding the compiled
+// geometry — slicing the alignment between the two chainages is the whole of it.
+//
+// They are per-edge and not per-service on purpose. Compilation is deliberately
+// route-blind and lets a service path across corridors that meet at a shared
+// station, so one route recorded against the service would be wrong for exactly
+// those services, and silently.
+//
+// The three travel together: an edge either names a route and carries both
+// chainages, or names neither. A hop whose endpoints cannot both be placed on an
+// alignment — a station beyond OffRouteThresholdM, a hop spanning two corridors,
+// no resolvable route — emits the second shape, which is also what a graph
+// compiled before SPA-264 decodes to. That is why nothing downstream needs a
+// second code path to recognise a hop it cannot draw, and why chainage does not
+// have to distinguish "absent" from a legitimate zero: RouteID is the discriminator.
+//
+// Descending chainage is ordinary, not an error. The reverse of every hop
+// carries the same two numbers swapped, and an alignment authored in the
+// opposite direction to a journey produces the same thing.
 type Edge struct {
-	FromSlug string `json:"from_slug"`
-	ToSlug   string `json:"to_slug"`
-	Seconds  int    `json:"seconds"`
-	DwellS   int    `json:"dwell_s,omitempty"`
+	FromSlug      string  `json:"from_slug"`
+	ToSlug        string  `json:"to_slug"`
+	Seconds       int     `json:"seconds"`
+	DwellS        int     `json:"dwell_s,omitempty"`
+	RouteID       string  `json:"route_id,omitempty"`
+	FromChainageM float64 `json:"from_chainage_m,omitempty"`
+	ToChainageM   float64 `json:"to_chainage_m,omitempty"`
 }
 
 // ServiceGraph is one service's contribution to a TransitGraph: its directed
@@ -101,7 +127,7 @@ type TransitGraph struct {
 
 func Compile(
 	_ Scenario,
-	_ []Route,
+	routes []Route,
 	stations []Station,
 	services []Service,
 	vehicleTypes []VehicleType,
@@ -129,6 +155,12 @@ func Compile(
 	if err != nil {
 		return nil, err
 	}
+
+	// routes used to be discarded here. SPA-264 uses them to record, per edge,
+	// which corridor the hop runs over and where its endpoints sit along it —
+	// best-effort, and never a reason to fail a compile. A caller with no routes
+	// to hand still compiles the same graph, minus that decoration.
+	placer := newRoutePlacer(routes, stationsBySlug, segmentRunTimes)
 
 	graph := &TransitGraph{Nodes: nodes}
 	for _, svc := range services {
@@ -180,10 +212,16 @@ func Compile(
 			revRunSecs := pathRunSeconds(adj, revPath)
 			fwdDwell := pathDwellSecs(path, stationsBySlug, stopByStationID, vt)
 			revDwell := pathDwellSecs(revPath, stationsBySlug, stopByStationID, vt)
-			sg.Edges = append(sg.Edges,
-				Edge{FromSlug: fromSlug, ToSlug: toSlug, Seconds: runSecs + fwdDwell, DwellS: fwdDwell},
-				Edge{FromSlug: toSlug, ToSlug: fromSlug, Seconds: revRunSecs + revDwell, DwellS: revDwell},
-			)
+			fwd := Edge{FromSlug: fromSlug, ToSlug: toSlug, Seconds: runSecs + fwdDwell, DwellS: fwdDwell}
+			rev := Edge{FromSlug: toSlug, ToSlug: fromSlug, Seconds: revRunSecs + revDwell, DwellS: revDwell}
+			// The reverse edge is the same hop the other way, so it carries the
+			// same two chainages swapped — descending, which nothing that reads
+			// them treats as a special case.
+			if routeID, fromChainageM, toChainageM, placed := placer.place(path); placed {
+				fwd.RouteID, fwd.FromChainageM, fwd.ToChainageM = routeID, fromChainageM, toChainageM
+				rev.RouteID, rev.FromChainageM, rev.ToChainageM = routeID, toChainageM, fromChainageM
+			}
+			sg.Edges = append(sg.Edges, fwd, rev)
 		}
 		graph.Services = append(graph.Services, sg)
 	}
