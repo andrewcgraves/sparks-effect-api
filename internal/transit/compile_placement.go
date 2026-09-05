@@ -36,6 +36,18 @@ type routePlacer struct {
 	chainage map[string]map[string]float64
 }
 
+// newRoutePlacer indexes the scenario's routes and its segments' corridors ready
+// to answer per hop. Two things it decides quietly, both deliberate:
+//
+// A segment row whose RouteID is empty is stored as such and read back by place
+// as "no corridor", which is indistinguishable from there being no row at all.
+// That is the right answer for both — neither says which alignment the hop runs
+// over — and it means the seed data need not be complete for a compile to work.
+//
+// Two segment rows naming the same pair of stations are last-write-wins. Nothing
+// upstream rejects that (buildSegmentAdj does not), and a scenario with two
+// corridors between one pair of stations has no single answer to give; taking
+// the last is arbitrary but total, which is what this function has to be.
 func newRoutePlacer(routes []Route, stationsBySlug map[string]Station, tt TravelTimes) *routePlacer {
 	byID := make(map[string]Route, len(routes))
 	for _, rt := range routes {
@@ -76,7 +88,7 @@ func stationPairKey(a, b string) [2]string {
 // single alignment to measure against, and picking either would draw a stub down
 // a corridor the leg only half runs over.
 func (p *routePlacer) place(path []string) (routeID string, fromChainageM, toChainageM float64, ok bool) {
-	if p == nil || len(path) < 2 {
+	if len(path) < 2 {
 		return "", 0, 0, false
 	}
 	for i := 0; i+1 < len(path); i++ {

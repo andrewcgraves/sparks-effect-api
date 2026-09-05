@@ -132,8 +132,18 @@ func (f *StopPlacementFault) Error() string {
 // raw authored position is deliberately not retained — the authoring UI holds
 // it in its own draft state for as long as the user is looking at it, and after
 // that the only position anything should reason about is the one on the line.
-// Route geometry is immutable (there is no UpdateRoute), so a persisted snap
-// cannot go stale.
+// A persisted snap can go stale, and the comment here used to say it could not,
+// on the grounds that route geometry is immutable. It is not: UpdateOwnedRoute
+// rewrites a route's geometry and re-snaps nothing that references it, so a
+// stop's stored ChainageM and OffsetM both describe an alignment that may since
+// have moved. Nothing re-runs this on the dependent services.
+//
+// What follows from that is where chainage is read rather than what is stored
+// here: CompileServicePhysics reports an edge's chainages from the projection it
+// performs at compile time, against the geometry as it stands, precisely so a
+// redrawn route does not leave a progress stub following a shape that no longer
+// exists (SPA-264). MergeColocatedStops, which widens its merge radius by the
+// stored OffsetM, has the same exposure and has not been revisited.
 //
 // It rejects, without mutating the service, when:
 //

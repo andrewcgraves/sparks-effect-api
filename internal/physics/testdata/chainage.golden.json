@@ -1,5 +1,5 @@
 {
-  "_note": "SPA-264. The shared definition of chainage, asserted by internal/physics/chainage_fixture_test.go here and by the website's chainage module against its own copy. Chainage is measured in an equirectangular planar frame about the *whole line's* mean latitude (38.225 here, not each segment's own), with a 6371000 m mean Earth radius — it is deliberately not haversine, and a consumer that accumulates distance differently will disagree with the chainages it is handed. Keep the two copies byte-identical.",
+  "_note": "SPA-264. The shared definition of chainage, asserted by internal/physics/chainage_fixture_test.go here and by the website's chainage module against its own copy. Chainage is measured in an equirectangular planar frame about the *whole line's* mean latitude (37.225 here, not each segment's own), with a 6371000 m mean Earth radius — it is deliberately not haversine, and a consumer that accumulates distance differently will disagree with the chainages it is handed. Keep the two copies byte-identical.",
   "line": [
     [-122.0, 37.0],
     [-122.0, 37.2],

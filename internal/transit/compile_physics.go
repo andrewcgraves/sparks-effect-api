@@ -103,16 +103,10 @@ func CompileServicePhysics(svc CompilableService, boardingWait BoardingWaitPolic
 		// The reverse edge carries the same two chainages swapped, which is
 		// descending and needs no special case at either end.
 		sg.Edges = append(sg.Edges,
-			Edge{
-				FromSlug: from.Slug, ToSlug: to.Slug,
-				Seconds: runSecs + to.DwellS, DwellS: to.DwellS,
-				RouteID: svc.Route.ID, FromChainageM: span.FromChainageM, ToChainageM: span.ToChainageM,
-			},
-			Edge{
-				FromSlug: to.Slug, ToSlug: from.Slug,
-				Seconds: runSecs + from.DwellS, DwellS: from.DwellS,
-				RouteID: svc.Route.ID, FromChainageM: span.ToChainageM, ToChainageM: span.FromChainageM,
-			},
+			Edge{FromSlug: from.Slug, ToSlug: to.Slug, Seconds: runSecs + to.DwellS, DwellS: to.DwellS}.
+				placedOn(svc.Route.ID, span.FromChainageM, span.ToChainageM),
+			Edge{FromSlug: to.Slug, ToSlug: from.Slug, Seconds: runSecs + from.DwellS, DwellS: from.DwellS}.
+				placedOn(svc.Route.ID, span.ToChainageM, span.FromChainageM),
 		)
 	}
 	return sg, nil

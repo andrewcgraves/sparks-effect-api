@@ -26,12 +26,20 @@ import (
 // those services, and silently.
 //
 // The three travel together: an edge either names a route and carries both
-// chainages, or names neither. A hop whose endpoints cannot both be placed on an
-// alignment — a station beyond OffRouteThresholdM, a hop spanning two corridors,
-// no resolvable route — emits the second shape, which is also what a graph
-// compiled before SPA-264 decodes to. That is why nothing downstream needs a
-// second code path to recognise a hop it cannot draw, and why chainage does not
-// have to distinguish "absent" from a legitimate zero: RouteID is the discriminator.
+// chainages, or names neither. That second shape is also what a graph compiled
+// before SPA-264 decodes to, which is why nothing downstream needs a second code
+// path to recognise a hop it cannot draw, and why chainage does not have to
+// distinguish "absent" from a legitimate zero: RouteID is the discriminator.
+//
+// Which hops take that shape is the seeded table compiler's rule, not a property
+// of every edge: see routePlacer, which emits it for a station beyond
+// OffRouteThresholdM, a hop spanning two corridors, or no resolvable route. The
+// physics compiler has no such case — it compiles one service against the one
+// alignment it references, and a route whose geometry it cannot use fails the
+// compile outright. That asymmetry is deliberate and load-bearing: edgeRoutesStale
+// reads a placeless authored edge as a graph predating this feature, so an
+// authored compile that could legitimately emit one would mark its own fresh
+// output stale and recompile for ever.
 //
 // Descending chainage is ordinary, not an error. The reverse of every hop
 // carries the same two numbers swapped, and an alignment authored in the
@@ -44,6 +52,20 @@ type Edge struct {
 	RouteID       string  `json:"route_id,omitempty"`
 	FromChainageM float64 `json:"from_chainage_m,omitempty"`
 	ToChainageM   float64 `json:"to_chainage_m,omitempty"`
+}
+
+// placedOn returns the edge with its corridor and endpoint chainages set.
+//
+// It exists so the three fields are written in one move rather than three, at
+// each of the sites that builds an edge. The invariant that they travel together
+// is what edgeRoutesStale leans on, and an edge naming a route with no chainages
+// would be undrawable in a way nothing detects — so the only way to set one of
+// them is to set all three.
+func (e Edge) placedOn(routeID string, fromChainageM, toChainageM float64) Edge {
+	e.RouteID = routeID
+	e.FromChainageM = fromChainageM
+	e.ToChainageM = toChainageM
+	return e
 }
 
 // ServiceGraph is one service's contribution to a TransitGraph: its directed
@@ -218,8 +240,8 @@ func Compile(
 			// same two chainages swapped — descending, which nothing that reads
 			// them treats as a special case.
 			if routeID, fromChainageM, toChainageM, placed := placer.place(path); placed {
-				fwd.RouteID, fwd.FromChainageM, fwd.ToChainageM = routeID, fromChainageM, toChainageM
-				rev.RouteID, rev.FromChainageM, rev.ToChainageM = routeID, toChainageM, fromChainageM
+				fwd = fwd.placedOn(routeID, fromChainageM, toChainageM)
+				rev = rev.placedOn(routeID, toChainageM, fromChainageM)
 			}
 			sg.Edges = append(sg.Edges, fwd, rev)
 		}
