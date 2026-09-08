@@ -13,10 +13,6 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// The enqueue cap is registered here rather than inside the handlers, so what
-// this file tests is the registration: which routes sit behind it, and that a
-// route outside it is untouched (SPA-219).
-
 const isochroneBody = `{"lat":37.79,"lng":-122.397,"budget_mins":30,"mode":"walk","scenario_slug":"ca-hsr"}`
 
 func newCappedServer(t *testing.T, deps AuthDeps, limit int) http.Handler {
@@ -29,9 +25,6 @@ func newCappedServer(t *testing.T, deps AuthDeps, limit int) http.Handler {
 	return New(cfg, store, deps, &routing.FakePublisher{}, logger.Discard()).Handler
 }
 
-// isochroneRoutes is every path that enqueues routing work. All three publish
-// to the one queue the one worker consumes, so a cap covering only some of them
-// would bound nothing.
 var isochroneRoutes = []struct{ path, token string }{
 	{"/api/isochrone", ""},
 	{"/api/services/some-slug/isochrone", userToken},
@@ -63,9 +56,6 @@ func TestIsochroneRoutesRefuseAFullBacklog(t *testing.T) {
 	}
 }
 
-// Below the threshold the cap is invisible: every request reaches its handler
-// and fails or succeeds on its own terms. The stub resolves no scenario, so
-// these are 404s — the assertion is that none of them is a 429.
 func TestIsochroneRoutesPassAnEmptyBacklogThrough(t *testing.T) {
 	deps := newStubDeps()
 	h := newCappedServer(t, deps, 4)
@@ -80,8 +70,6 @@ func TestIsochroneRoutesPassAnEmptyBacklogThrough(t *testing.T) {
 	}
 }
 
-// The cap protects the queue, not the API, so a route that enqueues nothing
-// must go on answering however full the backlog is.
 func TestNonEnqueueingRoutesAreNotCapped(t *testing.T) {
 	deps := newStubDeps()
 	deps.inFlight = 1000
@@ -97,8 +85,6 @@ func TestNonEnqueueingRoutesAreNotCapped(t *testing.T) {
 	}
 }
 
-// A cap of zero is the off switch, all the way through the wiring: the routes
-// answer on their own terms no matter what the backlog says.
 func TestIsochroneRoutesUncappedWhenDisabled(t *testing.T) {
 	deps := newStubDeps()
 	deps.inFlight = 1000
@@ -114,8 +100,6 @@ func TestIsochroneRoutesUncappedWhenDisabled(t *testing.T) {
 	}
 }
 
-// The cap sits inside the auth gate on the authored routes: an anonymous caller
-// is told to authenticate, not to come back later, whatever the backlog is.
 func TestAuthoredIsochronesStill401BeforeTheCap(t *testing.T) {
 	deps := newStubDeps()
 	deps.inFlight = 1000

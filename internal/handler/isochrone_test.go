@@ -19,12 +19,8 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// fakeSeededGraphStore stands in for the repository behind the public
-// isochrone: seeded scenarios by slug, the compile job that carries each one's
-// graph, and — since SPA-182 — the routing jobs it enqueues.
 type fakeSeededGraphStore struct {
 	fakeRoutingStore
-
 	scenarios map[string]transit.Scenario
 	jobs      map[string]transit.Job
 	err       error
@@ -56,14 +52,10 @@ func (f *fakeSeededGraphStore) GetLatestSucceededJob(_ context.Context, scenario
 	return job, ok, nil
 }
 
-// compiledStore is a scenario with a compiled graph behind it — the shape a
-// booted, seeded deployment is always in.
 func compiledStore() *fakeSeededGraphStore {
 	return compiledStoreOver(freshGraph())
 }
 
-// compiledStoreOver is compiledStore with the graph named, for the tests that
-// care where its stations are rather than only that it has some.
 func compiledStoreOver(graph *transit.TransitGraph) *fakeSeededGraphStore {
 	f := newFakeSeededGraphStore()
 	f.scenarios["ca-hsr"] = transit.Scenario{ID: "sc-1", Slug: "ca-hsr", Name: "CA HSR"}
@@ -93,9 +85,6 @@ func errorField(t *testing.T, rec *httptest.ResponseRecorder) string {
 	return body["error"]
 }
 
-// The endpoint no longer answers with a computed isochrone. It answers 202 with
-// the routing job the caller polls — the whole of SPA-182 from the client's
-// side.
 func TestIsochrone_202_enqueuesARoutingJob(t *testing.T) {
 	store := compiledStore()
 	pub := &routing.FakePublisher{}
@@ -124,10 +113,6 @@ func TestIsochrone_202_enqueuesARoutingJob(t *testing.T) {
 	}
 }
 
-// The public endpoint mints an ownerless job, because nobody authenticates to
-// call it. RoutingJobStatus reads that nil as "readable by anyone holding the
-// id", so getting it wrong here would silently lock a caller out of the job
-// they just requested.
 func TestIsochrone_202_jobHasNoOwner(t *testing.T) {
 	store := compiledStore()
 
@@ -140,9 +125,6 @@ func TestIsochrone_202_jobHasNoOwner(t *testing.T) {
 	}
 }
 
-// The published message must name the same job the caller was handed, carry the
-// compiled graph inline, and repeat the request's own parameters — otherwise
-// the worker computes something other than what was asked for.
 func TestIsochrone_202_publishesTheResolvedRequest(t *testing.T) {
 	store := compiledStore()
 	pub := &routing.FakePublisher{}
@@ -181,8 +163,6 @@ func TestIsochrone_202_publishesTheResolvedRequest(t *testing.T) {
 	}
 }
 
-// A publish the broker never confirmed must not leave a row in `queued` for a
-// client to poll forever. The job is failed on the spot and the caller is told.
 func TestIsochrone_502_unconfirmedPublishFailsTheJob(t *testing.T) {
 	store := compiledStore()
 	pub := &routing.FakePublisher{Err: routing.ErrNotConfirmed}
@@ -212,9 +192,6 @@ func TestIsochrone_502_unconfirmedPublishFailsTheJob(t *testing.T) {
 	}
 }
 
-// The publish failing is still a 502 even if recording the failure also fails.
-// The caller's information is the same either way; nothing is left pretending
-// to have succeeded.
 func TestIsochrone_502_whenTheFailureCannotBeRecordedEither(t *testing.T) {
 	store := compiledStore()
 	store.failErr = fmt.Errorf("database is on fire")
@@ -226,8 +203,6 @@ func TestIsochrone_502_whenTheFailureCannotBeRecordedEither(t *testing.T) {
 	}
 }
 
-// Nothing is published until the row exists: a message naming a routing job the
-// worker cannot find has nothing to transition.
 func TestIsochrone_500_nothingIsPublishedIfTheJobCannotBeRecorded(t *testing.T) {
 	store := compiledStore()
 	store.createErr = fmt.Errorf("database is on fire")
@@ -257,12 +232,6 @@ func TestIsochrone_400_invalidMode(t *testing.T) {
 	}
 }
 
-// Every mode the enum accepts must get through the request path to a published
-// message, in the domain's own spelling. Valhalla's "multimodal" is the
-// worker's business and must never appear on this side (SPA-246).
-//
-// Driven from transit.TravelModes() so a mode added to the enum is covered here
-// without anyone remembering to add it.
 func TestIsochrone_202_everyModeIsAccepted(t *testing.T) {
 	for _, mode := range transit.TravelModes() {
 		t.Run(string(mode), func(t *testing.T) {
@@ -305,8 +274,6 @@ func TestIsochrone_400_malformedJSON(t *testing.T) {
 	}
 }
 
-// A bad body is a 400 even for a scenario that does not exist: the body is
-// wrong regardless of what was asked for.
 func TestIsochrone_400_beforeScenarioLookup(t *testing.T) {
 	rec := postIsochrone(newFakeSeededGraphStore(), &routing.FakePublisher{},
 		`{"lat":37.7,"lng":-122.4,"budget_mins":0,"mode":"walk","scenario_slug":"nope"}`)
@@ -316,8 +283,6 @@ func TestIsochrone_400_beforeScenarioLookup(t *testing.T) {
 	}
 }
 
-// Nothing is enqueued for a request that never resolves to a graph — every 4xx
-// arm must leave the queue and the routing_jobs table untouched.
 func TestIsochrone_rejectedRequestsEnqueueNothing(t *testing.T) {
 	uncompiled := newFakeSeededGraphStore()
 	uncompiled.scenarios["ca-hsr"] = transit.Scenario{ID: "sc-1", Slug: "ca-hsr"}
@@ -352,9 +317,6 @@ func TestIsochrone_rejectedRequestsEnqueueNothing(t *testing.T) {
 
 // --- the origin-range guard (SPA-200) ---
 
-// distantGraph is freshGraph's stations moved a degree of latitude north —
-// about 111 km, which no mode reaches in 30 minutes and only a drive reaches at
-// all within the budgets the UI offers.
 func distantGraph() *transit.TransitGraph {
 	g := freshGraph()
 	for i := range g.Nodes {
@@ -363,9 +325,6 @@ func distantGraph() *transit.TransitGraph {
 	return g
 }
 
-// The refusal the ticket asked for: an origin no station can be reached from is
-// told so, in terms it can act on, and none of the work it would have caused is
-// done.
 func TestIsochrone_422_originOutOfRange(t *testing.T) {
 	store := compiledStoreOver(distantGraph())
 	pub := &routing.FakePublisher{}
@@ -406,9 +365,6 @@ func TestIsochrone_422_originOutOfRange(t *testing.T) {
 	}
 }
 
-// The point of running the check first. Everything below it — the row, the
-// message carrying the whole graph, the worker slot behind it — is what a
-// far-away origin used to cost, and none of it may be spent on one now.
 func TestIsochrone_422_outOfRangeEnqueuesNothing(t *testing.T) {
 	store := compiledStoreOver(distantGraph())
 	pub := &routing.FakePublisher{}
@@ -424,9 +380,6 @@ func TestIsochrone_422_outOfRangeEnqueuesNothing(t *testing.T) {
 	}
 }
 
-// The same origin and the same stations, in a mode that covers the distance.
-// This is what stops the guard being calibrated by a test that would pass just
-// as well if it refused everything.
 func TestIsochrone_202_sameOriginInRangeByDrive(t *testing.T) {
 	store := compiledStoreOver(distantGraph())
 	pub := &routing.FakePublisher{}
@@ -442,9 +395,6 @@ func TestIsochrone_202_sameOriginInRangeByDrive(t *testing.T) {
 	}
 }
 
-// A graph with no stations in it says nothing about how far away the origin is,
-// and the guard must not read it as "too far". Whatever such a request did
-// before the check existed, it still does.
 func TestIsochrone_202_graphWithNoNodesIsNotOutOfRange(t *testing.T) {
 	graph := freshGraph()
 	graph.Nodes = nil
@@ -473,8 +423,6 @@ func TestIsochrone_404_scenarioNotFound(t *testing.T) {
 	}
 }
 
-// A scenario that exists but has never compiled is a distinct 404: nothing is
-// wrong with the request, the graph simply is not there yet.
 func TestIsochrone_404_noCompiledGraph(t *testing.T) {
 	store := newFakeSeededGraphStore()
 	store.scenarios["ca-hsr"] = transit.Scenario{ID: "sc-1", Slug: "ca-hsr"}
@@ -489,8 +437,6 @@ func TestIsochrone_404_noCompiledGraph(t *testing.T) {
 	}
 }
 
-// A succeeded job whose result never made it to the row is the same "not
-// compiled yet" to a caller as no job at all.
 func TestIsochrone_404_succeededJobWithNoResult(t *testing.T) {
 	store := compiledStore()
 	job := store.jobs["ca-hsr"]
@@ -541,15 +487,6 @@ func TestIsochrone_contentType(t *testing.T) {
 	}
 }
 
-// The acceptance criterion behind the golden fixture is that it is what *the
-// API produces*, not merely what a struct literal in the routing package
-// serialises to. So this drives a real isochrone request, with the fixture's own
-// compile job id, graph, and request parameters behind it, and asserts the
-// message that came out the other end is the fixture byte for byte.
-//
-// It reaches across into the routing package's testdata deliberately: there is
-// one fixture, shared with the worker repository, and a copy here would be a
-// second thing to keep in step with the first.
 func TestIsochrone_publishesTheGoldenFixtureMessage(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "routing", "testdata", "message.golden.json"))
 	if err != nil {

@@ -7,8 +7,6 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// slugsOf reads the minted identities off a service, so a test can state the
-// whole pattern in one comparison rather than one assertion per stop.
 func slugsOf(svc transit.UserService) []string {
 	out := make([]string, len(svc.Stops))
 	for i, stop := range svc.Stops {
@@ -30,8 +28,6 @@ func TestMintStopSlugsNamespacesByService(t *testing.T) {
 	}
 }
 
-// Two services that each stop at a "Downtown" must not claim one identity —
-// that is the whole reason the service slug is in the prefix.
 func TestMintStopSlugsSeparatesTwoServicesWithTheSameStopName(t *testing.T) {
 	stops := []transit.ServiceStopPoint{{Name: "Downtown"}, {Name: "Airport"}}
 
@@ -47,8 +43,6 @@ func TestMintStopSlugsSeparatesTwoServicesWithTheSameStopName(t *testing.T) {
 	}
 }
 
-// Stop names are not unique within a service, so a repeat has to be
-// disambiguated or two stops answer to one identity.
 func TestMintStopSlugsDisambiguatesRepeatedNames(t *testing.T) {
 	svc := transit.UserService{
 		Slug: "loop",
@@ -66,9 +60,6 @@ func TestMintStopSlugsDisambiguatesRepeatedNames(t *testing.T) {
 	}
 }
 
-// The slug is server-assigned identity. A client that posts one must not be
-// able to make a stop answer to a name of its choosing — which is what would
-// let it collide with another service's stop on purpose.
 func TestMintStopSlugsOverwritesClientSuppliedSlugs(t *testing.T) {
 	svc := transit.UserService{
 		Slug: "line-a",
@@ -87,9 +78,6 @@ func TestMintStopSlugsOverwritesClientSuppliedSlugs(t *testing.T) {
 	}
 }
 
-// Re-minting an unchanged service must not drift — an update rewrites the whole
-// aggregate, so a slug that grew a suffix on every save would rename stops for
-// no reason.
 func TestMintStopSlugsIsIdempotent(t *testing.T) {
 	svc := transit.UserService{
 		Slug:  "loop",
@@ -106,8 +94,6 @@ func TestMintStopSlugsIsIdempotent(t *testing.T) {
 	}
 }
 
-// A slug is only useful as identity if it is one — the suffix rule has to hold
-// even where two stops slugify to the same base from different display names.
 func TestMintStopSlugsAreUniqueWithinAService(t *testing.T) {
 	svc := transit.UserService{
 		Slug: "line",
@@ -129,8 +115,6 @@ func TestMintStopSlugsAreUniqueWithinAService(t *testing.T) {
 	}
 }
 
-// An empty service is not an error here — Validate is what refuses it — so
-// minting must simply do nothing rather than panic on the way to that message.
 func TestMintStopSlugsToleratesNoStops(t *testing.T) {
 	svc := transit.UserService{Slug: "line"}
 	svc.MintStopSlugs()
@@ -140,11 +124,6 @@ func TestMintStopSlugsToleratesNoStops(t *testing.T) {
 	}
 }
 
-// Two services cannot share a stop identity, and the collision suffix on a
-// service slug is the case where that nearly fails: mintSlug appends "-2"
-// *after* slugifying, so a maximum-length name yields an 82-character slug.
-// Anything that re-slugified that would truncate the suffix back off and hand
-// both services the same prefix.
 func TestMintStopSlugsKeepsLongServiceSlugsDistinct(t *testing.T) {
 	long := strings.Repeat("a", 80)
 

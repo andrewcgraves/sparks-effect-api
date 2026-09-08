@@ -11,34 +11,21 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// SessionLookup resolves a session token hash to the user it authenticates.
-// It reports ok=false for a token that is unknown, revoked, or expired — the
-// middleware treats all three identically, so a caller learns nothing about
-// which case they hit.
-//
-// This is the seam between the middleware and the sessions table; Repo
-// satisfies it via its GetSessionUser method.
 type SessionLookup func(ctx context.Context, tokenHash string) (transit.User, bool, error)
 
 type contextKey struct{}
 
 var userKey contextKey
 
-// WithUser returns a context carrying the authenticated identity.
 func WithUser(ctx context.Context, u transit.User) context.Context {
 	return context.WithValue(ctx, userKey, u)
 }
 
-// UserFrom returns the authenticated identity placed on the context by
-// RequireAuth. Handlers behind the middleware can rely on ok being true.
 func UserFrom(ctx context.Context) (transit.User, bool) {
 	u, ok := ctx.Value(userKey).(transit.User)
 	return u, ok
 }
 
-// RequireAuth returns middleware that rejects any request without a valid
-// bearer token and, on success, attaches the authenticated user to the request
-// context for the wrapped handler.
 func RequireAuth(lookup SessionLookup) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -67,21 +54,6 @@ func RequireAuth(lookup SessionLookup) func(http.Handler) http.Handler {
 	}
 }
 
-// OptionalAuth returns middleware that attaches the authenticated user when the
-// request carries a valid bearer token, and otherwise passes the request
-// through unchanged. Handlers behind it must treat UserFrom's ok=false as
-// "anonymous", not as an error.
-//
-// It exists for endpoints serving a mix of public and owned resources, where
-// authentication is not the gate — the resource decides. The routing job poll
-// is the case: a job with no owner is the public seeded isochrone and is
-// readable by anyone holding its id, while an owned one is readable only by its
-// owner or an admin. RequireAuth would lock anonymous callers out of the public
-// half; no middleware at all would leave the owned half unprotected.
-//
-// A malformed or expired token is treated as no token rather than as a
-// rejection. The alternative — 401 for a token that would have been ignored
-// anyway — would make a stale session fail requests it has no bearing on.
 func OptionalAuth(lookup SessionLookup) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -112,11 +84,6 @@ func OptionalAuth(lookup SessionLookup) func(http.Handler) http.Handler {
 	}
 }
 
-// RequireAdmin returns middleware that admits only authenticated admins. It is
-// the gate for route-write and account-provisioning endpoints.
-//
-// An anonymous caller gets 401 and an authenticated non-admin gets 403, so
-// clients can tell "log in" apart from "you may not do this".
 func RequireAdmin(lookup SessionLookup) func(http.Handler) http.Handler {
 	requireAuth := RequireAuth(lookup)
 	return func(next http.Handler) http.Handler {
@@ -131,13 +98,6 @@ func RequireAdmin(lookup SessionLookup) func(http.Handler) http.Handler {
 	}
 }
 
-// BearerToken extracts the token from an `Authorization: Bearer <token>`
-// header. The scheme is matched case-insensitively per RFC 7235.
-//
-// Exported because logout needs the raw token to derive the hash it must
-// revoke. Both it and the middleware must agree on exactly what counts as a
-// valid header — if they drifted, logout would revoke nothing and still
-// answer 204.
 func BearerToken(r *http.Request) (string, bool) {
 	const prefix = "bearer "
 	header := r.Header.Get("Authorization")
@@ -154,17 +114,6 @@ func unauthorized(w http.ResponseWriter) {
 	writeErr(w, http.StatusUnauthorized, "authentication required")
 }
 
-// RequireWorkerToken gates the routing worker's write surface.
-//
-// It is a shared secret, not a user session: the worker is a service, not a
-// person, and looking the token up in the sessions table would either mint a
-// fake user for it or reject a credential that was never a login. Comparison
-// is constant-time so a timing oracle cannot walk the token a byte at a time.
-//
-// An empty expected token rejects every request rather than matching an empty
-// Authorization header. The routes that sit behind this gate used to require
-// a database connection; leaving them open when WORKER_TOKEN is unset would
-// be worse than not registering them.
 func RequireWorkerToken(expected string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

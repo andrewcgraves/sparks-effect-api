@@ -1,8 +1,3 @@
-// Package postgres provides a Postgres-backed implementation of
-// transit.Repository, plus schema migrations and connection helpers. It uses
-// pgx/v5 (pure Go, so CGO_ENABLED=0 static builds are preserved) and stores
-// geometry as GeoJSON in jsonb columns. Native Postgres types are used
-// throughout — this repository exists for testability, not engine-swapping.
 package postgres
 
 import (
@@ -12,27 +7,22 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
-
-	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
-// Repo is a Postgres-backed transit.Repository over a pgx connection pool.
 type Repo struct {
 	pool *pgxpool.Pool
 }
 
-// compile-time assertion that Repo satisfies the storage-agnostic seam.
 var _ transit.Repository = (*Repo)(nil)
 
-// Connect opens a pgx connection pool against databaseURL. If maxConns > 0 it
-// overrides the pool's max connection count.
 func Connect(ctx context.Context, databaseURL string, maxConns int) (*Repo, error) {
 	cfg, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
@@ -52,13 +42,8 @@ func Connect(ctx context.Context, databaseURL string, maxConns int) (*Repo, erro
 	return &Repo{pool: pool}, nil
 }
 
-// Close releases the connection pool.
 func (r *Repo) Close() { r.pool.Close() }
 
-// Migrate runs all pending goose migrations against databaseURL. It opens a
-// short-lived database/sql handle via the pgx stdlib driver (goose speaks
-// database/sql) and closes it before returning; the app itself uses the pgx
-// pool. Safe to run on every boot — already-applied migrations are skipped.
 func Migrate(ctx context.Context, databaseURL string) error {
 	cfg, err := pgx.ParseConfig(databaseURL)
 	if err != nil {
@@ -87,9 +72,6 @@ func (r *Repo) CreateScenario(ctx context.Context, sc transit.Scenario) error {
 	return wrap("CreateScenario", err)
 }
 
-// GetScenarioByID resolves a scenario the way a compile job names it. Its slug
-// is what the scenario's calibrated run times are addressed by, so a job
-// carrying only the id still reaches everything a compile needs.
 func (r *Repo) GetScenarioByID(ctx context.Context, id string) (transit.Scenario, bool, error) {
 	var sc transit.Scenario
 	err := r.pool.QueryRow(ctx,
@@ -118,19 +100,6 @@ func (r *Repo) GetScenarioBySlug(ctx context.Context, slug string) (transit.Scen
 	return sc, true, nil
 }
 
-// ListCuratedScenarios returns the platform's own scenarios — those with no
-// owner — and deliberately not the ones users have authored.
-//
-// The filter is the containment boundary for owned content. This read feeds
-// LoadStore, which compiles every scenario it returns into the public in-memory
-// store at boot, and CompileSeededIfNeeded, which recompiles them on drift. An
-// owned scenario reaching either would be published to the unauthenticated
-// /api/scenarios reads, and a malformed one would abort the boot; an owned
-// scenario compiles on explicit request instead (POST /api/scenarios/{slug}/compile).
-//
-// It is named for what it returns rather than left as ListScenarios so the
-// contract is legible at the call site: a caller that genuinely wants every row
-// has to say so, and there is no unfiltered variant to reach by accident.
 func (r *Repo) ListCuratedScenarios(ctx context.Context) ([]transit.Scenario, error) {
 	rows, err := r.pool.Query(ctx,
 		`SELECT `+scenarioColumns+` FROM scenarios WHERE owner_id IS NULL ORDER BY slug`)
@@ -140,8 +109,6 @@ func (r *Repo) ListCuratedScenarios(ctx context.Context) ([]transit.Scenario, er
 	return scanScenarios(rows, "ListCuratedScenarios")
 }
 
-// ListScenariosByOwner backs "my scenarios". As with services, ownership is
-// enforced in SQL so unowned rows are never loaded.
 func (r *Repo) ListScenariosByOwner(ctx context.Context, ownerID string) ([]transit.Scenario, error) {
 	rows, err := r.pool.Query(ctx,
 		`SELECT `+scenarioColumns+` FROM scenarios WHERE owner_id = $1 ORDER BY slug`, ownerID)
@@ -189,8 +156,6 @@ func (r *Repo) CreateRoute(ctx context.Context, rt transit.Route) error {
 	return wrap("CreateRoute", err)
 }
 
-// GetRouteBySlug reads a single route by its globally unique slug, which is how
-// an ingested route is addressed — it need not belong to any scenario.
 func (r *Repo) GetRouteBySlug(ctx context.Context, slug string) (transit.Route, bool, error) {
 	row := r.pool.QueryRow(ctx,
 		`SELECT `+routeColumns+` FROM routes WHERE slug = $1`, slug)
@@ -205,14 +170,6 @@ func (r *Repo) GetRouteBySlug(ctx context.Context, slug string) (transit.Route, 
 	return rt, true, nil
 }
 
-// ListCuratedRouteSummaries returns the unowned routes — seeded alignments and
-// admin-ingested ones — reduced to the fields needed to choose one. This is the
-// public picker at GET /api/routes, so an owner's draft alignment is
-// deliberately absent; they reach their own through ListRouteSummariesByOwner.
-//
-// The projection is done in SQL rather than after the fact: geometry and
-// segments are the bulk of a route row and no caller of this list wants them.
-// Ordered by slug so the list a client renders is stable between calls.
 func (r *Repo) ListCuratedRouteSummaries(ctx context.Context) ([]transit.RouteSummary, error) {
 	rows, err := r.pool.Query(ctx,
 		`SELECT `+routeSummaryColumns+` FROM routes WHERE owner_id IS NULL ORDER BY slug`)
@@ -222,10 +179,6 @@ func (r *Repo) ListCuratedRouteSummaries(ctx context.Context) ([]transit.RouteSu
 	return scanRouteSummaries(rows, "ListCuratedRouteSummaries")
 }
 
-// ListRouteSummariesByOwner is the complement: the caller's own alignments,
-// standalone and scenario-bound alike. Ownership is a WHERE clause rather than
-// a post-query filter, so a route the caller does not own never leaves the
-// database.
 func (r *Repo) ListRouteSummariesByOwner(ctx context.Context, ownerID string) ([]transit.RouteSummary, error) {
 	rows, err := r.pool.Query(ctx,
 		`SELECT `+routeSummaryColumns+` FROM routes WHERE owner_id = $1 ORDER BY slug`, ownerID)
@@ -270,11 +223,6 @@ func (r *Repo) ListRoutesByScenario(ctx context.Context, scenarioID string) ([]t
 	return out, wrap("ListRoutesByScenario rows", rows.Err())
 }
 
-// ListRoutesByIDs reads the routes with the given ids in one query — the whole
-// aggregate, since a compile projects stops onto their geometry. It backs the
-// user-authored compile, whose services reference routes by id rather than
-// belonging to a scenario. Ids not found are simply absent from the result; a
-// caller that needs every one present checks the count.
 func (r *Repo) ListRoutesByIDs(ctx context.Context, ids []string) ([]transit.Route, error) {
 	if len(ids) == 0 {
 		return nil, nil
@@ -300,8 +248,6 @@ func (r *Repo) ListRoutesByIDs(ctx context.Context, ids []string) ([]transit.Rou
 	return out, wrap("ListRoutesByIDs rows", rows.Err())
 }
 
-// scanRoute reads one row of routeColumns. It takes a pgx.Row so both the
-// single-row and multi-row readers share one column order.
 func scanRoute(row pgx.Row) (transit.Route, error) {
 	var rt transit.Route
 	err := row.Scan(&rt.ID, &rt.ScenarioID, &rt.OwnerID, &rt.Slug, &rt.Name,
@@ -324,9 +270,6 @@ func (r *Repo) CreateStation(ctx context.Context, st transit.Station) error {
 	return wrap("CreateStation", err)
 }
 
-// ListStationsByScenario is deliberately not filtered by owner: under the
-// ownership-uniformity invariant a scenario's stations always share its owner,
-// so scoping to the scenario has already scoped to the owner.
 func (r *Repo) ListStationsByScenario(ctx context.Context, scenarioID string) ([]transit.Station, error) {
 	rows, err := r.pool.Query(ctx,
 		`SELECT `+stationColumns+` FROM stations WHERE scenario_id = $1 ORDER BY slug`, scenarioID)
@@ -421,16 +364,10 @@ func (r *Repo) ListServicesByScenario(ctx context.Context, scenarioID string) ([
 	return r.listServicesBy(ctx, "ListServicesByScenario", "scenario_id", scenarioID)
 }
 
-// ListServicesByOwner backs "my services". Ownership is a WHERE clause, not a
-// post-query filter, so services the caller does not own never leave the
-// database.
 func (r *Repo) ListServicesByOwner(ctx context.Context, ownerID string) ([]transit.Service, error) {
 	return r.listServicesBy(ctx, "ListServicesByOwner", "owner_id", ownerID)
 }
 
-// listServicesBy loads services matching a single equality predicate and
-// hydrates each one's embedded stops and frequency windows. column is a
-// trusted internal identifier, never caller input.
 func (r *Repo) listServicesBy(ctx context.Context, op, column, value string) ([]transit.Service, error) {
 	rows, err := r.pool.Query(ctx,
 		`SELECT id, scenario_id, route_id, vehicle_type_id, name, direction, active, provenance, owner_id,
@@ -635,8 +572,6 @@ func (r *Repo) CreateUser(ctx context.Context, u transit.User, passwordHash stri
 	return wrap("CreateUser", err)
 }
 
-// GetUserCredentialsByEmail returns the user together with their stored
-// password hash. Only the login handler should call it.
 func (r *Repo) GetUserCredentialsByEmail(ctx context.Context, email string) (transit.User, string, bool, error) {
 	var u transit.User
 	var hash string
@@ -654,9 +589,6 @@ func (r *Repo) GetUserCredentialsByEmail(ctx context.Context, email string) (tra
 
 const userColumns = `id, email, name, is_admin, created_at, updated_at`
 
-// userColumnsU is the same list qualified for joins against sessions, where a
-// bare `id` would be ambiguous. Kept in step with userColumns by hand — both
-// feed the same scanUser, so a mismatch fails loudly at the first query.
 const userColumnsU = `u.id, u.email, u.name, u.is_admin, u.created_at, u.updated_at`
 
 func (r *Repo) GetUserByID(ctx context.Context, id string) (transit.User, bool, error) {
@@ -706,10 +638,6 @@ func (r *Repo) CreateSession(ctx context.Context, s transit.Session) error {
 	return wrap("CreateSession", err)
 }
 
-// GetSessionUser resolves a token hash to the user it authenticates. Expiry is
-// part of the WHERE clause rather than a follow-up check in Go, so an expired
-// session is indistinguishable from a missing one and no caller can skip the
-// comparison.
 func (r *Repo) GetSessionUser(ctx context.Context, tokenHash string) (transit.User, bool, error) {
 	return scanUser(r.pool.QueryRow(ctx,
 		`SELECT `+userColumnsU+`
@@ -743,9 +671,6 @@ func (r *Repo) CreateJob(ctx context.Context, j transit.Job) error {
 const jobColumns = `id, kind, status, scenario_id, user_scenario_id, user_service_id,
 	owner_id, error, result, compiled_service_ids, created_at, updated_at`
 
-// jobColumnsQualified is jobColumns with a `j.` alias prefix, for the reads that
-// join jobs against the target table to resolve a job by slug — there the
-// unqualified `id`, `owner_id`, and `created_at` would be ambiguous.
 const jobColumnsQualified = `j.id, j.kind, j.status, j.scenario_id, j.user_scenario_id, j.user_service_id,
 	j.owner_id, j.error, j.result, j.compiled_service_ids, j.created_at, j.updated_at`
 
@@ -766,10 +691,6 @@ func (r *Repo) UpdateJobStatus(ctx context.Context, id, status, errMsg string) e
 	return nil
 }
 
-// CompleteJob marks a job succeeded and stores its compiled result and the
-// member service ids it compiled in one write, so a poller never observes
-// "succeeded" with no result yet to read. compiledServiceIDs may be nil (an
-// empty compile), stored as SQL NULL.
 func (r *Repo) CompleteJob(ctx context.Context, id string, result transit.TransitGraph, compiledServiceIDs []string) error {
 	tag, err := r.pool.Exec(ctx,
 		`UPDATE jobs SET status = $2, error = '', result = $3, compiled_service_ids = $4, updated_at = now() WHERE id = $1`,
@@ -801,37 +722,18 @@ func (r *Repo) ListJobs(ctx context.Context) ([]transit.Job, error) {
 	return out, wrap("ListJobs rows", rows.Err())
 }
 
-// GetLatestSucceededJob is the seeded "result, retrievable by slug" read: it
-// joins through to scenarios by slug rather than requiring the caller to know a
-// scenario id, matching GetTravelTimes's slug-addressed convention. It is a thin
-// wrapper over latestSucceededJobBySlug, the one generalised resolver.
 func (r *Repo) GetLatestSucceededJob(ctx context.Context, scenarioSlug, kind string) (transit.Job, bool, error) {
 	return r.latestSucceededJobBySlug(ctx, "scenarios", "scenario_id", scenarioSlug, kind)
 }
 
-// GetLatestSucceededUserScenarioJob is the user-authored counterpart, resolving
-// through user_scenarios instead of scenarios. Kind is fixed at
-// compile_user_scenario — a user scenario has exactly one compile kind — so the
-// caller addresses it by slug alone.
 func (r *Repo) GetLatestSucceededUserScenarioJob(ctx context.Context, userScenarioSlug string) (transit.Job, bool, error) {
 	return r.latestSucceededJobBySlug(ctx, "user_scenarios", "user_scenario_id", userScenarioSlug, transit.JobKindCompileUserScenario)
 }
 
-// GetLatestSucceededUserServiceJob resolves through user_services, for a service
-// compiled alone rather than as a scenario member. Kind is fixed at
-// compile_user_service for the same reason as its scenario sibling: a service has
-// exactly one compile kind, so the caller addresses it by slug alone.
 func (r *Repo) GetLatestSucceededUserServiceJob(ctx context.Context, userServiceSlug string) (transit.Job, bool, error) {
 	return r.latestSucceededJobBySlug(ctx, "user_services", "user_service_id", userServiceSlug, transit.JobKindCompileUserService)
 }
 
-// latestSucceededJobBySlug is the single "compiled graph, retrievable by slug"
-// resolver the readers above share: it joins jobs to the target table on the
-// given FK column, filters by the target's slug, kind, and succeeded status, and
-// takes the most recent. targetTable and fkColumn are compile-time constants
-// from those wrappers, never caller input, so interpolating them into the SQL
-// carries no injection surface; the slug, kind, and status remain bound
-// parameters.
 func (r *Repo) latestSucceededJobBySlug(ctx context.Context, targetTable, fkColumn, slug, kind string) (transit.Job, bool, error) {
 	row := r.pool.QueryRow(ctx,
 		`SELECT `+jobColumnsQualified+`
@@ -842,8 +744,6 @@ func (r *Repo) latestSucceededJobBySlug(ctx context.Context, targetTable, fkColu
 	return scanJob(row)
 }
 
-// scanJob reads one jobColumns row, translating "no such row" into ok=false
-// rather than an error.
 func scanJob(row pgx.Row) (transit.Job, bool, error) {
 	var j transit.Job
 	err := scanJobInto(row, &j)
@@ -856,35 +756,20 @@ func scanJob(row pgx.Row) (transit.Job, bool, error) {
 	return j, true, nil
 }
 
-// scanJobRow is scanJob's pgx.Rows counterpart, for the multi-row ListJobs
-// reader.
 func scanJobRow(rows pgx.Rows) (transit.Job, error) {
 	var j transit.Job
 	err := scanJobInto(rows, &j)
 	return j, err
 }
 
-// scanJobInto is the single column order both job readers share, so a change to
-// jobColumns has one scan to keep in step rather than two.
 func scanJobInto(row pgx.Row, j *transit.Job) error {
 	return row.Scan(&j.ID, &j.Kind, &j.Status, &j.ScenarioID, &j.UserScenarioID, &j.UserServiceID,
 		&j.OwnerID, &j.Error, &j.Result, &j.CompiledServiceIDs, &j.CreatedAt, &j.UpdatedAt)
 }
 
-// --- Routing jobs ---
-//
-// The API inserts a routing job, polls it, and — in the one case it can
-// diagnose itself, a publish the broker never confirmed — fails it. The
-// worker's transitions (running, succeeded, the result, the egress cache)
-// used to be SQL this repository did not run; since SPA-273 they arrive as
-// authenticated HTTP and the SQL lives in worker.go.
-
 const routingJobColumns = `id, status, compile_job_id, owner_id, lat, lng,
 	budget_mins, mode, result, error, created_at, updated_at`
 
-// CreateRoutingJob inserts a queued routing job, filling in the timestamps the
-// database assigned so the caller can answer 202 with a complete row rather
-// than one carrying zero times.
 func (r *Repo) CreateRoutingJob(ctx context.Context, j *transit.RoutingJob) error {
 	err := r.pool.QueryRow(ctx,
 		`INSERT INTO routing_jobs (id, status, compile_job_id, owner_id, lat, lng, budget_mins, mode)
@@ -909,21 +794,6 @@ func (r *Repo) GetRoutingJobByID(ctx context.Context, id string) (transit.Routin
 	return j, true, nil
 }
 
-// CountInFlightRoutingJobs returns how many routing jobs are still waiting on a
-// worker: queued or running, and created within `within` of now.
-//
-// The age bound is what stops the count from being a ratchet. Nothing sweeps
-// abandoned rows — a job whose worker never picked it up is only failed when
-// someone polls it (see handler.RoutingJobStatus), and the public isochrone's
-// caller may well have closed the tab. Counting those forever would let one
-// outage leave the enqueue cap permanently tripped, refusing work no worker is
-// actually doing. Bounding by age instead means the backlog this reports is
-// work a live worker could still plausibly be on, and that it drains on its
-// own once the enqueues stop.
-//
-// The cutoff is computed here rather than as an interval against the
-// database's now() to match handler.failIfStale, which measures the same
-// staleness in Go against the same created_at.
 func (r *Repo) CountInFlightRoutingJobs(ctx context.Context, within time.Duration) (int, error) {
 	var n int
 	err := r.pool.QueryRow(ctx,
@@ -938,10 +808,6 @@ func (r *Repo) CountInFlightRoutingJobs(ctx context.Context, within time.Duratio
 	return n, nil
 }
 
-// FailRoutingJob marks a routing job failed. The API calls it for exactly one
-// condition: a publish the broker did not confirm, where the row exists but no
-// worker will ever see the message. Leaving it queued would strand a client
-// polling something that is never coming.
 func (r *Repo) FailRoutingJob(ctx context.Context, id, errMsg string) error {
 	return r.execRoutingJob(ctx, "FailRoutingJob", id,
 		`UPDATE routing_jobs SET status = $2, error = $3, updated_at = now() WHERE id = $1`,

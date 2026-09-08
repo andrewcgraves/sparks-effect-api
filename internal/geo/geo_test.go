@@ -13,10 +13,6 @@ func TestHaversineKm_zeroForTheSamePoint(t *testing.T) {
 	}
 }
 
-// A degree of latitude is ~111.19 km on a sphere of this radius, everywhere.
-// Checking it against the known figure is what catches a radians/degrees slip,
-// which is the mistake this function is prone to and the one that would make
-// every range check wrong by a constant factor.
 func TestHaversineKm_oneDegreeOfLatitude(t *testing.T) {
 	got := geo.HaversineKm(0, 0, 1, 0)
 	if math.Abs(got-111.19) > 0.05 {
@@ -24,9 +20,6 @@ func TestHaversineKm_oneDegreeOfLatitude(t *testing.T) {
 	}
 }
 
-// A degree of longitude shrinks with the cosine of the latitude. At 60° it is
-// half what it is at the equator, which is the cheapest way to show the
-// cos(lat) term is present and applied to the right argument.
 func TestHaversineKm_longitudeShrinksWithLatitude(t *testing.T) {
 	atEquator := geo.HaversineKm(0, 0, 0, 1)
 	atSixty := geo.HaversineKm(60, 0, 60, 1)
@@ -43,10 +36,6 @@ func TestHaversineKm_isSymmetric(t *testing.T) {
 	}
 }
 
-// The table the whole guard is calibrated against. These are the radii a
-// rejection is measured with, so they are asserted as the literal numbers
-// rather than recomputed from the formula — a test that restates the
-// implementation would agree with any change to it.
 func TestReachKm_theBudgetTable(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -71,9 +60,6 @@ func TestReachKm_theBudgetTable(t *testing.T) {
 	}
 }
 
-// A non-positive budget reaches nowhere rather than somewhere negative. The
-// request validator rejects these before they could arrive, so this pins the
-// behaviour rather than covering a live path.
 func TestReachKm_nonPositiveBudgetReachesNothing(t *testing.T) {
 	for _, mins := range []int{0, -1, -240} {
 		if got := geo.ReachKm(geo.WalkSpeedKmH, mins); got != 0 {
@@ -82,11 +68,6 @@ func TestReachKm_nonPositiveBudgetReachesNothing(t *testing.T) {
 	}
 }
 
-// The routing worker sizes its destination pre-filter by dividing this same
-// product by a detour factor of 1.4. This side must not: a rejection has to be
-// the looser of the two bounds or it refuses origins the worker would have
-// plotted. Stated as a test because the two numbers live in separate
-// repositories with nothing else holding them in relation.
 func TestReachKm_isLooserThanTheWorkersPreFilter(t *testing.T) {
 	const workerDetourFactor = 1.4
 

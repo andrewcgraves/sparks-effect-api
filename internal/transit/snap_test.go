@@ -10,11 +10,6 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// snapTestRoute is a due-east line at latitude 37, one degree of longitude
-// long. A straight line on a parallel makes the arithmetic checkable by hand:
-// in the local planar frame a stop displaced 0.001 degrees of latitude sits
-// ~111 m off the alignment, and 0.01 degrees ~1112 m — one comfortably inside
-// the 500 m threshold and one comfortably outside it.
 func snapTestRoute() transit.Route {
 	return transit.Route{
 		ID:   "route-1",
@@ -27,16 +22,10 @@ func snapTestRoute() transit.Route {
 	}
 }
 
-// offsetForDegLat is the planar distance, in metres, that a displacement of
-// degLat degrees of latitude produces — the same equirectangular frame
-// internal/physics snaps in.
 func offsetForDegLat(degLat float64) float64 {
 	return 6371000.0 * degLat * math.Pi / 180
 }
 
-// serviceOnSnapRoute is a service on snapTestRoute stopping at the given
-// longitudes, each displaced north of the alignment by degLat degrees. Stops
-// are named A, B, C… in the order given, which is the authored order.
 func serviceOnSnapRoute(degLat float64, lngs ...float64) transit.UserService {
 	svc := transit.UserService{
 		RouteID: "route-1",
@@ -263,10 +252,6 @@ func TestSnapToRouteReportsUnusableGeometry(t *testing.T) {
 	}
 }
 
-// TestSnapToRouteReportsAnOffRouteStopAsAStructuredFault pins the machine-readable half of
-// an off-route refusal (SPA-151). The prose stays the message a user reads; the
-// fault is what a client branches on, so it names the stop by fields rather
-// than leaving the caller to recover it from wording.
 func TestSnapToRouteReportsAnOffRouteStopAsAStructuredFault(t *testing.T) {
 	svc := serviceOnSnapRoute(0, -121.8, -121.4)
 	svc.Slug = "central-valley-express"
@@ -299,9 +284,6 @@ func TestSnapToRouteReportsAnOffRouteStopAsAStructuredFault(t *testing.T) {
 	}
 }
 
-// TestSnapToRouteReportsBothStopsOfAnOrderFault covers the fault whose prose was the
-// harder of the two to parse: the offending pair is what the authoring UI
-// highlights, and either stop alone does not describe the disagreement.
 func TestSnapToRouteReportsBothStopsOfAnOrderFault(t *testing.T) {
 	// A and B run east; C doubles back between them.
 	svc := serviceOnSnapRoute(0, -121.8, -121.4, -121.6)
@@ -337,11 +319,6 @@ func TestSnapToRouteReportsBothStopsOfAnOrderFault(t *testing.T) {
 	}
 }
 
-// TestSnapToRouteReadsAWestboundOrderFaultAgainstItsOwnDirection covers the
-// other half of the order message. A westbound service that doubles back is
-// still at fault, but the offending stop lies *before* its successor rather
-// than after it: the direction the sequence established is what the fault reads
-// against, not the direction the route was drawn in.
 func TestSnapToRouteReadsAWestboundOrderFaultAgainstItsOwnDirection(t *testing.T) {
 	// A→B runs west, establishing a descending direction; C then doubles back
 	// east of B.
@@ -360,16 +337,6 @@ func TestSnapToRouteReadsAWestboundOrderFaultAgainstItsOwnDirection(t *testing.T
 	}
 }
 
-// TestAWestboundServiceCompilesToTheSameGraphAsItsEastboundTwin is the proof
-// behind the monotonicity rule in FirstChainageOrderFault, which accepts a
-// service whose chainage descends the whole way even though physics.ProjectStops
-// sorts it back into ascending order before building spans.
-//
-// The claim is that the sort cannot change the graph for a monotonic sequence:
-// reversing a list preserves every adjacent pair, and compiled edges are emitted
-// in both directions carrying the dwell of the end they arrive at. If that ever
-// stops being true — a directional edge weight, an order-sensitive consumer —
-// this test fails and the rule has to tighten to strict ascent.
 func TestAWestboundServiceCompilesToTheSameGraphAsItsEastboundTwin(t *testing.T) {
 	rt := transit.Route{
 		ID: "route-1", Slug: "line", Name: "Line",
@@ -406,8 +373,6 @@ func TestAWestboundServiceCompilesToTheSameGraphAsItsEastboundTwin(t *testing.T)
 	}
 }
 
-// compiledEdges compiles svc and returns its edges as a set keyed "from->to",
-// so two graphs compare regardless of the order spans happened to be built in.
 func compiledEdges(t *testing.T, rt transit.Route, svc transit.UserService) map[string]int {
 	t.Helper()
 	compilable, err := transit.CompilableFromUserService(rt, svc)

@@ -13,7 +13,6 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// RouteStore is the slice of the repository route ingestion and reads need.
 type RouteStore interface {
 	CreateRoute(ctx context.Context, r transit.Route) error
 	GetRouteBySlug(ctx context.Context, slug string) (transit.Route, bool, error)
@@ -21,13 +20,6 @@ type RouteStore interface {
 	GetScenarioBySlug(ctx context.Context, slug string) (transit.Scenario, bool, error)
 }
 
-// CreateRoute ingests an admin-authored alignment: a GeoJSON LineString whose
-// per-segment track physics live in its properties. It is registered behind
-// RequireAdmin, which is the whole of its access control — the handler itself
-// makes no authorization decision.
-//
-// The response is the persisted route, whose slug is how it is addressed from
-// then on.
 func CreateRoute(store RouteStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var in route.Ingest
@@ -110,11 +102,6 @@ func CreateRoute(store RouteStore) http.HandlerFunc {
 	}
 }
 
-// RouteBySlug returns a handler that fetches one route by its globally unique
-// slug — geometry, per-segment physics, and metadata — for the public
-// /routes/:slug preview. Unlike scenario reads, it is backed by RouteStore
-// (Postgres) rather than the embedded scenario store, since ingested routes
-// are addressed independently of any scenario.
 func RouteBySlug(store RouteStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		slug := r.PathValue("slug")
@@ -132,17 +119,6 @@ func RouteBySlug(store RouteStore) http.HandlerFunc {
 	}
 }
 
-// mayReadRoute reports whether this request may see rt. A curated route is
-// public and needs no identity; an owned one is visible only to its owner or an
-// admin.
-//
-// It reads the optional identity rather than requiring one, because the
-// endpoints it guards are public: registering them behind RequireAuth would
-// take the curated alignments away from the anonymous callers they exist for.
-// The list read needs no equivalent — ListCuratedRouteSummaries filters in SQL
-// — but a by-slug read would otherwise confirm a draft's existence to anyone
-// who guessed its name-derived slug, which is the leak SPA-80 and SPA-81
-// answered with 404s.
 func mayReadRoute(ctx context.Context, rt transit.Route) bool {
 	if rt.OwnerID == nil {
 		return true
@@ -151,15 +127,6 @@ func mayReadRoute(ctx context.Context, rt transit.Route) bool {
 	return ok && auth.CanAccess(user, rt.OwnerID)
 }
 
-// Routes returns a handler that lists routes for a picker: enough to show a
-// choice and address the one that is chosen, no more. It is the discovery half
-// of RouteBySlug — without it a client would have to already know a slug to
-// read anything.
-//
-// Like RouteBySlug it reads Postgres rather than the embedded scenario store,
-// so it spans everything addressable by slug: admin-ingested alignments and the
-// seeded scenario routes alike. Both are real choices, so the picker is offered
-// both.
 func Routes(store RouteStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		routes, err := store.ListCuratedRouteSummaries(r.Context())
@@ -175,14 +142,6 @@ func Routes(store RouteStore) http.HandlerFunc {
 	}
 }
 
-// resolveCuratedScenarioOrFail turns an optional scenario slug into a scenario
-// ID, writing the error response itself and reporting ok=false when the caller
-// should stop. An empty slug is not an error — it yields a nil (standalone)
-// scenario.
-//
-// A scenario someone owns is reported as unknown rather than refused: this is
-// the admin ingest path, and an owned scenario is simply not a place curated
-// content belongs.
 func resolveCuratedScenarioOrFail(w http.ResponseWriter, r *http.Request, store RouteStore, slug string) (*string, bool) {
 	if slug == "" {
 		return nil, true
@@ -200,10 +159,6 @@ func resolveCuratedScenarioOrFail(w http.ResponseWriter, r *http.Request, store 
 	return &sc.ID, true
 }
 
-// buildRouteFromIngest turns a validated payload into the domain route. It is
-// the shared middle of the two create paths — admin ingestion and an owner
-// authoring their own alignment — which differ only in slug policy and owner,
-// both of which the caller has already decided.
 func buildRouteFromIngest(in route.Ingest, id, slug string, scenarioID, ownerID *string) transit.Route {
 	// Absent bidirectional means true: a physical alignment is traversable
 	// both ways unless the author says otherwise.
@@ -226,9 +181,6 @@ func buildRouteFromIngest(in route.Ingest, id, slug string, scenarioID, ownerID 
 	}
 }
 
-// toRouteSegments converts the validated ingestion segments to their domain
-// form. The two types are deliberately separate: internal/route describes the
-// wire payload, transit.RouteSegment is what the compiler and storage use.
 func toRouteSegments(segs []route.Segment) []transit.RouteSegment {
 	if len(segs) == 0 {
 		return nil

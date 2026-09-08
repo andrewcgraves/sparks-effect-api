@@ -7,17 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
+	"github.com/jackc/pgx/v5"
 )
-
-// The two tables SPA-182 adds are co-owned with the routing worker: the API
-// inserts and polls routing_jobs, and since SPA-273 the worker's transitions
-// and cache writes also land here, over authenticated HTTP rather than a
-// shared DATABASE_URL. What is testable here is both halves of that SQL,
-// plus the schema itself.
 
 const (
 	routingCompileJobID = "00000000-0000-400a-8002-000000000001"
@@ -25,16 +18,6 @@ const (
 	routingJobID        = "00000000-0000-400b-8002-000000000001"
 )
 
-// rewindRoutingJobsMigration unwinds 00014.
-//
-// Every earlier rewind reaches this by way of
-// rewindLasVegasCoordinateMigration, which unwinds 00015 — the current tail
-// of the chain that starts in snapmigration_test.go — first. goose refuses to
-// re-apply a migration older than the highest version already recorded, so a
-// test that puts the database back before 00007 must also unrecord
-// everything after it — and unrecording a migration without undoing what it
-// did leaves the next Migrate trying to CREATE TABLE over tables that already
-// exist.
 func rewindRoutingJobsMigration(t *testing.T, url string) {
 	t.Helper()
 	rewindLasVegasCoordinateMigration(t, url)
@@ -44,9 +27,6 @@ func rewindRoutingJobsMigration(t *testing.T, url string) {
 		`DELETE FROM goose_db_version WHERE version_id = 14`)
 }
 
-// seedCompileJob creates the compile job a routing job must reference. Every
-// routing job names one: a routing job with no graph is not a request anyone
-// can answer, so the column is NOT NULL and there is no way to test around it.
 func seedCompileJob(t *testing.T, repo interface {
 	CreateJob(context.Context, transit.Job) error
 }, id string) {
@@ -107,9 +87,6 @@ func TestRoutingJobsRoundTrip(t *testing.T) {
 	}
 }
 
-// An ownerless routing job is the public seeded isochrone. It must be storable:
-// the column is nullable precisely so an unauthenticated request has somewhere
-// to land.
 func TestRoutingJobWithoutAnOwner(t *testing.T) {
 	ctx := context.Background()
 	repo, _ := freshRepo(t)
@@ -159,9 +136,6 @@ func TestRoutingJobWithAnOwner(t *testing.T) {
 	}
 }
 
-// FailRoutingJob is the API's one transition: a publish the broker never
-// confirmed. Leaving such a row queued would strand a client polling work no
-// worker is ever going to see.
 func TestFailRoutingJob(t *testing.T) {
 	ctx := context.Background()
 	repo, _ := freshRepo(t)
@@ -195,8 +169,6 @@ func TestFailRoutingJob(t *testing.T) {
 	}
 }
 
-// A routing job cannot outlive the compiled graph it names: without that graph
-// the request is unanswerable, so the row is garbage rather than history.
 func TestRoutingJobCascadesWithItsCompileJob(t *testing.T) {
 	ctx := context.Background()
 	repo, url := freshRepo(t)
@@ -224,10 +196,6 @@ func TestRoutingJobCascadesWithItsCompileJob(t *testing.T) {
 	}
 }
 
-// Deleting an account takes its routing jobs with it rather than nulling the
-// owner. jobs.owner_id uses ON DELETE SET NULL, but here nil means "public", so
-// the same rule would quietly turn a private job into one anyone holding the id
-// could read.
 func TestRoutingJobCascadesWithItsOwnerRatherThanBecomingPublic(t *testing.T) {
 	ctx := context.Background()
 	repo, url := freshRepo(t)
@@ -264,12 +232,6 @@ func TestRoutingJobCascadesWithItsOwnerRatherThanBecomingPublic(t *testing.T) {
 	}
 }
 
-// The cache table is written by the worker through WorkerStore (SPA-273). Its
-// schema is still defined here, and uniqueness must stay exactly these five
-// columns — graph, station, mode, contour, and departs_on — with the tileset
-// timestamp still outside it. A rebuild is a miss on read (SPA-269), not a
-// new key. Walk/bike/drive store NULL departs_on; NULLS NOT DISTINCT keeps
-// those colliding the way the old four-column primary key did.
 func TestIsochroneCacheSchema(t *testing.T) {
 	ctx := context.Background()
 	repo, url := freshRepo(t)
@@ -337,9 +299,6 @@ func TestIsochroneCacheSchema(t *testing.T) {
 	}
 }
 
-// CountInFlightRoutingJobs is the signal the enqueue cap decides on (SPA-219),
-// so what it counts is the whole behaviour: only work a worker could still be
-// doing — queued or running, and young enough to believe in.
 func TestCountInFlightRoutingJobs(t *testing.T) {
 	ctx := context.Background()
 	repo, url := freshRepo(t)

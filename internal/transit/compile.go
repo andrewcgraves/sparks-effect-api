@@ -5,45 +5,6 @@ import (
 	"sort"
 )
 
-// Edge is one directed hop along a service.
-//
-// Seconds is the whole cost of taking it: the vehicle in motion plus the dwell
-// it serves on arrival at ToSlug. DwellS reports that dwell separately, so a
-// consumer that wants to say how long the vehicle stands at the destination can
-// recover it instead of watching it disappear into the total. It is additive and
-// omitted when zero — a graph compiled before this field existed decodes with
-// DwellS zero, which is indistinguishable on the wire from a hop with no dwell.
-//
-// RouteID, FromChainageM and ToChainageM (SPA-264) say where the hop runs: the
-// corridor it is carried by, and how far along that corridor's alignment each of
-// its two endpoint stations sits, in metres. They exist so a consumer can draw
-// the part of a hop a rider's budget covers without holding the compiled
-// geometry — slicing the alignment between the two chainages is the whole of it.
-//
-// They are per-edge and not per-service on purpose. Compilation is deliberately
-// route-blind and lets a service path across corridors that meet at a shared
-// station, so one route recorded against the service would be wrong for exactly
-// those services, and silently.
-//
-// The three travel together: an edge either names a route and carries both
-// chainages, or names neither. That second shape is also what a graph compiled
-// before SPA-264 decodes to, which is why nothing downstream needs a second code
-// path to recognise a hop it cannot draw, and why chainage does not have to
-// distinguish "absent" from a legitimate zero: RouteID is the discriminator.
-//
-// Which hops take that shape is the seeded table compiler's rule, not a property
-// of every edge: see routePlacer, which emits it for a station beyond
-// OffRouteThresholdM, a hop spanning two corridors, or no resolvable route. The
-// physics compiler has no such case — it compiles one service against the one
-// alignment it references, and a route whose geometry it cannot use fails the
-// compile outright. That asymmetry is deliberate and load-bearing: edgeRoutesStale
-// reads a placeless authored edge as a graph predating this feature, so an
-// authored compile that could legitimately emit one would mark its own fresh
-// output stale and recompile for ever.
-//
-// Descending chainage is ordinary, not an error. The reverse of every hop
-// carries the same two numbers swapped, and an alignment authored in the
-// opposite direction to a journey produces the same thing.
 type Edge struct {
 	FromSlug      string  `json:"from_slug"`
 	ToSlug        string  `json:"to_slug"`
@@ -54,13 +15,6 @@ type Edge struct {
 	ToChainageM   float64 `json:"to_chainage_m,omitempty"`
 }
 
-// placedOn returns the edge with its corridor and endpoint chainages set.
-//
-// It exists so the three fields are written in one move rather than three, at
-// each of the sites that builds an edge. The invariant that they travel together
-// is what edgeRoutesStale leans on, and an edge naming a route with no chainages
-// would be undrawable in a way nothing detects — so the only way to set one of
-// them is to set all three.
 func (e Edge) placedOn(routeID string, fromChainageM, toChainageM float64) Edge {
 	e.RouteID = routeID
 	e.FromChainageM = fromChainageM
@@ -68,17 +22,6 @@ func (e Edge) placedOn(routeID string, fromChainageM, toChainageM float64) Edge 
 	return e
 }
 
-// ServiceGraph is one service's contribution to a TransitGraph: its directed
-// edges plus the boarding wait charged once when a rider boards this service
-// at the path origin (see graphDijkstra).
-//
-// WaitSecs is that boarding wait in seconds — not a transfer penalty. How it
-// is derived is controlled by BoardingWaitPolicy, resolved per service through
-// ResolveBoardingWait (service override > scenario override > global default >
-// none). WaitPolicy records which policy produced it so GraphStale and the API
-// read surface can tell a stored graph from the current setting without
-// re-deriving. WaitPolicy is additive and optional on decode: a jobs.result
-// row written before it unmarshals with WaitPolicy empty.
 type ServiceGraph struct {
 	ServiceID  string `json:"service_id"`
 	Edges      []Edge `json:"edges"`
@@ -86,30 +29,6 @@ type ServiceGraph struct {
 	WaitPolicy string `json:"wait_policy,omitempty"`
 }
 
-// GraphNode is one addressable point in a compiled graph: the key every
-// Edge.FromSlug/ToSlug refers to, together with the position the isochrone
-// layer needs and the display names that produced it.
-//
-// It exists because a compiled scenario is otherwise pure topology — bare slugs
-// and seconds, no geometry anywhere. The chainer needs a location per node, and
-// a user scenario has no stations table to reconstruct one from after the fact:
-// its key is a compile-time cluster key (MergeColocatedStops) persisted nowhere
-// else, so the coordinate must ride on the graph or it is unrecoverable. The
-// compile result is the one sound source.
-//
-// Lat/Lng are the cluster key member's persisted-snapped coordinate (SPA-108),
-// not a centroid. A centroid lies on no route line, so it is not a place a
-// train stops, and it would drift as membership changed; the key member's own
-// snapped position is a real point on a real alignment. Names carries every
-// distinct member stop name, key member first, so a caller can render
-// "Transbay (also: Salesforce Center)" from one field.
-//
-// RoutingLat/RoutingLng are nil for almost every node: they exist only so a
-// station whose real coordinate the routing worker's Valhalla graph cannot
-// reach yet (Station.RoutingLocation, SPA-234) can still get an egress
-// isochrone, centred on this point instead of Lat/Lng. Nothing that plots a
-// node on a map should read them — Lat/Lng remains the place the station
-// actually is; these are a routing-only stand-in for it.
 type GraphNode struct {
 	Slug       string   `json:"slug"`
 	Lat        float64  `json:"lat"`
@@ -119,28 +38,6 @@ type GraphNode struct {
 	Names      []string `json:"names"`
 }
 
-// TransitGraph is a compiled, Dijkstra-ready representation of a scenario's
-// active services — either hand-authored (Compile) or physics-derived
-// (CompileScenario) — and is what an async compile job persists as its result
-// (see Job.Result).
-//
-// Merge records how interchange was resolved when several services were
-// compiled together: which stops were folded onto one node and which nearly
-// were. It is empty for a hand-authored compile and for a physics compile with
-// nothing to merge. It rides on the job result rather than a separate endpoint
-// so the poller contract is unchanged — a client already reading the graph
-// reads the report from the same payload.
-//
-// Nodes gives every graph key a position and display names, so a compiled
-// graph carries its own geometry (see GraphNode). The physics path
-// (CompileServices) populates it with exactly one node per key the edges name;
-// the hand-authored Compile populates it with one node per station of the
-// scenario (seededNodes), which is the same set plus any station no service
-// calls at. Both are closure the graph would otherwise lack, and since SPA-181
-// the seeded isochrone reads its nodes from here rather than from the station
-// rows. The field is additive and optional on decode: a jobs.result row written
-// before it unmarshals unchanged, with Nodes nil, and no historical rows are
-// backfilled — such a job compiles again to gain them.
 type TransitGraph struct {
 	Services []ServiceGraph `json:"services"`
 	Merge    MergeReport    `json:"merge,omitempty"`
@@ -250,24 +147,6 @@ func Compile(
 	return graph, nil
 }
 
-// seededNodes turns a seeded scenario's stations into the graph's node set:
-// one node per station, carrying the position and name the station row already
-// holds.
-//
-// It is every station of the scenario, not only those some service calls at,
-// because that is exactly what Store.Nodes offered the chainer before the
-// seeded isochrone moved onto the compiled graph (SPA-181) — an uncalled
-// station is still a place the origin polygon may reach, it simply leads
-// nowhere by transit.
-//
-// Unlike the physics compile, no clustering runs here: seeded services share a
-// Station row outright, so stops that interchange already carry one slug and
-// there is nothing to merge. Names is therefore always the station's own single
-// name rather than a merged cluster's list.
-// A station with no usable location is an error rather than a node at (0, 0):
-// that coordinate is a real place, and the graph this builds is persisted and
-// plotted from, so a silent default would put a station in the Gulf of Guinea
-// and stay there.
 func seededNodes(stations []Station) ([]GraphNode, error) {
 	if len(stations) == 0 {
 		return nil, nil
@@ -297,10 +176,6 @@ func seededNodes(stations []Station) ([]GraphNode, error) {
 	return nodes, nil
 }
 
-// CompiledServiceIDs is the set of member service ids a compiled graph
-// contains, in the order the graph lists them. Every ServiceGraph is keyed by
-// its source service id, so the graph is itself the record of what compiled —
-// no separate bookkeeping that could drift from it.
 func CompiledServiceIDs(g TransitGraph) []string {
 	if len(g.Services) == 0 {
 		return nil

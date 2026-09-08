@@ -5,33 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/andrewcgraves/sparks-effect-api/internal/persistence/postgres"
+	"github.com/jackc/pgx/v5"
 )
 
-// The migration that keys segments by route (00011) backfills from the
-// scenario's single route, and asserts that premise rather than assuming it —
-// the deployed database is already seeded, and SeedIfEmpty will not re-seed a
-// populated one, so this migration is the only thing that gives existing rows
-// their route. These tests pin both halves of that choice, so a later reader
-// finds out what it does with legacy data from a test rather than from a
-// production incident.
-
-// rewindSegmentRouteIDMigration puts the database back to how it looked
-// immediately before 00011 ran: column and index gone, version row removed.
-// goose then re-applies 00011 on the next Migrate, which is what lets a test
-// put pre-migration segments in front of it. Doing it this way rather than
-// migrating partially keeps the test honest — it runs the real migration file,
-// not a copy of its SQL.
-//
-// It is a link in the rewind chain in snapmigration_test.go: every earlier
-// rewind ends up here, because goose refuses to re-apply an earlier migration
-// while a later one is still recorded as applied. It passes the chain on to
-// 00012, the current tail.
-//
-// 00012 is unwound first, before the column drop below: it deletes the spur's
-// segments by route_id, which is the very column this rewind removes.
 func rewindSegmentRouteIDMigration(t *testing.T, url string) {
 	t.Helper()
 	rewindBrightlineWestMigration(t, url)
@@ -46,9 +23,6 @@ const (
 	segRouteID    = "00000000-0000-4002-9001-000000000001"
 )
 
-// insertLegacySegments writes segments in the pre-SPA-152 shape — no route_id.
-// It goes in through raw SQL because the column is NOT NULL afterwards, so the
-// Go model can no longer express a segment without one.
 func insertLegacySegments(t *testing.T, url string) {
 	t.Helper()
 	exec(t, url, `INSERT INTO segments (scenario_id, from_slug, to_slug, run_seconds)
@@ -67,9 +41,6 @@ func insertSegmentRoute(t *testing.T, url, id, slug string) {
 		VALUES ('`+id+`', '`+segScenarioID+`', '`+slug+`', 'Route '||'`+slug+`', '{}'::jsonb)`)
 }
 
-// TestSegmentRouteIDBackfillsExistingRows is the case actually expected in
-// every environment: one seeded scenario, one route, segments that predate the
-// column and must come out the other side pointing at it.
 func TestSegmentRouteIDBackfillsExistingRows(t *testing.T) {
 	_, url := freshRepo(t)
 	rewindSegmentRouteIDMigration(t, url)
@@ -92,10 +63,6 @@ func TestSegmentRouteIDBackfillsExistingRows(t *testing.T) {
 	}
 }
 
-// A scenario with several routes is the case this ticket exists to unlock, and
-// the one where a plain UPDATE would mis-key every segment of the other
-// corridors without saying so. Which alignment a span belongs to lives in the
-// authored YAML, out of SQL's reach — so the deploy stops and a human decides.
 func TestSegmentRouteIDRefusesAMultiRouteScenario(t *testing.T) {
 	_, url := freshRepo(t)
 	rewindSegmentRouteIDMigration(t, url)
@@ -116,9 +83,6 @@ func TestSegmentRouteIDRefusesAMultiRouteScenario(t *testing.T) {
 	}
 }
 
-// A scenario with no route leaves rows that cannot satisfy NOT NULL. Deleting
-// them would silently destroy seeded run times SeedIfEmpty will never restore,
-// so this refuses too — the segments survive for a human to key.
 func TestSegmentRouteIDRefusesARoutelessScenario(t *testing.T) {
 	_, url := freshRepo(t)
 	rewindSegmentRouteIDMigration(t, url)
@@ -134,7 +98,6 @@ func TestSegmentRouteIDRefusesARoutelessScenario(t *testing.T) {
 		t.Errorf("migration error %q does not name the offending scenario", err)
 	}
 
-	// The rows the migration refused are still there to be keyed by hand.
 	var count int
 	conn, connErr := pgx.Connect(context.Background(), url)
 	if connErr != nil {
@@ -150,9 +113,6 @@ func TestSegmentRouteIDRefusesARoutelessScenario(t *testing.T) {
 	}
 }
 
-// segmentRouteIDs returns from_slug → route_id for a scenario's segments, read
-// straight from the table: these fixtures have no travel_time_sets row, which
-// the repository read path requires before it returns any segment.
 func segmentRouteIDs(t *testing.T, url, scenarioID string) map[string]string {
 	t.Helper()
 	ctx := context.Background()

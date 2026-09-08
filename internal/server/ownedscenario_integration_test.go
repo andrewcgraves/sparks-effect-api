@@ -10,16 +10,6 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// The load-bearing test for the whole feature: a member builds a complete
-// scenario of their own — scenario, route, stations, segment times, service —
-// compiles it, and plots over it, while the curated ca-hsr baseline is
-// untouched and nothing they authored reaches a public surface.
-//
-// Both halves matter. Without the first, owned scenarios are a name and a
-// description; without the second, authoring one publishes it.
-
-// ownedScenarioFixture builds the whole thing and returns the member's token
-// and the scenario's slug.
 func ownedScenarioFixture(t *testing.T, h http.Handler, token string) string {
 	t.Helper()
 
@@ -74,8 +64,6 @@ func ownedScenarioFixture(t *testing.T, h http.Handler, token string) string {
 	return sc.Slug
 }
 
-// createOwnedServiceIn adds a service to an owned scenario, using the shared
-// vehicle-type catalog the seed provides.
 func createOwnedServiceIn(t *testing.T, h http.Handler, token, scenarioSlug, routeSlug, vehicleTypeID, name string) transit.Service {
 	t.Helper()
 	body := `{
@@ -95,9 +83,6 @@ func createOwnedServiceIn(t *testing.T, h http.Handler, token, scenarioSlug, rou
 	return svc
 }
 
-// firstVehicleTypeID returns a vehicle type from the shared catalog the ca-hsr
-// seed writes. Vehicle types are global and unowned, so any authored service
-// may reference one.
 func firstVehicleTypeID(t *testing.T, repo interface {
 	ListVehicleTypes(context.Context) ([]transit.VehicleType, error)
 }) string {
@@ -112,8 +97,6 @@ func firstVehicleTypeID(t *testing.T, repo interface {
 	return vts[0].ID
 }
 
-// AC: an owned scenario is a real, compilable thing — not a name and a
-// description.
 func TestIntegration_OwnedScenarioCompilesForItsOwner(t *testing.T) {
 	h, repo := integrationServer(t)
 	adminToken := provisionAdminAndLogin(t, h, repo)
@@ -144,8 +127,6 @@ func TestIntegration_OwnedScenarioCompilesForItsOwner(t *testing.T) {
 	}
 }
 
-// The containment half: nothing the member authored reaches a public surface,
-// and a stranger cannot reach it either.
 func TestIntegration_OwnedScenarioIsInvisibleToThePublicAndToStrangers(t *testing.T) {
 	h, repo := integrationServer(t)
 	adminToken := provisionAdminAndLogin(t, h, repo)
@@ -197,9 +178,6 @@ func TestIntegration_OwnedScenarioIsInvisibleToThePublicAndToStrangers(t *testin
 	}
 }
 
-// The curated baseline must be entirely unaffected by anything a member
-// authors. This is the property the ownership filter exists for, and the one
-// that would fail silently rather than loudly.
 func TestIntegration_AuthoringAnOwnedScenarioLeavesTheCuratedBaselineAlone(t *testing.T) {
 	h, repo := integrationServer(t)
 	adminToken := provisionAdminAndLogin(t, h, repo)

@@ -1,4 +1,3 @@
-// Package handler contains the HTTP handlers exposed by the API.
 package handler
 
 import (
@@ -7,9 +6,6 @@ import (
 	"net/http"
 )
 
-// Health responds with a basic liveness payload. It exists so the service
-// has something to hit while it's being built out; SPA-13 will replace this
-// with real readiness/liveness checks against the routing service.
 func Health(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

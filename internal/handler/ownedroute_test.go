@@ -27,12 +27,10 @@ var (
 	adminU  = transit.User{ID: "00000000-0000-4100-8000-000000000009", Email: "admin@example.com", IsAdmin: true}
 )
 
-// fakeOwnedRouteStore is an in-memory handler.OwnedRouteStore. failWith is the
-// package's standard lever for exercising the 500 path.
 type fakeOwnedRouteStore struct {
-	routes    map[string]transit.Route // by slug
+	routes    map[string]transit.Route
 	scenarios map[string]transit.Scenario
-	deps      map[string]transit.RouteDependents // by route id
+	deps      map[string]transit.RouteDependents
 	failWith  error
 }
 
@@ -122,10 +120,6 @@ func (f *fakeOwnedRouteStore) GetScenarioBySlug(_ context.Context, slug string) 
 	return sc, ok, nil
 }
 
-// runWithSlug drives a handler with an identity already on the context, the way
-// RequireAuth would have left it, and with the {slug} wildcard bound the way
-// the mux would have. Both are supplied directly rather than by standing up the
-// server, which is what keeps these unit tests about the handler.
 func runWithSlug(t *testing.T, h http.HandlerFunc, user transit.User,
 	method, target, slug, body string) *httptest.ResponseRecorder {
 	t.Helper()
@@ -138,7 +132,6 @@ func runWithSlug(t *testing.T, h http.HandlerFunc, user transit.User,
 	return rec
 }
 
-// asUser is runWithSlug with the slug taken from a /api/me/routes target.
 func asUser(t *testing.T, h http.HandlerFunc, user transit.User, method, target, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	slug := strings.Trim(strings.TrimPrefix(target, "/api/me/routes"), "/")
@@ -162,7 +155,6 @@ func ownedRouteBody(name, description, scenarioSlug string) string {
 	}`
 }
 
-// The headline acceptance criterion: a member authors a route, and it is theirs.
 func TestCreateOwnedRouteStampsTheCallerAsOwner(t *testing.T) {
 	store := newFakeOwnedRouteStore()
 
@@ -190,9 +182,6 @@ func TestCreateOwnedRouteStampsTheCallerAsOwner(t *testing.T) {
 	}
 }
 
-// routes.slug is globally unique across curated and owned rows, so a user
-// naming their draft after a curated alignment must get the next free slug
-// rather than a constraint violation.
 func TestCreateOwnedRouteWorksAroundACollidingCuratedSlug(t *testing.T) {
 	store := newFakeOwnedRouteStore()
 	store.routes["bay-link"] = transit.Route{
@@ -212,8 +201,6 @@ func TestCreateOwnedRouteWorksAroundACollidingCuratedSlug(t *testing.T) {
 	}
 }
 
-// The ownership-uniformity invariant: a member may author into their own
-// scenario, and nowhere else.
 func TestCreateOwnedRouteRefusesAScenarioTheCallerDoesNotOwn(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
@@ -235,9 +222,6 @@ func TestCreateOwnedRouteRefusesAScenarioTheCallerDoesNotOwn(t *testing.T) {
 	}
 }
 
-// A non-owner gets 404, not 403: the set of authored slugs is not public
-// knowledge, and a name-derived slug is guessable enough that 403 would confirm
-// it exists.
 func TestOwnedRouteAnswers404ToEveryoneButItsOwner(t *testing.T) {
 	seed := func() *fakeOwnedRouteStore {
 		store := newFakeOwnedRouteStore()
@@ -278,8 +262,6 @@ func TestOwnedRouteAnswers404ToEveryoneButItsOwner(t *testing.T) {
 	}
 }
 
-// A curated route has no owner, so CanAccess admits only admins. This is what
-// keeps the seeded ca-hsr alignments read-only for everyone else.
 func TestCuratedRouteIsNotEditableByANonAdmin(t *testing.T) {
 	store := newFakeOwnedRouteStore()
 	store.routes["curated"] = transit.Route{
@@ -299,8 +281,6 @@ func TestCuratedRouteIsNotEditableByANonAdmin(t *testing.T) {
 	}
 }
 
-// The slug is the route's address: renaming must not move it, or every link to
-// it breaks and the travel-time segments naming it are orphaned.
 func TestUpdateOwnedRouteKeepsTheSlugAndTheOwner(t *testing.T) {
 	store := newFakeOwnedRouteStore()
 	store.routes["bay-link"] = transit.Route{
@@ -330,9 +310,6 @@ func TestUpdateOwnedRouteKeepsTheSlugAndTheOwner(t *testing.T) {
 	}
 }
 
-// user_services.route_id is ON DELETE CASCADE, so an unchecked delete would
-// silently destroy someone's saved services. The 409 is what makes that
-// cascade unreachable through the API.
 func TestDeleteOwnedRouteRefusesWhileAnythingDependsOnIt(t *testing.T) {
 	store := newFakeOwnedRouteStore()
 	const id = "00000000-0000-4002-8000-000000000001"
@@ -378,8 +355,6 @@ func TestMyRoutesReturnsOnlyTheCallersOwnRoutes(t *testing.T) {
 	}
 }
 
-// Admins are scoped to their own rows here, matching MyServices: admin rights
-// gate privileged endpoints, they do not redefine what "mine" means.
 func TestMyRoutesDoesNotWidenForAdmins(t *testing.T) {
 	store := newFakeOwnedRouteStore()
 	store.routes["theirs"] = transit.Route{
@@ -395,7 +370,6 @@ func TestMyRoutesDoesNotWidenForAdmins(t *testing.T) {
 	}
 }
 
-// An empty owned list is [] on the wire, never null.
 func TestMyRoutesEmitsAnEmptyListNotNull(t *testing.T) {
 	rec := asUser(t, handler.MyRoutes(newFakeOwnedRouteStore()), memberA,
 		http.MethodGet, "/api/me/routes", "")
@@ -404,8 +378,6 @@ func TestMyRoutesEmitsAnEmptyListNotNull(t *testing.T) {
 	}
 }
 
-// A storage failure is an opaque 500 — the underlying error is logged, never
-// returned.
 func TestOwnedRouteStorageFailureIsAnOpaque500(t *testing.T) {
 	store := newFakeOwnedRouteStore()
 	store.failWith = fmt.Errorf("connection refused")
@@ -419,9 +391,6 @@ func TestOwnedRouteStorageFailureIsAnOpaque500(t *testing.T) {
 	}
 }
 
-// An unauthenticated request never reaches these handlers in production —
-// RequireAuth is in front of them — but the guard is what makes that a
-// belt-and-braces property rather than an assumption.
 func TestOwnedRouteHandlersRequireAnIdentity(t *testing.T) {
 	store := newFakeOwnedRouteStore()
 	for name, h := range map[string]http.HandlerFunc{

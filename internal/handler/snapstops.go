@@ -11,34 +11,14 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// offRouteThresholdM is how far a stop may sit from an alignment before the
-// preview flags it as implausible.
-//
-// It is an alias for the write path's threshold, not a second copy: SPA-108
-// enforces the same distance when a service is saved, and a preview that warned
-// at a different distance from the one the save enforced would be worse than no
-// warning — the user would fix what it complained about and still be refused.
-// The rule lives in internal/transit, next to the model it constrains.
-//
-// The comparison is strict (offset > threshold), so a stop exactly on the
-// boundary previews as acceptable, and the write path saves it.
 const offRouteThresholdM = transit.OffRouteThresholdM
 
-// maxSnapStopsBodyBytes caps a request body. A pattern of a few hundred stops
-// stays well under this; anything larger is a client bug or an attack.
-const maxSnapStopsBodyBytes = 1 << 20 // 1 MiB
+const maxSnapStopsBodyBytes = 1 << 20
 
-// snapStopsRequest is a list of raw, user-placed points to project onto a
-// route. It carries no service or vehicle context: this is a geometry preview,
-// not a draft of anything that gets persisted.
 type snapStopsRequest struct {
 	Stops []snapStopInput `json:"stops"`
 }
 
-// snapStopInput is one raw point. ID is optional and opaque — the client's own
-// handle for the stop, echoed back so it can match results to the row it is
-// editing without counting. Results are in input order regardless, so an
-// absent or repeated ID costs nothing.
 type snapStopInput struct {
 	ID  string  `json:"id"`
 	Lat float64 `json:"lat"`
@@ -50,11 +30,6 @@ type snapCoord struct {
 	Lng float64 `json:"lng"`
 }
 
-// snappedStopResult is one stop's projection: where it landed, how far along
-// the route that is, and how far it moved to get there.
-//
-// There is no index field: results are in input order, so a stop's position in
-// the array is its index, and that is what chainage_order refers to.
 type snappedStopResult struct {
 	ID        string    `json:"id,omitempty"`
 	Input     snapCoord `json:"input"`
@@ -64,44 +39,14 @@ type snappedStopResult struct {
 	OffRoute  bool      `json:"off_route"`
 }
 
-// snapStopsResponse reports the snap in input order, alongside the order the
-// stops actually fall in along the line.
-//
-// The two orders are reported separately rather than the response being sorted:
-// a client that got back a reordered list could not tell a reordering from its
-// own mistake, and the disagreement is precisely the thing worth showing the
-// user. OffRouteThresholdM is echoed so the client renders the same boundary
-// the server applied instead of hard-coding a copy of it.
 type snapStopsResponse struct {
 	RouteSlug          string              `json:"route_slug"`
 	OffRouteThresholdM float64             `json:"off_route_threshold_m"`
 	Stops              []snappedStopResult `json:"stops"`
 	ChainageOrder      []int               `json:"chainage_order"`
-	// OrderIsConsistent answers the question the write path will ask: does the
-	// authored sequence run one way along the line, or does it double back?
-	//
-	// It deliberately does not report "the stops are in ascending chainage
-	// order". A service authored against the direction its route was drawn in
-	// runs descending the whole way and saves perfectly well, so flagging it
-	// here would send the user to fix something that was never going to be
-	// refused. The rule is transit.FirstChainageOrderFault, shared with the
-	// save so the two cannot drift.
-	OrderIsConsistent bool `json:"order_is_consistent"`
+	OrderIsConsistent  bool                `json:"order_is_consistent"`
 }
 
-// SnapStops previews where a set of raw, user-placed points land on a route:
-// the snapped coordinate, its chainage along the alignment, and how far the
-// input sat from the line.
-//
-// It always answers 200 for a well-formed request, flagging stops beyond
-// offRouteThresholdM rather than refusing them. Rejecting an off-route stop is
-// the write path's job; this endpoint exists so the user sees the problem while
-// they can still drag the marker, and an endpoint that refused to answer could
-// not show them what was wrong.
-//
-// It is public, like the route read it previews against — the alignment it
-// projects onto is already readable by anyone, and the snap adds no information
-// that geometry does not already contain.
 func SnapStops(store RouteStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		req, ok := decodeSnapStopsRequest(w, r)
@@ -143,8 +88,6 @@ func SnapStops(store RouteStore) http.HandlerFunc {
 	}
 }
 
-// buildSnapStopsResponse pairs each raw input with its projection. SnapStops
-// preserves input order, so the two slices are index-aligned.
 func buildSnapStopsResponse(slug string, inputs []snapStopInput, snapped []physics.SnappedStop) snapStopsResponse {
 	results := make([]snappedStopResult, len(snapped))
 	for i, s := range snapped {
@@ -173,14 +116,6 @@ func buildSnapStopsResponse(slug string, inputs []snapStopInput, snapped []physi
 	}
 }
 
-// chainageOrder returns the input indices sorted by distance along the route.
-// The sort is stable so two stops at the same chainage keep their input order
-// rather than being reshuffled arbitrarily.
-//
-// This is reported for display, not for judgement: for a service authored
-// against the route's drawn direction it is simply the input order reversed,
-// which is not a fault. OrderIsConsistent is what says whether anything is
-// wrong.
 func chainageOrder(snapped []physics.SnappedStop) []int {
 	order := make([]int, len(snapped))
 	for i := range order {
@@ -219,10 +154,6 @@ func decodeSnapStopsRequest(w http.ResponseWriter, r *http.Request) (snapStopsRe
 	return req, true
 }
 
-// validateSnapStops checks the only thing the endpoint can check without the
-// route: that there is at least one stop and each is a real coordinate. Unlike
-// a service, a preview has no minimum of two — the authoring UI snaps each stop
-// as it is placed.
 func validateSnapStops(stops []snapStopInput) error {
 	if len(stops) == 0 {
 		return errors.New("at least one stop is required")

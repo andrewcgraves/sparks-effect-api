@@ -5,22 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/andrewcgraves/sparks-effect-api/internal/persistence/postgres"
+	"github.com/jackc/pgx/v5"
 )
 
-// The migration that gives every stop an identity (00008) chose to assert
-// rather than backfill, the same way 00007 did: minting a slug in SQL would
-// mean a second implementation of transit.Slugify and its disambiguation rule,
-// and SPA-103 requires a stored slug to equal a derived one exactly. These
-// tests pin that choice, so a later reader finds out what the migration does
-// with legacy data from a test rather than from a production incident.
-
-// rewindSlugMigration puts the database back to how it looked immediately
-// before 00008 ran. goose then re-applies it on the next Migrate, which is what
-// lets a test put a slugless row in front of the real migration file rather
-// than in front of a copy of its SQL.
 func rewindSlugMigration(t *testing.T, url string) {
 	t.Helper()
 	exec(t, url,
@@ -31,11 +19,6 @@ func rewindSlugMigration(t *testing.T, url string) {
 	rewindJobTargetsMigration(t, url)
 }
 
-// insertUserServiceRaw writes a user_services row with the stop document given
-// verbatim. It goes in through raw SQL because the Go model can no longer
-// express a stop without an identity, which is exactly the shape these tests
-// need to put in front of the migration. Coordinates are snapped throughout, so
-// 00007's constraint is satisfied and only 00008 is under test.
 func insertUserServiceRaw(t *testing.T, url, stopsJSON string) {
 	t.Helper()
 	exec(t, url, `INSERT INTO user_services (id, slug, route_id, owner_id, name, vehicle, stops)
@@ -44,10 +27,6 @@ func insertUserServiceRaw(t *testing.T, url, stopsJSON string) {
 		        '`+stopsJSON+`')`)
 }
 
-// TestSlugMigrationRefusesAPreSlugRow is the backfill test SPA-103 asks for.
-// The chosen behaviour for a row whose stops have no identity is that the
-// deploy stops and a human re-saves it, rather than SQL guessing at slugs the
-// compiler would then derive differently.
 func TestSlugMigrationRefusesAPreSlugRow(t *testing.T) {
 	_, _, url := userServiceFixture(t)
 	rewindSlugMigration(t, url)
@@ -67,9 +46,6 @@ func TestSlugMigrationRefusesAPreSlugRow(t *testing.T) {
 	}
 }
 
-// A present-but-empty slug is the case the constraint exists for: a missing key
-// decodes to "", so without this the two would be indistinguishable and a stop
-// with no identity would read as one whose identity is the empty string.
 func TestSlugMigrationRefusesAnEmptySlug(t *testing.T) {
 	_, _, url := userServiceFixture(t)
 	rewindSlugMigration(t, url)
@@ -83,8 +59,6 @@ func TestSlugMigrationRefusesAnEmptySlug(t *testing.T) {
 	}
 }
 
-// TestSlugMigrationRunsOnAnEmptyTable is the case actually expected in every
-// environment: nothing to backfill, so the migration is just the invariant.
 func TestSlugMigrationRunsOnAnEmptyTable(t *testing.T) {
 	_, _, url := userServiceFixture(t)
 	rewindSlugMigration(t, url)
@@ -94,9 +68,6 @@ func TestSlugMigrationRunsOnAnEmptyTable(t *testing.T) {
 	}
 }
 
-// A row that already has identities is not legacy data, so the migration must
-// pass it through rather than treat "was written before the constraint existed"
-// as the thing it refuses.
 func TestSlugMigrationAcceptsAnAlreadySluggedRow(t *testing.T) {
 	_, _, url := userServiceFixture(t)
 	rewindSlugMigration(t, url)
@@ -110,8 +81,6 @@ func TestSlugMigrationAcceptsAnAlreadySluggedRow(t *testing.T) {
 	}
 }
 
-// TestStopSlugConstraintRejectsASluglessStop covers the invariant the migration
-// leaves behind, for writes that come after it.
 func TestStopSlugConstraintRejectsASluglessStop(t *testing.T) {
 	_, _, url := userServiceFixture(t)
 
@@ -135,9 +104,6 @@ func TestStopSlugConstraintRejectsASluglessStop(t *testing.T) {
 	}
 }
 
-// TestStopSlugConstraintAcceptsWhatTheModelWrites guards against the constraint
-// and the Go struct's json tags drifting apart: every stop the write path
-// produces must satisfy it.
 func TestStopSlugConstraintAcceptsWhatTheModelWrites(t *testing.T) {
 	repo, ctx, _ := userServiceFixture(t)
 

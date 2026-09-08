@@ -7,11 +7,6 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// The curated reads are the containment boundary for owned content: LoadStore
-// compiles everything ListCuratedScenarios returns into the public in-memory
-// store, and ListCuratedRouteSummaries is the unauthenticated route picker. A
-// leak here is not a wrong list, it is publishing someone's private work.
-
 const (
 	ownershipOwnerID    = "00000000-0000-4900-8000-000000000001"
 	ownershipCuratedID  = "00000000-0000-4901-8000-000000000001"
@@ -21,8 +16,6 @@ const (
 	ownershipCuratedStn = "00000000-0000-4903-8000-000000000001"
 )
 
-// ownershipFixture writes one curated scenario and one owned scenario, each
-// with a route of its own, and returns the repo.
 func ownershipFixture(t *testing.T) (repo interface {
 	ListCuratedScenarios(context.Context) ([]transit.Scenario, error)
 	ListCuratedRouteSummaries(context.Context) ([]transit.RouteSummary, error)
@@ -119,8 +112,6 @@ func TestListRouteSummariesByOwnerReturnsOnlyTheCallersRoutes(t *testing.T) {
 	}
 }
 
-// Deleting an account must take its content with it. Under SET NULL the rows
-// would survive as unowned — which now means curated and public.
 func TestDeletingUserCascadesToOwnedDomainRows(t *testing.T) {
 	repo, url := freshRepo(t)
 	ctx := context.Background()

@@ -5,8 +5,6 @@ import (
 	"testing"
 )
 
-// Stations carry coordinates because a compiled graph carries its own geometry
-// (TransitGraph.Nodes) — a station with no usable location fails the compile.
 func testStations() []Station {
 	return []Station{
 		{ID: "st-a", Slug: "a", Name: "A", Location: GeoPoint{Coordinates: []float64{-122.4, 37.7}}},
@@ -15,9 +13,6 @@ func testStations() []Station {
 	}
 }
 
-// platformStations is testStations with the platform heights a dwell test
-// varies. The coordinates come along because a compile needs them, not because
-// these tests care about position.
 func platformStations(heights ...string) []Station {
 	sts := testStations()
 	for i, h := range heights {
@@ -117,9 +112,6 @@ func TestCompile_edgeSecondsIncludeRunAndDwell(t *testing.T) {
 	}
 }
 
-// Dwell is reported alongside the edge total rather than only folded into it,
-// so a consumer can say how long the vehicle stands at the destination. The
-// total is unchanged and still includes it.
 func TestCompile_edgesReportDwellAlongsideTotal(t *testing.T) {
 	sc := Scenario{ID: "sc-1", Slug: "test"}
 	override := 30
@@ -360,10 +352,6 @@ func TestCompile_nonPositiveReverseOverrideFails(t *testing.T) {
 	}
 }
 
-// A wholly symmetric diamond must compile to the same duration both ways.
-// Two equal-hop routes (a-c-d at 600 s and a-b-d at 200 s) make an independent
-// reverse BFS pick the other route, because adjacency-list order is not
-// symmetric — so run time and dwell would come from different physical paths.
 func TestCompile_symmetricDiamondKeepsBothDirectionsOnTheForwardPath(t *testing.T) {
 	sc := Scenario{ID: "sc-1", Slug: "test"}
 	stations := []Station{
@@ -398,7 +386,7 @@ func TestCompile_symmetricDiamondKeepsBothDirectionsOnTheForwardPath(t *testing.
 	}
 	fwd := byKey["a→d"]
 	rev := byKey["d→a"]
-	const want = 780 // a-c-d run 600 + arrival dwell 180; reverse of the same path
+	const want = 780
 	if fwd.Seconds != want || rev.Seconds != want {
 		t.Errorf("a→d %d, d→a %d, want %d both ways (same physical route)", fwd.Seconds, rev.Seconds, want)
 	}
@@ -518,9 +506,6 @@ func TestNewStore_holdsCompiledGraph(t *testing.T) {
 	}
 }
 
-// A compiled graph must carry its own geometry: the seeded isochrone now reads
-// its nodes off the compile job's result rather than the station rows, so a
-// graph without nodes has nothing to plot from (SPA-181).
 func TestCompile_emitsOneNodePerStation(t *testing.T) {
 	sc := Scenario{ID: "sc-1", Slug: "test"}
 	stations := testStations()
@@ -555,11 +540,6 @@ func TestCompile_emitsOneNodePerStation(t *testing.T) {
 	}
 }
 
-// A station with a routing anchor (SPA-234) carries it on the node as a
-// separate pair of fields, leaving Lat/Lng — the place a map plots the station
-// — untouched. A station with no routing anchor must not grow one: RoutingLat
-// and RoutingLng stay nil, not zero, so a consumer can tell "no override" from
-// "override at (0, 0)".
 func TestCompile_nodeCarriesRoutingAnchorSeparatelyFromLocation(t *testing.T) {
 	sc := Scenario{ID: "sc-1", Slug: "test"}
 	stations := testStations()
@@ -596,9 +576,6 @@ func TestCompile_nodeCarriesRoutingAnchorSeparatelyFromLocation(t *testing.T) {
 	}
 }
 
-// A station whose location is malformed must fail the compile, not quietly
-// become a node at (0, 0) — that coordinate is a real place in the Gulf of
-// Guinea, and it would be baked into a persisted graph and plotted from.
 func TestCompile_rejectsStationWithMalformedLocation(t *testing.T) {
 	sc := Scenario{ID: "sc-1", Slug: "test"}
 	stations := []Station{
@@ -623,9 +600,6 @@ func TestCompile_rejectsStationWithMalformedLocation(t *testing.T) {
 	}
 }
 
-// A malformed routing_location must fail the compile the same way a malformed
-// location does (see above), not silently fall back to Location or bake a
-// half-formed anchor into the persisted graph.
 func TestCompile_rejectsStationWithMalformedRoutingLocation(t *testing.T) {
 	sc := Scenario{ID: "sc-1", Slug: "test"}
 	stations := []Station{
@@ -654,16 +628,6 @@ func TestCompile_rejectsStationWithMalformedRoutingLocation(t *testing.T) {
 	}
 }
 
-// The reverse edge is priced by walking the forward path backwards through the
-// adjacency, and that adjacency is where reverse_run_seconds lives:
-// buildSegmentAdj stores the override on the reverse entry of its own segment.
-// This checks the override survives that walk on a leg spanning more than one
-// segment — the service skips b, so the compiler paths a→b→c and has to pick
-// the override up mid-route rather than as the whole hop.
-//
-// It complements TestCompile_symmetricDiamondKeepsBothDirectionsOnTheForwardPath:
-// that one proves symmetric input compiles symmetrically, this one proves the
-// same code path still produces the asymmetry SPA-245 asked for.
 func TestCompile_reverseOverrideHonouredAcrossMultiHopLeg(t *testing.T) {
 	sc := Scenario{ID: "sc-1", Slug: "test"}
 	rev := 400

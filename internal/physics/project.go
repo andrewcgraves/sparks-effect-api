@@ -6,58 +6,29 @@ import (
 	"sort"
 )
 
-// earthRadiusM is the mean Earth radius, in meters, used for the local planar
-// projection below.
 const earthRadiusM = 6371000.0
 
-// Point is a WGS84 geographic position, in GeoJSON coordinate order
-// (longitude, then latitude) — the order used throughout this codebase (e.g.
-// transit.GeoLineString).
 type Point struct {
-	Lng float64 // degrees
-	Lat float64 // degrees
+	Lng float64
+	Lat float64
 }
 
-// Segment is the authored track physics for one span between two consecutive
-// line coordinates. Its fields mirror transit.RouteSegment; it is defined
-// locally so this package stays free of a dependency on internal/transit, the
-// same seam internal/route already keeps for its own mirrored Segment type.
-// The zero value describes tangent, level, uncanted track.
 type Segment struct {
-	CantMM       float64 // applied superelevation, millimeters
-	CurveRadiusM float64 // curve radius, meters; 0 means tangent (straight) track
-	GradePct     float64 // grade as a percent; positive = ascending, negative = descending
+	CantMM       float64
+	CurveRadiusM float64
+	GradePct     float64
 }
 
-// Stop is a position to project onto a route line, carrying an opaque
-// caller-assigned ID (e.g. a station ID) so results can be traced back to it.
 type Stop struct {
 	ID       string
 	Location Point
 }
 
-// SpanSegment is the portion of one underlying route segment that falls
-// within an InterStopSpan, together with the physics that applies across it.
-// A span whose stops don't land exactly on a line vertex has partial pieces at
-// its ends; a span crossing several vertices has one SpanSegment per
-// vertex-to-vertex stretch it fully or partly covers.
 type SpanSegment struct {
 	DistanceM float64
 	Physics   Segment
 }
 
-// InterStopSpan is the stretch of route line between two consecutive stops,
-// ordered by chainage, split into the physics-uniform sub-segments the
-// run-time integrator needs to walk. DistanceM is the span's total length —
-// the sum of Segments' distances.
-//
-// FromChainageM and ToChainageM are where the two stops sit along the whole
-// line, which DistanceM (their difference) does not recover: a caller that wants
-// to point at a place on the alignment rather than measure a length needs the
-// absolute positions. transit.Edge carries them onto the compiled graph so a map
-// can slice this span out of the route geometry (SPA-264). They are reported
-// rather than recomputed by the caller because a second snap would be a second
-// chance to disagree with the one that produced these spans.
 type InterStopSpan struct {
 	FromStopID    string
 	ToStopID      string
@@ -67,35 +38,13 @@ type InterStopSpan struct {
 	Segments      []SpanSegment
 }
 
-// SnappedStop is one stop projected onto a route line.
 type SnappedStop struct {
 	ID        string
-	Point     Point   // the snapped position on the line
-	ChainageM float64 // distance along the line from its start to the snapped point
-	OffsetM   float64 // distance from the stop's raw input position to the snapped point
+	Point     Point
+	ChainageM float64
+	OffsetM   float64
 }
 
-// SnapStops projects each stop onto the route line and returns, per stop, the
-// snapped point, its chainage, and how far the raw input sat from the line.
-//
-// Distances are measured in the same local planar frame the snap itself uses,
-// so an offset can never disagree with the projection that produced it. A stop
-// beyond either end of the line snaps to that endpoint, and its offset is the
-// distance to that endpoint rather than a perpendicular.
-//
-// line is the route's coordinates in order and must have at least 2 points.
-// Results are in the order the stops were supplied, not chainage order:
-// ordering is the caller's concern, and a caller cannot notice that a stop
-// sequence runs against the route's direction if this function has already
-// sorted that disagreement away.
-//
-// Snapping has the same simple-polyline assumption as ProjectStops: on a
-// self-intersecting or switchback route, a stop can snap to the geometrically
-// closer of two passes rather than the one intended.
-//
-// SnapStops returns an error if line has fewer than 2 points. Unlike
-// ProjectStops it accepts any number of stops, including one — snapping a
-// single stop is meaningful even though a single stop forms no span.
 func SnapStops(line []Point, stops []Stop) ([]SnappedStop, error) {
 	if len(line) < 2 {
 		return nil, fmt.Errorf("line must have at least 2 points, got %d", len(line))
@@ -103,26 +52,6 @@ func SnapStops(line []Point, stops []Stop) ([]SnappedStop, error) {
 	return projectLinePlanar(line).snap(stops), nil
 }
 
-// ProjectStops snaps each stop onto the route line, orders the stops by
-// chainage (distance along the line from its start), and splits the line's
-// geometry and per-vertex-segment physics into the spans between consecutive
-// stops.
-//
-// line is the route's coordinates in order and must have at least 2 points.
-// physicsSegs, when non-empty, must have exactly len(line)-1 entries — one per
-// span between consecutive line coordinates, the same convention
-// transit.Route uses. An empty physicsSegs means every span is tangent, level,
-// uncanted track (the zero Segment) — mirroring transit.Route.Segments, which
-// is itself optional for the same reason.
-//
-// Nearest-point snapping assumes line is a simple polyline: on a
-// self-intersecting or switchback route, a stop can snap to the geometrically
-// closer of two passes rather than the one intended by the service's stopping
-// pattern.
-//
-// ProjectStops returns an error if line has fewer than 2 points, physicsSegs
-// is non-empty with the wrong length, or fewer than 2 stops are given (there
-// is no inter-stop span with fewer than two).
 func ProjectStops(line []Point, physicsSegs []Segment, stops []Stop) ([]InterStopSpan, error) {
 	if len(line) < 2 {
 		return nil, fmt.Errorf("line must have at least 2 points, got %d", len(line))
@@ -164,58 +93,25 @@ func ProjectStops(line []Point, physicsSegs []Segment, stops []Stop) ([]InterSto
 	return spans, nil
 }
 
-// DistanceM is the straight-line distance between two positions, in metres,
-// measured in the same local planar frame SnapStops and ProjectStops use.
-//
-// It exists so that "how far apart are these two stops" is answered by the
-// metric the compiler already reasons in, rather than by a second, subtly
-// different one. transit's co-located-stop merge compares snapped positions
-// against a radius in metres; if it measured on a different Earth model from
-// the one that produced those positions, the radius would not mean quite what
-// the snap said it meant.
-//
-// The projection is centred on the two points' mean latitude, which is what
-// keeps it a metric — symmetric, and zero only for coincident points. Like the
-// rest of this package it trades geodesic exactness for local consistency; at
-// the sub-kilometre separations a merge decides on, the two agree to well
-// under a centimetre.
 func DistanceM(a, b Point) float64 {
 	refLatRad := degToRad((a.Lat + b.Lat) / 2)
 	return planarDist(projectPoint(a, refLatRad), projectPoint(b, refLatRad))
 }
 
-// planarPoint is a position in the local planar (x, y) meter frame produced by
-// the equirectangular projection below. It is a distinct type from Point so
-// geographic (degree) and projected (meter) coordinates can never be mixed up
-// at a call site.
 type planarPoint struct {
 	X, Y float64
 }
 
-// planarLine is a route line projected into local planar meters, alongside
-// the per-vertex chainage (distance along the line from its start) and the
-// reference latitude the projection used — callers need the latter to project
-// stops consistently with the line.
 type planarLine struct {
 	points    []planarPoint
-	chainageM []float64 // chainageM[i] is the distance along the line to points[i]
+	chainageM []float64
 	refLatRad float64
 }
 
-// degToRad converts degrees to radians.
 func degToRad(deg float64) float64 {
 	return deg * math.Pi / 180
 }
 
-// projectLinePlanar converts a WGS84 line to local planar meters using an
-// equirectangular approximation around the line's mean latitude, and computes
-// each vertex's chainage.
-//
-// This trades literal geodesic accuracy for a locally-consistent, self-similar
-// distance metric — which is what nearest-point projection and chainage need:
-// the same answer whether you sum the pieces or measure the whole, not the
-// true great-circle length. It is accurate to a small fraction of a percent at
-// the route scales this compiler targets (regional rail lines).
 func projectLinePlanar(line []Point) planarLine {
 	var latSum float64
 	for _, p := range line {
@@ -236,9 +132,6 @@ func projectLinePlanar(line []Point) planarLine {
 	return planarLine{points: points, chainageM: chainageM, refLatRad: refLatRad}
 }
 
-// projectPoint converts a single WGS84 point to local planar meters around
-// refLatRad, using the same equirectangular approximation as
-// projectLinePlanar.
 func projectPoint(p Point, refLatRad float64) planarPoint {
 	return planarPoint{
 		X: earthRadiusM * degToRad(p.Lng) * math.Cos(refLatRad),
@@ -246,10 +139,6 @@ func projectPoint(p Point, refLatRad float64) planarPoint {
 	}
 }
 
-// unprojectPoint is the inverse of projectPoint: it converts a local planar
-// point back to WGS84 degrees around the same reference latitude. Snapped
-// positions are computed in the planar frame but returned to callers as
-// geographic coordinates.
 func unprojectPoint(p planarPoint, refLatRad float64) Point {
 	return Point{
 		Lng: radToDeg(p.X / (earthRadiusM * math.Cos(refLatRad))),
@@ -257,7 +146,6 @@ func unprojectPoint(p planarPoint, refLatRad float64) Point {
 	}
 }
 
-// radToDeg converts radians to degrees.
 func radToDeg(rad float64) float64 {
 	return rad * 180 / math.Pi
 }
@@ -266,10 +154,6 @@ func planarDist(a, b planarPoint) float64 {
 	return math.Hypot(b.X-a.X, b.Y-a.Y)
 }
 
-// snap projects each stop onto the line and is the loop shared by SnapStops
-// and ProjectStops. It hangs off an already-projected line so ProjectStops,
-// which needs the planar line for its own segment splitting, does not project
-// it twice.
 func (pl planarLine) snap(stops []Stop) []SnappedStop {
 	out := make([]SnappedStop, len(stops))
 	for i, s := range stops {
@@ -285,9 +169,6 @@ func (pl planarLine) snap(stops []Stop) []SnappedStop {
 	return out
 }
 
-// snapPoint finds the point on the polyline nearest to p and returns it
-// alongside its chainage — the distance along the line from the start to the
-// snapped point.
 func (pl planarLine) snapPoint(p planarPoint) (chainageM float64, snapped planarPoint) {
 	best := math.Inf(1)
 	for i := 0; i < len(pl.points)-1; i++ {
@@ -303,8 +184,6 @@ func (pl planarLine) snapPoint(p planarPoint) (chainageM float64, snapped planar
 	return chainageM, snapped
 }
 
-// closestPointOnSegment projects p onto the segment a→b, clamped to the
-// segment, and returns the clamp parameter t in [0, 1] and the resulting point.
 func closestPointOnSegment(a, b, p planarPoint) (t float64, closest planarPoint) {
 	dx := b.X - a.X
 	dy := b.Y - a.Y
@@ -321,17 +200,11 @@ func closestPointOnSegment(a, b, p planarPoint) (t float64, closest planarPoint)
 	return t, planarPoint{X: a.X + t*dx, Y: a.Y + t*dy}
 }
 
-// lineSegment is one physics-uniform stretch of route line, expressed in
-// chainage terms: it runs from StartM to EndM, with Physics applying across
-// it. Bundling the two keeps them from drifting out of sync the way parallel
-// chainage/physics slices indexed by a shared i would.
 type lineSegment struct {
 	StartM, EndM float64
 	Physics      Segment
 }
 
-// buildLineSegments pairs each underlying route segment's physics with the
-// chainage span (from planarLn's per-vertex chainage) it covers.
 func buildLineSegments(planarLn planarLine, physics []Segment) []lineSegment {
 	out := make([]lineSegment, len(physics))
 	for i, seg := range physics {
@@ -340,9 +213,6 @@ func buildLineSegments(planarLn planarLine, physics []Segment) []lineSegment {
 	return out
 }
 
-// splitSpan slices lineSegs into the sub-segments falling within
-// [fromChainageM, toChainageM), producing one SpanSegment per underlying route
-// segment the span fully or partly covers.
 func splitSpan(lineSegs []lineSegment, fromChainageM, toChainageM float64) []SpanSegment {
 	var out []SpanSegment
 	for _, seg := range lineSegs {

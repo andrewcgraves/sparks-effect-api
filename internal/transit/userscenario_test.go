@@ -52,7 +52,6 @@ func TestUserScenarioValidateRejectsBlankServiceID(t *testing.T) {
 	}
 }
 
-// SPA-120: a declared pair naming two members is accepted.
 func TestUserScenarioValidateAllowsInterchangePairBetweenMembers(t *testing.T) {
 	sc := validUserScenario()
 	sc.InterchangePairs = []transit.InterchangePair{

@@ -10,16 +10,14 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/crypto/bcrypt"
-
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
+	"golang.org/x/crypto/bcrypt"
 )
 
-// fakeAuthStore is an in-memory stand-in for the sessions/users tables.
 type fakeAuthStore struct {
-	users    map[string]userRecord // by email
+	users    map[string]userRecord
 	sessions map[string]transit.Session
 	created  []transit.User
 	failWith error
@@ -101,10 +99,6 @@ func (f *fakeAuthStore) CreateUser(_ context.Context, u transit.User, hash strin
 	return nil
 }
 
-// testHasher is the bcrypt cost every handler test hashes at. These tests care
-// that the password path is wired up, not that it is slow, so they pay
-// bcrypt.MinCost (~1ms) instead of DefaultCost (~46ms). The properties that do
-// depend on the real cost are asserted in the auth package's own tests.
 var testHasher = auth.NewHasher(bcrypt.MinCost)
 
 func postJSON(t *testing.T, h http.Handler, path, body string) *httptest.ResponseRecorder {
@@ -154,8 +148,6 @@ func TestLoginSuccessReturnsUsableToken(t *testing.T) {
 	}
 }
 
-// The response must never carry the password hash, even though the login path
-// reads it.
 func TestLoginResponseOmitsPasswordHash(t *testing.T) {
 	store := newFakeAuthStore(t)
 	rec := postJSON(t, handler.Login(store, time.Hour, testHasher), "/api/auth/login",
@@ -195,8 +187,6 @@ func TestLoginRejectsBadCredentials(t *testing.T) {
 	}
 }
 
-// A wrong password and an unknown email must be indistinguishable, or the
-// endpoint becomes an account-enumeration oracle.
 func TestLoginDoesNotRevealWhetherAccountExists(t *testing.T) {
 	store := newFakeAuthStore(t)
 	h := handler.Login(store, time.Hour, testHasher)
@@ -220,8 +210,6 @@ func TestLoginRejectsMalformedJSON(t *testing.T) {
 	}
 }
 
-// A store outage must be a 500, not a 401 that tells a valid user their
-// credentials are wrong.
 func TestLoginSurfacesStoreErrors(t *testing.T) {
 	store := newFakeAuthStore(t)
 	store.failWith = errors.New("db is down")

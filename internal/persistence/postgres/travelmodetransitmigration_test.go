@@ -7,37 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/andrewcgraves/sparks-effect-api/internal/persistence/postgres"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
+	"github.com/jackc/pgx/v5"
 )
 
-// 00021 adds 'transit' to the travel modes and, for the first time, makes the
-// database hold the set at all (SPA-248). Both halves need a real Postgres:
-// that the new mode stores, and that a mode outside the set no longer can.
-//
-// The second half is the one no in-memory fake could show, and the one worth
-// having. transit.TravelMode calls itself the single definition of the set "so
-// the request validator, the queue message, and the database cannot drift
-// apart"; until this migration the database enforced nothing, so that was a
-// statement about Go code only.
-
-// rewindTravelModeTransitMigration unwinds 00021, unwinding the migration above
-// it first the way every link in this chain does. 00022–00024 sit above it, so
-// the tail of the rewind chain that starts in snapmigration_test.go is now
-// rewindIsochroneCacheDepartsOnMigration. Goose refuses to re-apply a migration
-// older than the highest version recorded, so anything rewinding a migration
-// below this one must unrecord those — rewindBoardingWaitOverrideMigration does
-// that by calling this.
-//
-// 00021 adds constraints, so unwinding it drops them as well as unrecording the
-// version. Leaving them behind would let the next Migrate's DROP-then-ADD
-// succeed as a no-op, which hides a rewind that did not actually rewind.
-//
-// ALTER TABLE IF EXISTS because this runs part-way down a chain that drops
-// tables — prerendered_isochrones is gone once 00019's rewind has finished — and
-// a rewind helper must not depend on the order it is reached in.
 func rewindTravelModeTransitMigration(t *testing.T, url string) {
 	t.Helper()
 	rewindOwnedDomainModelsMigration(t, url)
@@ -49,16 +23,10 @@ func rewindTravelModeTransitMigration(t *testing.T, url string) {
 		`DELETE FROM goose_db_version WHERE version_id = 21`)
 }
 
-// modeJobID is a distinct routing job id per case, so a table-driven test can
-// insert many rows without the primary key deciding the outcome.
 func modeJobID(i int) string {
 	return fmt.Sprintf("00000000-0000-400b-8004-%012d", i)
 }
 
-// insertRoutingJobMode inserts a routing job with mode set to whatever raw
-// string is asked for, bypassing the Go enum the way a second writer or a hand
-// at a psql prompt would. Asking what the database itself permits is the whole
-// point, so this deliberately does not go through the repository.
 func insertRoutingJobMode(t *testing.T, url, id, mode string) error {
 	t.Helper()
 	ctx := context.Background()
@@ -89,14 +57,6 @@ func countRoutingJobs(t *testing.T, url string) int {
 	return n
 }
 
-// Every mode the Go enum accepts must be storable. This is the pairing that
-// keeps the constraint honest: the enum and the CHECK are one set written twice
-// in two languages, and only a test can compare them.
-//
-// It walks transit.TravelModes() rather than the four modes written out here,
-// so a mode added to the enum without being added to 00021 fails here. Written
-// out, this test would be a third copy of the set and would simply not cover
-// the new mode — which is the whole failure it exists to catch.
 func TestTravelModeCheckAcceptsEveryModeTheEnumDoes(t *testing.T) {
 	repo, url := freshRepo(t)
 	seedCompileJob(t, repo, routingCompileJobID)
@@ -115,10 +75,6 @@ func TestTravelModeCheckAcceptsEveryModeTheEnumDoes(t *testing.T) {
 	}
 }
 
-// What the constraint is for. Each of these is a plausible way a bad mode
-// arrives: a mode nobody has, Valhalla's spelling of this very mode leaking
-// back across the worker boundary, another of its costing names, the wrong
-// case, a stray space, and the empty string NOT NULL alone would have allowed.
 func TestTravelModeCheckRefusesAnythingElse(t *testing.T) {
 	repo, url := freshRepo(t)
 	seedCompileJob(t, repo, routingCompileJobID)
@@ -135,9 +91,6 @@ func TestTravelModeCheckRefusesAnythingElse(t *testing.T) {
 	}
 }
 
-// The mode this ticket exists for, through the path the API actually uses
-// rather than raw SQL: it must survive the round trip in the domain's own
-// vocabulary, never translated to Valhalla's "multimodal" on this side.
 func TestRoutingJobTransitModeRoundTrips(t *testing.T) {
 	ctx := context.Background()
 	repo, _ := freshRepo(t)
@@ -165,9 +118,6 @@ func TestRoutingJobTransitModeRoundTrips(t *testing.T) {
 	}
 }
 
-// prerendered_isochrones.mode is the other column 00021 constrains, and it is
-// written by a different path than routing_jobs (the admin POST and the
-// seeder), so it gets its own pair of assertions rather than being assumed.
 func TestPrerenderedIsochroneTransitMode(t *testing.T) {
 	ctx := context.Background()
 	repo, url := freshRepo(t)
@@ -209,9 +159,6 @@ func TestPrerenderedIsochroneTransitMode(t *testing.T) {
 	}
 }
 
-// The case that matters in production: adding a CHECK validates every existing
-// row, and migrations run on boot, so a deployed database full of rows in the
-// three old modes must come through this one rather than failing the deploy.
 func TestTravelModeCheckMigrationOverADeployedDatabase(t *testing.T) {
 	repo, url := freshRepo(t)
 	seedCompileJob(t, repo, routingCompileJobID)
@@ -245,9 +192,6 @@ func TestTravelModeCheckMigrationOverADeployedDatabase(t *testing.T) {
 	}
 }
 
-// A schema change re-applied over what it already wrote must not fail — the
-// property every migration in this package is held to, and the reason 00021
-// drops each constraint before adding it.
 func TestTravelModeCheckMigrationIsSafeToReRun(t *testing.T) {
 	repo, url := freshRepo(t)
 	seedCompileJob(t, repo, routingCompileJobID)

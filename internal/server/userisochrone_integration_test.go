@@ -9,8 +9,6 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// compileUserScenarioAndWait triggers POST /api/user-scenarios/{slug}/compile
-// and polls it to completion, failing the test unless it succeeds.
 func compileUserScenarioAndWait(t *testing.T, h http.Handler, token, slug string) transit.Job {
 	t.Helper()
 	rec := request(t, h, http.MethodPost, "/api/user-scenarios/"+slug+"/compile", token)
@@ -30,9 +28,6 @@ func compileUserScenarioAndWait(t *testing.T, h http.Handler, token, slug string
 
 const isoRequestBody = `{"lat":37.0,"lng":-121.8,"budget_mins":90,"mode":"walk"}`
 
-// A user compiles their scenario, then computes an isochrone over it: the
-// live analogue of the seeded POST /api/isochrone, but owner-scoped and
-// sourced from the compiled graph rather than the embedded store.
 func TestIntegration_UserScenarioIsochrone_FreshGraph(t *testing.T) {
 	h, repo := integrationServer(t)
 	adminToken := provisionAdminAndLogin(t, h, repo)
@@ -93,10 +88,6 @@ func TestIntegration_UserScenarioIsochrone_FreshGraph(t *testing.T) {
 	}
 }
 
-// The central SPA-116 acceptance criterion: compile a two-service scenario,
-// delete one of the member services, and the isochrone must answer 409 with
-// the distinct stale error code rather than 200 with a graph that still
-// references the deleted service.
 func TestIntegration_UserScenarioIsochrone_DeletedMember_409(t *testing.T) {
 	h, repo := integrationServer(t)
 	adminToken := provisionAdminAndLogin(t, h, repo)
@@ -143,7 +134,6 @@ func TestIntegration_UserScenarioIsochrone_DeletedMember_409(t *testing.T) {
 		t.Errorf("code: want %q, got %q", handler.StaleGraphErrorCode, body["code"])
 	}
 
-	// The 409 must never leak the stale graph itself.
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
 		t.Fatalf("decode raw: %v", err)
@@ -159,10 +149,6 @@ func TestIntegration_UserScenarioIsochrone_DeletedMember_409(t *testing.T) {
 	}
 }
 
-// Removing a member from a scenario without deleting the underlying service
-// must also be caught — this path does bump user_scenarios.updated_at, but
-// the membership-set comparison catches it uniformly with the deletion case
-// rather than depending on that timestamp.
 func TestIntegration_UserScenarioIsochrone_RemovedMemberWithoutDeletion_409(t *testing.T) {
 	h, repo := integrationServer(t)
 	adminToken := provisionAdminAndLogin(t, h, repo)
@@ -198,9 +184,6 @@ func TestIntegration_UserScenarioIsochrone_RemovedMemberWithoutDeletion_409(t *t
 	}
 }
 
-// Adding a member must also invalidate the compiled graph. The membership-set
-// comparison catches this the same way it catches removal, uniformly —
-// verified rather than assumed, per the acceptance criteria.
 func TestIntegration_UserScenarioIsochrone_AddedMember_409(t *testing.T) {
 	h, repo := integrationServer(t)
 	adminToken := provisionAdminAndLogin(t, h, repo)
@@ -234,10 +217,6 @@ func TestIntegration_UserScenarioIsochrone_AddedMember_409(t *testing.T) {
 	}
 }
 
-// Deleting a service that anchors a co-located-stop cluster (SPA-109) must
-// not let any reference to its now-nonexistent stop slug escape to a client:
-// the 409 path returns only the small error envelope, never the stale graph
-// whose nodes may be keyed on the deleted anchor.
 func TestIntegration_UserScenarioIsochrone_DeletedClusterAnchor_NoStaleSlugLeak(t *testing.T) {
 	h, repo := integrationServer(t)
 	adminToken := provisionAdminAndLogin(t, h, repo)
@@ -277,8 +256,6 @@ func TestIntegration_UserScenarioIsochrone_DeletedClusterAnchor_NoStaleSlugLeak(
 		t.Fatalf("isochrone after anchor deletion: status %d, want 409; body %s", rec.Code, rec.Body.String())
 	}
 
-	// The response is exactly the error envelope: no nodes, no services, no
-	// stop slugs of any kind — stale or otherwise.
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
 		t.Fatalf("decode raw: %v", err)

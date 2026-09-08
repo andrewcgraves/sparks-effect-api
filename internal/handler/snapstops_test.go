@@ -14,8 +14,6 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// snapResponse mirrors the endpoint's JSON so the tests assert against the wire
-// shape a client actually sees, not the handler's internal types.
 type snapResponse struct {
 	RouteSlug          string  `json:"route_slug"`
 	OffRouteThresholdM float64 `json:"off_route_threshold_m"`
@@ -36,9 +34,6 @@ type snapCoordJSON struct {
 	Lng float64 `json:"lng"`
 }
 
-// seedSnapRoute ingests validRoute — the three-point alignment the route tests
-// share — and returns the store it lives in. Its first vertex is
-// (-122.4, 37.79) and it runs south-east from there.
 func seedSnapRoute(t *testing.T) *fakeRouteStore {
 	t.Helper()
 	store := newFakeRouteStore()
@@ -67,15 +62,6 @@ func decodeSnap(t *testing.T, rec *httptest.ResponseRecorder) snapResponse {
 	return got
 }
 
-// The headline acceptance criterion: every stop comes back with a snapped
-// coordinate, a chainage along the route, and an offset in metres.
-//
-// The first stop sits exactly on the route's first vertex, so it pins the
-// degenerate case (chainage and offset both zero). The second sits 0.001° of
-// latitude due north of that same vertex — off the near end of a line that runs
-// south-east, so it clamps to the start and its offset is a known ~111 m. That
-// magnitude is what proves the offset is reported in metres rather than
-// degrees or kilometres.
 func TestSnapStopsReturnsSnappedPointChainageAndOffset(t *testing.T) {
 	store := seedSnapRoute(t)
 
@@ -126,9 +112,6 @@ func TestSnapStopsReturnsSnappedPointChainageAndOffset(t *testing.T) {
 	}
 }
 
-// Chainage must grow along the line, so a stop near the far end reports a
-// larger chainage than one near the start. This is what makes the value usable
-// as "distance along the route" rather than an arbitrary index.
 func TestSnapStopsChainageGrowsAlongTheLine(t *testing.T) {
 	store := seedSnapRoute(t)
 
@@ -157,9 +140,6 @@ func TestSnapStopsChainageGrowsAlongTheLine(t *testing.T) {
 	}
 }
 
-// The preview's whole job: an implausibly far stop is still answered, flagged
-// rather than refused, so the user can see and fix it. Rejection at 500 m is
-// the write path's concern (SPA-108), not this endpoint's.
 func TestSnapStopsFlagsFarStopsWithoutFailing(t *testing.T) {
 	store := seedSnapRoute(t)
 
@@ -188,9 +168,6 @@ func TestSnapStopsFlagsFarStopsWithoutFailing(t *testing.T) {
 	}
 }
 
-// Input order is preserved so the client can zip the response onto the list it
-// sent; chainage order is reported separately so it can say "your stops are out
-// of order along the line" without reordering anything itself.
 func TestSnapStopsPreservesInputOrderAndReportsChainageOrder(t *testing.T) {
 	store := seedSnapRoute(t)
 
@@ -248,8 +225,6 @@ func TestSnapStopsReportsAgreementWhenStopsAreInChainageOrder(t *testing.T) {
 	}
 }
 
-// A single stop is a legitimate preview — the authoring UI snaps each stop as
-// it is placed, long before there are two of them.
 func TestSnapStopsAcceptsASingleStop(t *testing.T) {
 	store := seedSnapRoute(t)
 
@@ -307,8 +282,6 @@ func TestSnapStopsRejectsInvalidPayloads(t *testing.T) {
 	}
 }
 
-// The body cap must actually fire: a client that posts a huge stop list gets a
-// bounded refusal rather than the server reading it all into memory.
 func TestSnapStopsRejectsAnOversizedBody(t *testing.T) {
 	store := seedSnapRoute(t)
 
@@ -335,9 +308,6 @@ func TestSnapStopsReportsStorageFailure(t *testing.T) {
 	}
 }
 
-// Ingestion validates geometry, so a one-point route can only come from data
-// that predates or bypassed that check. The client did nothing wrong, so it is
-// a 500 rather than a 400 — but it must not be a panic or a bogus 200.
 func TestSnapStopsRejectsUnusableRouteGeometry(t *testing.T) {
 	store := newFakeRouteStore()
 	store.routes["degenerate"] = transit.Route{
@@ -353,11 +323,6 @@ func TestSnapStopsRejectsUnusableRouteGeometry(t *testing.T) {
 	}
 }
 
-// TestSnapStopsCallsAWestboundServiceConsistent is the divergence guard: the
-// preview must not flag an ordering problem the save would accept. Stops
-// supplied against the direction the route was drawn in run descending the
-// whole way, which the write path stores happily, so the preview reports them
-// as consistent even though chainage_order comes back reversed.
 func TestSnapStopsCallsAWestboundServiceConsistent(t *testing.T) {
 	store := seedSnapRoute(t)
 

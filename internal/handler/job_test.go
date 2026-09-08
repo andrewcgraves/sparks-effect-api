@@ -16,34 +16,22 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// fakeCompileStore is an in-memory stand-in for the repository slice the
-// async compile job surface needs, including the worker.Store methods a
-// triggered compile actually runs against.
 type fakeCompileStore struct {
-	mu sync.Mutex
-
-	scenarios map[string]transit.Scenario
-	jobs      map[string]transit.Job
-
-	// User-authored targets, keyed by slug (the address the compile handlers
-	// resolve). Empty unless a test populates them.
-	userServices  map[string]transit.UserService
-	userScenarios map[string]transit.UserScenario
-
-	routes       []transit.Route
-	stations     []transit.Station
-	services     []transit.Service
-	vehicleTypes []transit.VehicleType
-	travelTimes  map[string]transit.TravelTimes
-
+	mu             sync.Mutex
+	scenarios      map[string]transit.Scenario
+	jobs           map[string]transit.Job
+	userServices   map[string]transit.UserService
+	userScenarios  map[string]transit.UserScenario
+	routes         []transit.Route
+	stations       []transit.Station
+	services       []transit.Service
+	vehicleTypes   []transit.VehicleType
+	travelTimes    map[string]transit.TravelTimes
 	createJobErr   error
 	getScenarioErr error
 	getJobErr      error
 	getGraphErr    error
-
-	// completed receives a copy of the job every time it reaches a terminal
-	// state, so a test can wait for the background compile without sleeping.
-	completed chan transit.Job
+	completed      chan transit.Job
 }
 
 func newFakeCompileStore() *fakeCompileStore {
@@ -58,9 +46,6 @@ func newFakeCompileStore() *fakeCompileStore {
 	}
 }
 
-// compilableFixture equips the store with a route/station/service/vehicle set
-// that a real compile succeeds against, for tests exercising the whole async
-// round trip.
 func (f *fakeCompileStore) compilableFixture() {
 	f.routes = []transit.Route{{
 		ID:   "rt-1",
@@ -94,9 +79,6 @@ func (f *fakeCompileStore) compilableFixture() {
 	}
 }
 
-// compilableUserFixture equips the store with a user-authored service (owned by
-// ownerID) on its own route, plus a user scenario curating it, both compilable
-// end to end. Keyed by slug — "line-a" and "trip".
 func (f *fakeCompileStore) compilableUserFixture(ownerID string) (svcID, scenarioID string) {
 	f.routes = append(f.routes, transit.Route{
 		ID:   "rt-user",
@@ -333,8 +315,6 @@ func (f *fakeCompileStore) GetLatestSucceededUserScenarioJob(_ context.Context, 
 	return latest, found, nil
 }
 
-// GetLatestSucceededUserServiceJob is the single-service twin of the reader
-// above: same scan, keyed on the service FK and the service compile kind.
 func (f *fakeCompileStore) GetLatestSucceededUserServiceJob(_ context.Context, slug string) (transit.Job, bool, error) {
 	if f.getGraphErr != nil {
 		return transit.Job{}, false, f.getGraphErr
@@ -394,8 +374,6 @@ func getWithPathValueAs(t *testing.T, h http.Handler, path, pathValueName, pathV
 	return rec
 }
 
-// The headline acceptance criterion: a POST returns a job id, and a worker
-// actually runs the compile and stores a retrievable result.
 func TestCompileScenarioReturnsQueuedJobAndCompilesAsync(t *testing.T) {
 	store := newFakeCompileStore()
 	store.compilableFixture()
@@ -432,9 +410,6 @@ func TestCompileScenarioReturnsQueuedJobAndCompilesAsync(t *testing.T) {
 	}
 }
 
-// A scenario the compiler rejects fails the job with its error recorded,
-// rather than the POST itself failing — the caller already has a 202 and a job
-// id by the time the compile runs.
 func TestCompileScenarioFailsJobOnBadScenarioData(t *testing.T) {
 	store := newFakeCompileStore()
 	store.compilableFixture()
@@ -509,8 +484,6 @@ func TestJobStatusReturnsJobForItsOwner(t *testing.T) {
 	}
 }
 
-// A job that exists but belongs to another user must be indistinguishable
-// from a job that doesn't exist, so a caller cannot enumerate job ids.
 func TestJobStatusHidesOtherUsersJobsAsNotFound(t *testing.T) {
 	store := newFakeCompileStore()
 	owner := "user-2"
@@ -523,7 +496,6 @@ func TestJobStatusHidesOtherUsersJobsAsNotFound(t *testing.T) {
 	}
 }
 
-// Admin power applies here: an admin can inspect any job, not just their own.
 func TestJobStatusAdminCanViewAnyJob(t *testing.T) {
 	store := newFakeCompileStore()
 	owner := "user-2"
@@ -553,9 +525,6 @@ func TestJobStatusRequiresAuth(t *testing.T) {
 	}
 }
 
-// The headline "retrievable by slug" criterion: once a compile job has
-// succeeded, its result can be fetched by the scenario's slug with no job id
-// in hand.
 func TestScenarioGraphReturnsCompiledResult(t *testing.T) {
 	store := newFakeCompileStore()
 	scenarioID := "sc-a"

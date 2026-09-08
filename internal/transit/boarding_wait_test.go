@@ -152,8 +152,7 @@ func TestResolveBoardingWait_inheritFallsThroughToScenarioThenGlobal(t *testing.
 }
 
 func TestBoardingWaitOverride_yamlNestedObject(t *testing.T) {
-	// services.yaml carries the override as a nested object, the same shape
-	// the API write surface uses. Absent means inherit; this pins the bind.
+
 	const src = `
 id: "svc-1"
 name: "Night Owl"

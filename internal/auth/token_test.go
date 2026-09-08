@@ -30,8 +30,6 @@ func TestNewTokenIsUniqueAndHashed(t *testing.T) {
 	}
 }
 
-// The hash stored in the sessions table must be derivable from a presented
-// token, or lookup on the auth path is impossible.
 func TestHashTokenIsDeterministic(t *testing.T) {
 	tok, hash, err := auth.NewToken()
 	if err != nil {

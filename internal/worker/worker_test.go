@@ -11,26 +11,19 @@ import (
 
 func ptr(s string) *string { return &s }
 
-// fakeStore is an in-memory stand-in for the repository slice a compile job
-// needs, plus recorders so tests can assert the status sequence a poller
-// would observe.
 type fakeStore struct {
-	routes       []transit.Route
-	stations     []transit.Station
-	services     []transit.Service
-	vehicleTypes []transit.VehicleType
-
-	scenarios     map[string]transit.Scenario
-	travelTimes   map[string]transit.TravelTimes
-	userScenarios map[string]transit.UserScenario
-	userServices  map[string]transit.UserService
-
-	listErr error
-
-	statusCalls []string // status argument of each UpdateJobStatus call, in order
-	lastErrMsg  string
-	updateErr   error
-
+	routes           []transit.Route
+	stations         []transit.Station
+	services         []transit.Service
+	vehicleTypes     []transit.VehicleType
+	scenarios        map[string]transit.Scenario
+	travelTimes      map[string]transit.TravelTimes
+	userScenarios    map[string]transit.UserScenario
+	userServices     map[string]transit.UserService
+	listErr          error
+	statusCalls      []string
+	lastErrMsg       string
+	updateErr        error
 	completedWith    *transit.TransitGraph
 	completedWithIDs []string
 	completeErr      error
@@ -171,8 +164,6 @@ func fixtureStore() *fakeStore {
 	}
 }
 
-// userFixtureStore adds a user-authored service and a user scenario curating
-// it, on the same route/geometry the seeded fixture uses.
 func userFixtureStore() *fakeStore {
 	f := fixtureStore()
 	usvc := transit.UserService{
@@ -194,8 +185,6 @@ func scenarioJob() transit.Job {
 	return transit.Job{ID: "job-1", Kind: transit.JobKindCompileScenario, ScenarioID: ptr("sc-1")}
 }
 
-// The headline lifecycle: queued -> running -> succeeded, with the compiled
-// graph stored on completion.
 func TestCompileRunsThenSucceeds(t *testing.T) {
 	store := fixtureStore()
 
@@ -218,8 +207,6 @@ func TestCompileRunsThenSucceeds(t *testing.T) {
 	}
 }
 
-// A user scenario compiles its member services through the user-authored
-// loader, and the compiled member ids are recorded.
 func TestCompileUserScenario(t *testing.T) {
 	store := userFixtureStore()
 	job := transit.Job{ID: "job-2", Kind: transit.JobKindCompileUserScenario, UserScenarioID: ptr("uscn-1")}
@@ -238,7 +225,6 @@ func TestCompileUserScenario(t *testing.T) {
 	}
 }
 
-// A single user service compiles alone — the degenerate scenario compile.
 func TestCompileUserService(t *testing.T) {
 	store := userFixtureStore()
 	job := transit.Job{ID: "job-3", Kind: transit.JobKindCompileUserService, UserServiceID: ptr("usvc-1")}
@@ -254,7 +240,6 @@ func TestCompileUserService(t *testing.T) {
 	}
 }
 
-// A job whose target no longer exists fails cleanly rather than panicking.
 func TestCompileUserServiceNotFoundFailsJob(t *testing.T) {
 	store := userFixtureStore()
 	job := transit.Job{ID: "job-4", Kind: transit.JobKindCompileUserService, UserServiceID: ptr("gone")}
@@ -270,8 +255,6 @@ func TestCompileUserServiceNotFoundFailsJob(t *testing.T) {
 	}
 }
 
-// An unknown kind is a programming error on the enqueue side; it fails the job
-// rather than crashing the goroutine.
 func TestCompileUnknownKindFailsJob(t *testing.T) {
 	store := fixtureStore()
 	job := transit.Job{ID: "job-5", Kind: "compute", ScenarioID: ptr("sc-1")}
@@ -284,9 +267,6 @@ func TestCompileUnknownKindFailsJob(t *testing.T) {
 	}
 }
 
-// A scenario whose data the compiler rejects (here, a service pointing at a
-// vehicle type that doesn't exist in the loaded set) fails the job with the
-// error recorded, rather than panicking or silently succeeding.
 func TestCompileRecordsFailureOnBadScenarioData(t *testing.T) {
 	store := fixtureStore()
 	store.services[0].VehicleTypeID = "no-such-vehicle-type"
@@ -306,8 +286,6 @@ func TestCompileRecordsFailureOnBadScenarioData(t *testing.T) {
 	}
 }
 
-// A repository failure while loading the scenario's composition is also a
-// job failure, not a crash.
 func TestCompileRecordsFailureWhenLoadingScenarioDataFails(t *testing.T) {
 	store := fixtureStore()
 	store.listErr = errors.New("connection reset")
@@ -320,8 +298,6 @@ func TestCompileRecordsFailureWhenLoadingScenarioDataFails(t *testing.T) {
 	}
 }
 
-// If the store can't even be marked running, Compile reports that to its
-// caller — there is nowhere else for that failure to go.
 func TestCompileReturnsErrorWhenItCannotMarkRunning(t *testing.T) {
 	store := fixtureStore()
 	store.updateErr = errors.New("database is down")
@@ -331,9 +307,6 @@ func TestCompileReturnsErrorWhenItCannotMarkRunning(t *testing.T) {
 	}
 }
 
-// An empty scenario (no services yet) is a legitimate success, not a failure
-// — this is the state a freshly-created, not-yet-authored scenario compiles
-// to.
 func TestCompileSucceedsForAnEmptyScenario(t *testing.T) {
 	store := fixtureStore()
 	store.services = nil
@@ -346,10 +319,6 @@ func TestCompileSucceedsForAnEmptyScenario(t *testing.T) {
 	}
 }
 
-// A seeded scenario compiles from its calibrated segment run times, not from
-// track physics. The public isochrone answers off this graph since SPA-181, and
-// the calibrated table is what it has always answered with — a physics profile
-// over the same alignment gives materially different times.
 func TestCompileScenarioUsesCalibratedRunTimes(t *testing.T) {
 	store := fixtureStore()
 

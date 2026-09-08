@@ -13,12 +13,6 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// OwnedStationStore is the slice of the repository the owner-scoped station
-// CRUD needs.
-//
-// Stations are addressed by (scenario, slug) throughout, because stations.slug
-// is unique per scenario rather than globally — there is no station read here
-// that is not scenario-scoped, and no global namespace to mint against.
 type OwnedStationStore interface {
 	OwnedScenarioStore
 	CreateStation(ctx context.Context, st transit.Station) error
@@ -29,34 +23,17 @@ type OwnedStationStore interface {
 	ListStationsByScenario(ctx context.Context, scenarioID string) ([]transit.Station, error)
 }
 
-const maxStationBodyBytes = 1 << 20 // 1 MiB
+const maxStationBodyBytes = 1 << 20
 
-// stationRequest is the client-writable surface of a station. Identity fields
-// (id, scenario_id, slug, owner_id) are absent: the server assigns them all, so
-// a client can neither claim an id nor move a station between scenarios.
-//
-// Coordinates are lat/lng rather than a GeoJSON point, matching every other
-// authoring payload in this API (ServiceStopPoint, the isochrone request). The
-// stored and read-back shape stays GeoJSON, since that is what the compiler and
-// the map consume.
 type stationRequest struct {
-	Name string  `json:"name"`
-	Lat  float64 `json:"lat"`
-	Lng  float64 `json:"lng"`
-	// RoutingLat/RoutingLng optionally move where this station's egress
-	// isochrone is centred, without moving the station itself. Both must be
-	// given together. See transit.Station.RoutingLocation for why a station
-	// would need one: a site still under construction has no walkable network
-	// the routing worker can see.
-	RoutingLat *float64 `json:"routing_lat"`
-	RoutingLng *float64 `json:"routing_lng"`
-	// PlatformHeight feeds dwell resolution at compile time, together with the
-	// serving vehicle's floor height.
-	PlatformHeight string `json:"platform_height"`
+	Name           string   `json:"name"`
+	Lat            float64  `json:"lat"`
+	Lng            float64  `json:"lng"`
+	RoutingLat     *float64 `json:"routing_lat"`
+	RoutingLng     *float64 `json:"routing_lng"`
+	PlatformHeight string   `json:"platform_height"`
 }
 
-// applyTo copies the client-writable fields onto st, leaving ID, ScenarioID,
-// Slug, and OwnerID untouched.
 func (req stationRequest) applyTo(st *transit.Station) {
 	st.Name = strings.TrimSpace(req.Name)
 	st.Location = transit.GeoPoint{Type: "Point", Coordinates: []float64{req.Lng, req.Lat}}
@@ -72,9 +49,6 @@ func (req stationRequest) applyTo(st *transit.Station) {
 	}
 }
 
-// validate rejects what the database would accept but the compiler could not
-// use. Coordinate bounds are checked here rather than left to Postgres because
-// jsonb will happily store a longitude of 500.
 func (req stationRequest) validate() error {
 	if strings.TrimSpace(req.Name) == "" {
 		return fmt.Errorf("name is required")
@@ -99,7 +73,6 @@ func (req stationRequest) validate() error {
 	return nil
 }
 
-// ListOwnedStations returns the stations of a scenario the caller owns.
 func ListOwnedStations(store OwnedStationStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sc, ok := loadOwnedScenario(w, r, store)
@@ -118,11 +91,6 @@ func ListOwnedStations(store OwnedStationStore) http.HandlerFunc {
 	}
 }
 
-// CreateOwnedStation adds a station to a scenario the caller owns.
-//
-// The station inherits the scenario's owner rather than taking one from the
-// request: that is the ownership-uniformity invariant, and it is what lets
-// every scenario-scoped read stay unfiltered.
 func CreateOwnedStation(store OwnedStationStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sc, ok := loadOwnedScenario(w, r, store)
@@ -169,11 +137,6 @@ func CreateOwnedStation(store OwnedStationStore) http.HandlerFunc {
 	}
 }
 
-// UpdateOwnedStation rewrites a station in place.
-//
-// The slug does not move with a rename. Travel-time segments address stations
-// by slug, so re-slugging one would silently orphan every segment naming it and
-// the scenario would stop compiling.
 func UpdateOwnedStation(store OwnedStationStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		st, ok := loadOwnedStation(w, r, store)
@@ -199,10 +162,6 @@ func UpdateOwnedStation(store OwnedStationStore) http.HandlerFunc {
 	}
 }
 
-// DeleteOwnedStation removes a station once no service stops at it.
-//
-// service_stops.station_id is RESTRICT, so without the pre-check this would
-// surface as an opaque 500 rather than telling the caller what is in the way.
 func DeleteOwnedStation(store OwnedStationStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		st, ok := loadOwnedStation(w, r, store)
@@ -230,9 +189,6 @@ func DeleteOwnedStation(store OwnedStationStore) http.HandlerFunc {
 	}
 }
 
-// loadOwnedStation resolves {slug}/stations/{stationSlug}, applying the
-// scenario's ownership rule first: a station is reachable exactly when its
-// scenario is, which is the invariant restated as a lookup.
 func loadOwnedStation(w http.ResponseWriter, r *http.Request, store OwnedStationStore) (transit.Station, bool) {
 	sc, ok := loadOwnedScenario(w, r, store)
 	if !ok {
@@ -267,9 +223,6 @@ func decodeStationRequest(w http.ResponseWriter, r *http.Request) (stationReques
 	return req, true
 }
 
-// mintStationSlug derives a slug from name, appending -2, -3, ... until it
-// finds one free *within this scenario* — the scope stations.slug is unique in.
-// It returns "" when the name slugifies to nothing.
 func mintStationSlug(ctx context.Context, store OwnedStationStore, scenarioID, name string) (string, error) {
 	base := route.Slugify(name)
 	if base == "" {

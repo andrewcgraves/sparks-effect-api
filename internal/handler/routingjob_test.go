@@ -13,8 +13,6 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// fixedNow is what the fake store stamps onto rows it "persists", so tests can
-// tell a row that went through the store from one the handler invented.
 var fixedNow = time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
 
 var (
@@ -23,9 +21,6 @@ var (
 	pollAdmin    = transit.User{ID: "admin-1", Email: "admin@example.com", IsAdmin: true}
 )
 
-// pollAs issues GET /api/routing-jobs/{id} as user, or anonymously when user is
-// the zero value — the anonymous case being the one auth.OptionalAuth exists
-// for.
 func pollAs(t *testing.T, store handler.RoutingStore, id string, user transit.User) *httptest.ResponseRecorder {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -51,9 +46,6 @@ func decodeRoutingJob(t *testing.T, rec *httptest.ResponseRecorder) transit.Rout
 
 // --- the poll's ownership rule ---
 
-// An ownerless job came from the public /api/isochrone, which anyone may call.
-// There is no identity to match it against, so holding the id is the whole of
-// the credential — and the id is an unguessable v4 UUID.
 func TestRoutingJobStatus_ownerlessJobIsReadableByAnyone(t *testing.T) {
 	store := &fakeRoutingStore{}
 	store.put(transit.RoutingJob{ID: "job-public", Status: transit.JobStatusQueued})
@@ -89,7 +81,6 @@ func TestRoutingJobStatus_ownedJobIsReadableByItsOwner(t *testing.T) {
 	}
 }
 
-// An admin may view any job, matching the compile job poll's rule.
 func TestRoutingJobStatus_ownedJobIsReadableByAnAdmin(t *testing.T) {
 	store := &fakeRoutingStore{}
 	owner := pollOwner.ID
@@ -101,8 +92,6 @@ func TestRoutingJobStatus_ownedJobIsReadableByAnAdmin(t *testing.T) {
 	}
 }
 
-// Everyone else gets the same 404 as an unknown id, so a caller cannot probe
-// which job ids exist by watching the status code change.
 func TestRoutingJobStatus_ownedJobIsNotFoundForAnyoneElse(t *testing.T) {
 	store := &fakeRoutingStore{}
 	owner := pollOwner.ID
@@ -146,8 +135,6 @@ func TestRoutingJobStatus_500_storeFailure(t *testing.T) {
 	}
 }
 
-// The point of the poll: once the worker has finished, the result comes back
-// with the job rather than from a second endpoint.
 func TestRoutingJobStatus_succeededJobCarriesItsResult(t *testing.T) {
 	store := &fakeRoutingStore{}
 	result := json.RawMessage(`{"type":"FeatureCollection","features":[]}`)
@@ -172,8 +159,6 @@ func TestRoutingJobStatus_succeededJobCarriesItsResult(t *testing.T) {
 	}
 }
 
-// A failed job reports why. Without this a client polling a job the broker
-// never accepted would see "failed" and have nothing to show for it.
 func TestRoutingJobStatus_failedJobCarriesItsError(t *testing.T) {
 	store := &fakeRoutingStore{}
 	store.put(transit.RoutingJob{
@@ -189,13 +174,6 @@ func TestRoutingJobStatus_failedJobCarriesItsError(t *testing.T) {
 	}
 }
 
-// --- staleness (SPA-230): the isochrone service being down, with no worker to
-// ever consume the message ---
-
-// A job that has sat queued well past RoutingJobStaleAfter with no worker
-// ever picking it up is the shape of the outage this exists for: the broker
-// took the message, so enqueueIsochrone's publish-failure path never fired,
-// and nothing else was ever going to tell the caller.
 func TestRoutingJobStatus_staleQueuedJobIsFailed(t *testing.T) {
 	store := &fakeRoutingStore{}
 	store.put(transit.RoutingJob{
@@ -227,10 +205,6 @@ func TestRoutingJobStatus_staleQueuedJobIsFailed(t *testing.T) {
 	}
 }
 
-// A worker that claimed the job and then vanished — the process died, the pod
-// was killed — leaves it stuck `running` exactly the way an unconsumed message
-// leaves it stuck `queued`. Both are "the service is not answering" from a
-// caller's point of view, so both are caught the same way.
 func TestRoutingJobStatus_staleRunningJobIsFailed(t *testing.T) {
 	store := &fakeRoutingStore{}
 	store.put(transit.RoutingJob{
@@ -247,9 +221,6 @@ func TestRoutingJobStatus_staleRunningJobIsFailed(t *testing.T) {
 	}
 }
 
-// A job still well within RoutingJobStaleAfter must not be touched — this is
-// the ordinary "sitting behind another user's request" wait the frontend's own
-// deadline already tolerates, not an outage.
 func TestRoutingJobStatus_freshQueuedJobIsUntouched(t *testing.T) {
 	store := &fakeRoutingStore{}
 	store.put(transit.RoutingJob{
@@ -269,9 +240,6 @@ func TestRoutingJobStatus_freshQueuedJobIsUntouched(t *testing.T) {
 	}
 }
 
-// A succeeded or failed job is terminal and must never be rewritten by the
-// staleness check, however old it is — a result the worker actually computed
-// must not be clobbered by a poll that happens to land late.
 func TestRoutingJobStatus_terminalJobsAreNeverRewrittenForStaleness(t *testing.T) {
 	old := time.Now().Add(-2 * handler.RoutingJobStaleAfter)
 	result := json.RawMessage(`{"type":"FeatureCollection","features":[]}`)
@@ -302,10 +270,6 @@ func TestRoutingJobStatus_terminalJobsAreNeverRewrittenForStaleness(t *testing.T
 	}
 }
 
-// A store that cannot record the failure must not tell the caller it happened
-// anyway — the job comes back exactly as it was, so the next poll gets another
-// chance to persist it rather than a caller believing a failure that never
-// made it to the database.
 func TestRoutingJobStatus_staleJobLeftUnchangedWhenTheFailWriteFails(t *testing.T) {
 	store := &fakeRoutingStore{failErr: fmt.Errorf("database is on fire")}
 	store.put(transit.RoutingJob{

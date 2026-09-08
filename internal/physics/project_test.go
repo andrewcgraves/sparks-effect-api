@@ -6,8 +6,6 @@ import (
 	"testing"
 )
 
-// distTol is the absolute tolerance, in meters, used when comparing computed
-// distances against a hand-checked reference value.
 const distTol = 1.0
 
 func TestProjectStops_twoStopsAtLineEndpointsOnStraightLine(t *testing.T) {
@@ -43,11 +41,6 @@ func TestProjectStops_twoStopsAtLineEndpointsOnStraightLine(t *testing.T) {
 	}
 }
 
-// TestProjectStops_offLineStopSnapsToNearestPointIgnoringPerpendicularOffset
-// covers the "snap to nearest point on the line" acceptance criterion
-// directly: a stop that is not exactly on the line must still land at the
-// correct chainage — its perpendicular distance from the line must not affect
-// the along-line (chainage) component of the projection.
 func TestProjectStops_offLineStopSnapsToNearestPointIgnoringPerpendicularOffset(t *testing.T) {
 	// A north-south line (constant longitude), so the expected chainage to the
 	// midpoint is an independently-computed reference value: half the line's
@@ -78,11 +71,6 @@ func TestProjectStops_offLineStopSnapsToNearestPointIgnoringPerpendicularOffset(
 	}
 }
 
-// TestProjectStops_reordersStopsByChainageAndSplitsAcrossVertex covers two
-// acceptance criteria at once: stops supplied out of route order come back
-// ordered by chainage, and a span whose endpoints straddle an interior route
-// vertex is split into one SpanSegment per underlying route segment it
-// crosses, each carrying that segment's own physics.
 func TestProjectStops_reordersStopsByChainageAndSplitsAcrossVertex(t *testing.T) {
 	// A north-south line with one interior vertex at lat=1, so it has two
 	// physics-distinct segments of equal, independently-computed length.
@@ -139,18 +127,8 @@ func TestProjectStops_reordersStopsByChainageAndSplitsAcrossVertex(t *testing.T)
 	}
 }
 
-// TestProjectStops_threeStopsProduceTwoOrderedSpans covers a representative
-// multi-stop service pattern: three stops along a bent (non-straight) line
-// must produce exactly two spans, in chainage order, each summing to the
-// correct leg distance.
 func TestProjectStops_threeStopsProduceTwoOrderedSpans(t *testing.T) {
-	// An L-shaped line near Fresno, CA (representative of the CA-HSR corridor
-	// this compiler targets): north for one leg, then east for the other. Legs
-	// are ~1.1 km, small enough that the implementation's equirectangular
-	// approximation and true great-circle (haversine) distance agree to well
-	// under a meter, so haversineM below — a fresh, independent implementation
-	// of the standard formula — is a real ground truth, not a restatement of
-	// the code under test.
+
 	const (
 		baseLng  = -119.78
 		baseLat  = 36.75
@@ -193,10 +171,6 @@ func TestProjectStops_threeStopsProduceTwoOrderedSpans(t *testing.T) {
 	}
 }
 
-// haversineM is an independent great-circle distance implementation (the
-// standard haversine formula, mean Earth radius 6371 km) used purely as test
-// ground truth. It is not shared with — and must not be kept in sync with —
-// the equirectangular approximation project.go uses internally.
 func haversineM(a, b Point) float64 {
 	const r = 6371000.0
 	lat1, lat2 := a.Lat*math.Pi/180, b.Lat*math.Pi/180
@@ -207,11 +181,6 @@ func haversineM(a, b Point) float64 {
 	return r * 2 * math.Atan2(math.Sqrt(h), math.Sqrt(1-h))
 }
 
-// TestProjectStops_stopsBeyondLineEndsClampToEndpoints covers the clamped
-// nearest-point behavior for a stop that falls before the line's start or
-// after its end (e.g. a station sited slightly past the mapped end of a
-// route): it must snap to that endpoint rather than extrapolating off the
-// line, so both stops land at the line's own endpoint chainages.
 func TestProjectStops_stopsBeyondLineEndsClampToEndpoints(t *testing.T) {
 	line := []Point{
 		{Lng: 0.0, Lat: 0.0},
@@ -242,11 +211,6 @@ func TestProjectStops_stopsBeyondLineEndsClampToEndpoints(t *testing.T) {
 	}
 }
 
-// TestProjectStops_spanCrossingTwoInteriorVerticesSplitsIntoThreeSegments
-// covers a span that is not adjacent to a single route vertex pair: it
-// crosses two interior vertices, so it must be split into one SpanSegment per
-// underlying route segment (three), each carrying that segment's own physics
-// and summing back to the span's total distance.
 func TestProjectStops_spanCrossingTwoInteriorVerticesSplitsIntoThreeSegments(t *testing.T) {
 	line := []Point{
 		{Lng: 0.0, Lat: 0.0},
@@ -355,9 +319,6 @@ func TestProjectStops_errors(t *testing.T) {
 	}
 }
 
-// TestProjectStops_emptyPhysicsMeansTangentLevelTrack covers the documented
-// default: an omitted physics slice must not error, and every resulting
-// SpanSegment must carry the zero Segment value.
 func TestProjectStops_emptyPhysicsMeansTangentLevelTrack(t *testing.T) {
 	line := []Point{{Lng: 0, Lat: 0}, {Lng: 0, Lat: 1}}
 	stops := []Stop{
@@ -377,10 +338,6 @@ func TestProjectStops_emptyPhysicsMeansTangentLevelTrack(t *testing.T) {
 	}
 }
 
-// TestProjectStops_coincidentStopsProduceZeroDistanceSpan covers the
-// degenerate case of two stops snapping to (almost) the same chainage: the
-// function must not panic or error, and must return a valid, empty span
-// rather than a negative distance.
 func TestProjectStops_coincidentStopsProduceZeroDistanceSpan(t *testing.T) {
 	line := []Point{{Lng: 0, Lat: 0}, {Lng: 0, Lat: 1}}
 	stops := []Stop{
@@ -403,11 +360,6 @@ func TestProjectStops_coincidentStopsProduceZeroDistanceSpan(t *testing.T) {
 	}
 }
 
-// TestSnapStops_returnsChainagePreservingInputOrder covers the ordering
-// contract that separates SnapStops from ProjectStops: callers need to be able
-// to detect that a service's stop sequence disagrees with the route's
-// direction, which is impossible if the snapper pre-sorts by chainage. Stops
-// come back in the order they were supplied.
 func TestSnapStops_returnsChainagePreservingInputOrder(t *testing.T) {
 	line := []Point{{Lng: 0, Lat: 0}, {Lng: 0, Lat: 1}}
 	// Supplied in reverse chainage order on purpose.
@@ -438,10 +390,6 @@ func TestSnapStops_returnsChainagePreservingInputOrder(t *testing.T) {
 	}
 }
 
-// TestSnapStops_offLineStopReturnsThePointOnTheLine covers the snapped
-// coordinate: for a stop sitting east of a meridian line, the answer is the
-// foot of the perpendicular — same latitude, on the line's longitude — not the
-// raw input point.
 func TestSnapStops_offLineStopReturnsThePointOnTheLine(t *testing.T) {
 	const lineLng = -119.78
 	line := []Point{{Lng: lineLng, Lat: 36.75}, {Lng: lineLng, Lat: 36.85}}
@@ -455,8 +403,6 @@ func TestSnapStops_offLineStopReturnsThePointOnTheLine(t *testing.T) {
 		t.Fatalf("len(got) = %d, want 1", len(got))
 	}
 
-	// degTol is a tolerance in degrees loose enough to absorb the planar
-	// round-trip but far tighter than the stop's 0.01° offset from the line.
 	const degTol = 1e-6
 	if math.Abs(got[0].Point.Lng-lineLng) > degTol {
 		t.Errorf("got[0].Point.Lng = %v, want ~%v (the snapped point lies on the line)", got[0].Point.Lng, lineLng)
@@ -466,10 +412,6 @@ func TestSnapStops_offLineStopReturnsThePointOnTheLine(t *testing.T) {
 	}
 }
 
-// TestSnapStops_offsetIsDistanceFromRawInputToSnappedPoint covers OffsetM: how
-// far the caller's raw coordinate sits from the line. It is the input to the
-// off-route tolerance check, so it must measure the raw point, not the snapped
-// one — a stop already on the line has an offset of zero.
 func TestSnapStops_offsetIsDistanceFromRawInputToSnappedPoint(t *testing.T) {
 	const lineLng = -119.78
 	line := []Point{{Lng: lineLng, Lat: 36.75}, {Lng: lineLng, Lat: 36.85}}
@@ -500,9 +442,6 @@ func TestSnapStops_offsetIsDistanceFromRawInputToSnappedPoint(t *testing.T) {
 	}
 }
 
-// TestSnapStops_errorsOnShortLine covers the one input SnapStops rejects: a
-// line it cannot project onto. It errors the same way ProjectStops does, so
-// callers see one message for one condition.
 func TestSnapStops_errorsOnShortLine(t *testing.T) {
 	stops := []Stop{{ID: "a", Location: Point{Lng: 0, Lat: 0}}}
 
@@ -525,10 +464,6 @@ func TestSnapStops_errorsOnShortLine(t *testing.T) {
 	}
 }
 
-// TestSnapStops_acceptsFewerThanTwoStops covers where SnapStops deliberately
-// diverges from ProjectStops: snapping needs no inter-stop span, so a single
-// stop (the snap-preview and single-stop validation case) is valid, and no
-// stops is an empty result rather than an error.
 func TestSnapStops_acceptsFewerThanTwoStops(t *testing.T) {
 	line := []Point{{Lng: 0, Lat: 0}, {Lng: 0, Lat: 1}}
 
@@ -553,12 +488,6 @@ func TestSnapStops_acceptsFewerThanTwoStops(t *testing.T) {
 	}
 }
 
-// TestDistanceM_matchesHaversineGroundTruth pins DistanceM against an
-// independent great-circle formula, at the short separations the co-located
-// stop merge actually measures. The equirectangular frame DistanceM uses is a
-// local approximation, so this is what says "local" is good enough: at station
-// scale it must agree with the real thing to well under a metre, or a 50 m
-// merge radius would not mean 50 m.
 func TestDistanceM_matchesHaversineGroundTruth(t *testing.T) {
 	cases := []struct {
 		name string
@@ -581,9 +510,6 @@ func TestDistanceM_matchesHaversineGroundTruth(t *testing.T) {
 	}
 }
 
-// DistanceM is a metric, so it cannot depend on which point is named first.
-// The merge walks stops in a fixed order and measures each against a cluster
-// anchor; an asymmetric distance would make membership depend on that order.
 func TestDistanceM_isSymmetric(t *testing.T) {
 	a := Point{Lng: -122.397, Lat: 37.790}
 	b := Point{Lng: -122.3958, Lat: 37.7907}

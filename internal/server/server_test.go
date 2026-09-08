@@ -104,9 +104,6 @@ func TestCORS_productionOrigin_allowedRegardlessOfFlag(t *testing.T) {
 	}
 }
 
-// Preview deployments (SPA-252) talk to the staging API from a per-deployment
-// hostname on the Vercel team, not the production alias. The git alias is
-// truncated to a prefix plus a short slug — not the full branch name.
 func TestCORS_previewOrigin_allowedRegardlessOfFlag(t *testing.T) {
 	store, err := transit.NewStore(transit.DefaultBoardingWaitPolicy())
 	if err != nil {
@@ -187,9 +184,6 @@ func TestCORS_allowsXTraceIdHeader(t *testing.T) {
 	}
 }
 
-// The Retry-After on a capped isochrone's 429 (SPA-219) is only readable from
-// a browser if it is named here — a cross-origin response otherwise exposes
-// none of its headers to script.
 func TestCORS_exposesRetryAfter(t *testing.T) {
 	store, err := transit.NewStore(transit.DefaultBoardingWaitPolicy())
 	if err != nil {
@@ -226,9 +220,6 @@ func TestCORS_flagOff_localhostOrigin(t *testing.T) {
 	}
 }
 
-// The project's own domain is allowed whole: the apex and dev. are the two
-// hosts in use today, but the point of the domain match is that a third does
-// not need a code change to reach the API.
 func TestCORS_sparksEffectOrigin_allowedRegardlessOfFlag(t *testing.T) {
 	for _, origin := range []string{
 		"https://sparks-effect.app",
@@ -251,8 +242,6 @@ func TestCORS_sparksEffectOrigin_allowedRegardlessOfFlag(t *testing.T) {
 	}
 }
 
-// The preflight is the half that matters for an authenticated POST from the
-// SPA: without a 204 on OPTIONS the browser never sends the real request.
 func TestCORS_sparksEffectOrigin_OPTIONS(t *testing.T) {
 	store, err := transit.NewStore(transit.DefaultBoardingWaitPolicy())
 	if err != nil {

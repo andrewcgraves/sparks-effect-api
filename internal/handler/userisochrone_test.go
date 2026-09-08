@@ -151,14 +151,6 @@ func TestUserScenarioIsochrone_409_editedMember(t *testing.T) {
 	}
 }
 
-// The origin-range guard lives in the shared enqueue tail, so the authored
-// surfaces inherit it from the same code the seeded one is refused by. This is
-// the check that the tail is genuinely shared: the substance of the rule is
-// covered against the seeded endpoint (SPA-200).
-//
-// The order matters and is asserted by the 409 tests above, not here: a stale
-// graph is still refused as stale, because a range check run against a graph
-// the owner has already superseded would be answering about the wrong stations.
 func TestUserScenarioIsochrone_422_originOutOfRange(t *testing.T) {
 	store := newFakeScenarioStore()
 	created := time.Now().Add(-time.Hour)
@@ -190,8 +182,6 @@ func TestUserScenarioIsochrone_422_originOutOfRange(t *testing.T) {
 	}
 }
 
-// A fresh graph enqueues rather than computing, and — unlike the public seeded
-// isochrone — records the caller as the job's owner, so only they can poll it.
 func TestUserScenarioIsochrone_202_enqueuesOwnedByTheCaller(t *testing.T) {
 	store := newFakeScenarioStore()
 	created := time.Now().Add(-time.Hour)
@@ -262,7 +252,6 @@ func TestUserServiceIsochrone_404_unknownSlug(t *testing.T) {
 	}
 }
 
-// 404 rather than 403, so a non-owner cannot probe which service slugs exist.
 func TestUserServiceIsochrone_404_nonOwner(t *testing.T) {
 	store := newFakeServiceStore()
 	created := time.Now().Add(-time.Hour)
@@ -310,8 +299,6 @@ func TestUserServiceIsochrone_400_budgetNotPositive(t *testing.T) {
 	}
 }
 
-// Editing the service after its compile is the only way a single-service graph
-// goes stale — there is no membership to change, so this is the whole rule.
 func TestUserServiceIsochrone_409_editedService(t *testing.T) {
 	store := newFakeServiceStore()
 	created := time.Now().Add(-time.Hour)
@@ -338,8 +325,6 @@ func TestUserServiceIsochrone_409_editedService(t *testing.T) {
 	}
 }
 
-// A job that compiled a different service cannot satisfy this service's read,
-// the membership arm of GraphStale degenerated to a one-vs-one identity check.
 func TestUserServiceIsochrone_409_graphCompiledADifferentService(t *testing.T) {
 	store := newFakeServiceStore()
 	created := time.Now().Add(-time.Hour)
@@ -355,8 +340,6 @@ func TestUserServiceIsochrone_409_graphCompiledADifferentService(t *testing.T) {
 	}
 }
 
-// The single-service twin of the scenario enqueue: 202, owned by the caller,
-// naming the service's own compile job.
 func TestUserServiceIsochrone_202_enqueuesOwnedByTheCaller(t *testing.T) {
 	store := newFakeServiceStore()
 	created := time.Now().Add(-time.Hour)
@@ -383,11 +366,6 @@ func TestUserServiceIsochrone_202_enqueuesOwnedByTheCaller(t *testing.T) {
 	}
 }
 
-// A service with 0 or 1 stops compiles to a graph with no transit edges. That
-// is not an error and must still enqueue: what such a graph yields — a plain
-// street-mode isochrone with nothing chained onto it — is the worker's call to
-// make, and rejecting it here would mean an as-yet-unstopped service could not
-// be previewed at all.
 func TestUserServiceIsochrone_202_graphWithoutTransitEdges(t *testing.T) {
 	store := newFakeServiceStore()
 	created := time.Now().Add(-time.Hour)
@@ -415,9 +393,6 @@ func TestUserServiceIsochrone_202_graphWithoutTransitEdges(t *testing.T) {
 	}
 }
 
-// Neither authored isochrone enqueues anything it has just refused. A stale
-// target in particular must not leave a routing job behind: the worker would
-// compute over a graph the owner has already superseded.
 func TestAuthoredIsochrone_refusedRequestsEnqueueNothing(t *testing.T) {
 	created := time.Now().Add(-time.Hour)
 
@@ -465,8 +440,6 @@ func TestAuthoredIsochrone_refusedRequestsEnqueueNothing(t *testing.T) {
 	})
 }
 
-// An unconfirmed publish fails the job on the authored surface too, not only on
-// the public seeded one.
 func TestUserServiceIsochrone_502_unconfirmedPublishFailsTheJob(t *testing.T) {
 	store := newFakeServiceStore()
 	created := time.Now().Add(-time.Hour)

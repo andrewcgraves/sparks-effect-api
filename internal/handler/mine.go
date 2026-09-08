@@ -9,17 +9,11 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// OwnerStore is the slice of the repository the owner-scoped reads need.
 type OwnerStore interface {
 	ListScenariosByOwner(ctx context.Context, ownerID string) ([]transit.Scenario, error)
 	ListServicesByOwner(ctx context.Context, ownerID string) ([]transit.Service, error)
 }
 
-// MyScenarios returns the scenarios owned by the authenticated caller.
-//
-// The owner ID comes from the request context — the identity the middleware
-// resolved from the bearer token — and never from the request itself, so there
-// is no parameter a caller could set to read someone else's rows.
 func MyScenarios(store OwnerStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := auth.UserFrom(r.Context())
@@ -40,9 +34,6 @@ func MyScenarios(store OwnerStore) http.HandlerFunc {
 	}
 }
 
-// MyServices returns the services owned by the authenticated caller. Admins are
-// scoped to their own rows here too: admin rights gate privileged endpoints,
-// they do not redefine what "mine" means.
 func MyServices(store OwnerStore, boardingWait transit.BoardingWaitPolicy) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := auth.UserFrom(r.Context())

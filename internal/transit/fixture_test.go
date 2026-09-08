@@ -10,12 +10,6 @@ func servicePathSecs(sg ServiceGraph, from, to string) (int, bool) {
 	return secs, ok
 }
 
-// The seeded express-beats-local assertion that stood here went with HSR
-// Express when it was parked. What it proved — that a pattern skipping a stop
-// saves exactly that stop's dwell — is proved on its own fixture by
-// TestCompile_expressSkipsIntermediateDwell, which does not need the seed to
-// carry two patterns over one corridor.
-
 func TestFixture_BranchShortestPath_DijkstraBeatsBFS(t *testing.T) {
 	g := &TransitGraph{Services: []ServiceGraph{{
 		ServiceID: "branch",

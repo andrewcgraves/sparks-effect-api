@@ -5,18 +5,12 @@ import (
 	"testing"
 )
 
-// speedTol is the absolute tolerance (km/h) used when comparing computed
-// speeds. The model is deterministic, so a tight tolerance suffices; it only
-// guards against floating-point representation noise.
 const speedTol = 1e-6
 
-// almostEqual reports whether a and b are within speedTol of each other.
 func almostEqual(a, b float64) bool {
 	return math.Abs(a-b) <= speedTol
 }
 
-// almostEqualTol reports whether a and b are within an explicit tolerance,
-// used by golden-value assertions that compare against a hand-rounded literal.
 func almostEqualTol(a, b, tol float64) bool {
 	return math.Abs(a-b) <= tol
 }
@@ -63,23 +57,9 @@ func TestSpeedLimit_tightCurveWellBelowVehicleMax(t *testing.T) {
 	}
 }
 
-// TestSpeedLimit_goldenValue pins the numeric output of the lateral model for a
-// documented worked example, so a change to the formula or a constant is caught
-// rather than silently altering computed speeds.
-//
-// Worked example: R = 400 m, applied cant = 150 mm, default deficiency = 150 mm,
-// gauge = 1500 mm, g = 9.81 m/s^2, vehicle max well above the geometric limit.
-//
-//	effectiveCant = 150 + 150            = 300 mm
-//	v = sqrt((300/1500) * 9.81 * 400)    = sqrt(784.8) = 28.01428 m/s
-//	v * 3.6                              = 100.8514 km/h
-//
-// NOTE: this pins *this model's* output, not an externally published figure.
-// Validating the model against a standard (AREMA / EN 13803) is deferred to a
-// later story per review — see SPA-78 discussion.
 func TestSpeedLimit_goldenValue(t *testing.T) {
 	const (
-		want = 100.8514 // km/h, hand-computed above
+		want = 100.8514
 		tol  = 1e-3
 	)
 	got := SpeedLimit(SpeedLimitInputs{
@@ -94,7 +74,7 @@ func TestSpeedLimit_goldenValue(t *testing.T) {
 }
 
 func TestSpeedLimit_monotonicInRadius(t *testing.T) {
-	const vmax = 1000.0 // high ceiling so the geometric limit dominates
+	const vmax = 1000.0
 	radii := []float64{100, 200, 400, 800, 1600, 3200}
 	prev := math.Inf(-1)
 	for _, r := range radii {
@@ -113,7 +93,7 @@ func TestSpeedLimit_monotonicInRadius(t *testing.T) {
 
 func TestSpeedLimit_monotonicInCant(t *testing.T) {
 	const (
-		vmax   = 1000.0 // high ceiling so the geometric limit dominates
+		vmax   = 1000.0
 		radius = 400.0
 	)
 	cants := []float64{0, 50, 100, 150, 200}
@@ -144,9 +124,6 @@ func TestSpeedLimit_addingCantRaisesSpeed(t *testing.T) {
 	}
 }
 
-// TestSpeedLimit_higherCantDeficiencyRaisesSpeed covers the per-vehicle cant
-// deficiency: a vehicle allowed a larger deficiency may take the same curve
-// faster. A zero/unset deficiency falls back to the default.
 func TestSpeedLimit_higherCantDeficiencyRaisesSpeed(t *testing.T) {
 	const (
 		vmax   = 1000.0
@@ -197,9 +174,6 @@ func TestSpeedLimit_descentDerateFlooredAtMinFactor(t *testing.T) {
 	}
 }
 
-// TestSpeedLimit_descentThresholdBoundary pins the behavior exactly at the
-// derate threshold and just past it: a descent at -gradeDerateThreshold is not
-// derated, while a marginally steeper descent is.
 func TestSpeedLimit_descentThresholdBoundary(t *testing.T) {
 	const vmax = 200.0
 
@@ -275,9 +249,6 @@ func TestSpeedLimit_negativeRadiusTreatedAsTangent(t *testing.T) {
 	}
 }
 
-// TestSpeedLimit_badInputsGuarded covers the input-normalization guards: NaN or
-// negative applied cant is treated as zero applied cant, and NaN grade is
-// treated as level (no derate). None of these produce a non-finite result.
 func TestSpeedLimit_badInputsGuarded(t *testing.T) {
 	const (
 		vmax   = 300.0
@@ -353,10 +324,6 @@ func TestSpeedLimit_representativeCases(t *testing.T) {
 	}
 }
 
-// expectedGeometric independently recomputes the lateral (curve + cant) limit
-// in km/h so the table tests assert against a value derived from the documented
-// formula rather than the implementation under test. It uses the default cant
-// deficiency, matching inputs that leave MaxCantDeficiencyMM unset.
 func expectedGeometric(radiusM, cantMM float64) float64 {
 	effectiveCantMM := cantMM + defaultMaxCantDeficiencyMM
 	vMS := math.Sqrt((effectiveCantMM / gaugeMM) * gravityMS2 * radiusM)

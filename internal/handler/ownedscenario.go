@@ -14,12 +14,6 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// OwnedScenarioStore is the slice of the repository the owner-scoped scenario
-// CRUD needs.
-//
-// GetScenarioBySlug is unfiltered for GetRouteBySlug's reason: scenarios.slug is
-// globally unique across curated and owned rows, so minting a slug has to see
-// the whole namespace. Ownership is decided here, against the row it returns.
 type OwnedScenarioStore interface {
 	CreateScenario(ctx context.Context, sc transit.Scenario) error
 	GetScenarioBySlug(ctx context.Context, slug string) (transit.Scenario, bool, error)
@@ -28,34 +22,20 @@ type OwnedScenarioStore interface {
 	CountUnownedScenarioChildren(ctx context.Context, scenarioID string) (int, error)
 }
 
-// maxOwnedScenarioBodyBytes caps a request body. A scenario is three short
-// strings; anything larger is a client bug or an attack.
-const maxOwnedScenarioBodyBytes = 1 << 20 // 1 MiB
+const maxOwnedScenarioBodyBytes = 1 << 20
 
-// ownedScenarioRequest is the client-writable surface of a seeded scenario.
-// Identity fields (id, slug, owner_id) are deliberately absent: the server
-// assigns them, so a client cannot claim an ID or reassign ownership by
-// including them.
 type ownedScenarioRequest struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Status      string `json:"status"`
 }
 
-// applyTo copies the client-writable fields onto sc, leaving ID, Slug, and
-// OwnerID untouched.
 func (req ownedScenarioRequest) applyTo(sc *transit.Scenario) {
 	sc.Name = strings.TrimSpace(req.Name)
 	sc.Description = req.Description
 	sc.Status = req.Status
 }
 
-// CreateOwnedScenario persists a new scenario owned by the caller.
-//
-// The scenario starts empty: its routes, stations, travel-time segments, and
-// services are authored afterwards through the endpoints under
-// /api/me/scenarios/{slug}. It is not compilable until it has stations and
-// segments, which is what a compile will tell the caller if they try early.
 func CreateOwnedScenario(store OwnedScenarioStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := auth.UserFrom(r.Context())
@@ -104,7 +84,6 @@ func CreateOwnedScenario(store OwnedScenarioStore) http.HandlerFunc {
 	}
 }
 
-// GetOwnedScenario returns one of the caller's own scenarios.
 func GetOwnedScenario(store OwnedScenarioStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sc, ok := loadOwnedScenario(w, r, store)
@@ -115,12 +94,6 @@ func GetOwnedScenario(store OwnedScenarioStore) http.HandlerFunc {
 	}
 }
 
-// UpdateOwnedScenario rewrites the name, description, and status of a scenario
-// the caller owns.
-//
-// The slug is not re-derived from a changed name: it is the scenario's address,
-// and it is also what the travel-time set is keyed on, so re-slugging would
-// silently detach a scenario from its own segment times.
 func UpdateOwnedScenario(store OwnedScenarioStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sc, ok := loadOwnedScenario(w, r, store)
@@ -148,14 +121,6 @@ func UpdateOwnedScenario(store OwnedScenarioStore) http.HandlerFunc {
 	}
 }
 
-// DeleteOwnedScenario removes a scenario the caller owns, together with
-// everything under it.
-//
-// The cascade is wide — routes, stations, services, segments, the travel-time
-// set — and is safe exactly while the ownership-uniformity invariant holds: the
-// children of an owned scenario are the caller's own. A curated child means the
-// invariant has been broken (an admin attached platform content), so the delete
-// is refused rather than cascading over rows the caller does not own.
 func DeleteOwnedScenario(store OwnedScenarioStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sc, ok := loadOwnedScenario(w, r, store)
@@ -182,10 +147,6 @@ func DeleteOwnedScenario(store OwnedScenarioStore) http.HandlerFunc {
 	}
 }
 
-// loadOwnedScenario resolves the {slug} path value and applies the ownership
-// rule, answering 404 rather than 403 for the reason loadOwnedRoute does. A
-// curated scenario lands here too — its owner is nil, so CanAccess admits only
-// admins — which is what keeps the ca-hsr baseline read-only.
 func loadOwnedScenario(w http.ResponseWriter, r *http.Request, store OwnedScenarioStore) (transit.Scenario, bool) {
 	user, ok := auth.UserFrom(r.Context())
 	if !ok {
@@ -221,20 +182,6 @@ func decodeOwnedScenarioRequest(w http.ResponseWriter, r *http.Request) (ownedSc
 	return req, true
 }
 
-// mintOwnedScenarioSlug derives a slug from name, appending -2, -3, ... until
-// it finds one no scenario is using. It returns "" when the name slugifies to
-// nothing, which the caller reports as a 422.
-//
-// The namespace spans curated and owned scenarios alike, because scenarios.slug
-// is globally unique: a user naming their scenario "CA HSR" gets ca-hsr-2
-// rather than a constraint violation. Check-then-insert, with the same race and
-// the same justification as mintSlug.
-//
-// route.Slugify rather than transit.Slugify: the latter substitutes the literal
-// "service" for a name that slugifies to nothing, which is a sensible default
-// for a UserService and a wrong one for a scenario. The neutral function
-// returns "", and the caller turns that into a 422 telling the author to pick a
-// nameable name.
 func mintOwnedScenarioSlug(ctx context.Context, store OwnedScenarioStore, name string) (string, error) {
 	base := route.Slugify(name)
 	if base == "" {

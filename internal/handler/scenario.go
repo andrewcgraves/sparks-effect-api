@@ -22,11 +22,7 @@ type vehicleTypeSummary struct {
 }
 
 type serviceSummary struct {
-	ID string `json:"id"`
-	// The line this service runs over. Several services can share one corridor
-	// — an express and a local pattern are two services and one route — so a
-	// client that wants to present the network by line, rather than by
-	// timetable, cannot derive this from the stop list.
+	ID               string                    `json:"id"`
 	RouteID          string                    `json:"route_id"`
 	Name             string                    `json:"name"`
 	VehicleType      vehicleTypeSummary        `json:"vehicle_type"`
@@ -47,7 +43,6 @@ type scenarioDetail struct {
 	Services    []serviceSummary  `json:"services"`
 }
 
-// Scenarios returns a handler that lists all scenarios.
 func Scenarios(store *transit.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		all := store.GetScenarios()
@@ -65,8 +60,6 @@ func Scenarios(store *transit.Store) http.HandlerFunc {
 	}
 }
 
-// ScenarioBySlug returns a handler that fetches one scenario by slug with its
-// routes, stations, and service summaries.
 func ScenarioBySlug(store *transit.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		slug := r.PathValue("slug")
@@ -113,7 +106,6 @@ func ScenarioBySlug(store *transit.Store) http.HandlerFunc {
 	}
 }
 
-// ScenarioRoutes returns a handler that lists the routes for a scenario.
 func ScenarioRoutes(store *transit.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		slug := r.PathValue("slug")
@@ -126,7 +118,6 @@ func ScenarioRoutes(store *transit.Store) http.HandlerFunc {
 	}
 }
 
-// ScenarioServices returns a handler that lists the services for a scenario.
 func ScenarioServices(store *transit.Store, boardingWait transit.BoardingWaitPolicy) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		slug := r.PathValue("slug")
@@ -139,7 +130,6 @@ func ScenarioServices(store *transit.Store, boardingWait transit.BoardingWaitPol
 	}
 }
 
-// ScenarioStations returns a handler that lists the stations for a scenario.
 func ScenarioStations(store *transit.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		slug := r.PathValue("slug")
@@ -152,7 +142,6 @@ func ScenarioStations(store *transit.Store) http.HandlerFunc {
 	}
 }
 
-// ScenarioTravelTimes returns a handler that returns the adjacent segment travel times for a scenario.
 func ScenarioTravelTimes(store *transit.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		slug := r.PathValue("slug")

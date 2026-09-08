@@ -18,9 +18,6 @@ const (
 	usnScenario1ID = "00000000-0000-4009-8006-000000000001"
 )
 
-// userScenarioFixture returns a repo pre-loaded with an owner, a stranger, a
-// route, and two user services owned by the owner — the rows a user scenario
-// needs to reference.
 func userScenarioFixture(t *testing.T) (*postgres.Repo, context.Context) {
 	t.Helper()
 	ctx := context.Background()
@@ -110,8 +107,6 @@ func TestUserScenarioRoundTrip(t *testing.T) {
 	}
 }
 
-// SPA-120: a scenario's declared interchange pairs round-trip through the
-// jsonb column exactly as authored.
 func TestUserScenarioRoundTripInterchangePairs(t *testing.T) {
 	repo, ctx := userScenarioFixture(t)
 	want := sampleUserScenario()

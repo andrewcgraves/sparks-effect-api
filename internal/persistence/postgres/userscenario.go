@@ -6,9 +6,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
+	"github.com/jackc/pgx/v5"
 )
 
 // --- User scenarios (curated membership over user_services) ---
@@ -42,8 +41,6 @@ func (r *Repo) CreateUserScenario(ctx context.Context, sc transit.UserScenario) 
 	return wrap("CreateUserScenario commit", tx.Commit(ctx))
 }
 
-// UpdateUserScenario rewrites scalar fields and replaces the membership set
-// wholesale — membership has no client-visible identity to diff against.
 func (r *Repo) UpdateUserScenario(ctx context.Context, sc transit.UserScenario) error {
 	pairs, err := marshalInterchangePairs(sc)
 	if err != nil {
@@ -152,9 +149,6 @@ func (r *Repo) ListUserScenariosByOwner(ctx context.Context, ownerID string) ([]
 	return out, nil
 }
 
-// UserServiceIDsOwnedBy reports which of ids are user_services rows owned by
-// ownerID, in one round trip — the bulk check a scenario write validates
-// membership against before it persists anything.
 func (r *Repo) UserServiceIDsOwnedBy(ctx context.Context, ownerID string, ids []string) (map[string]bool, error) {
 	out := map[string]bool{}
 	if len(ids) == 0 {
@@ -181,8 +175,6 @@ func (r *Repo) UserServiceIDsOwnedBy(ctx context.Context, ownerID string, ids []
 	return out, wrap("UserServiceIDsOwnedBy rows", rows.Err())
 }
 
-// serviceIDsByScenario reads membership for many scenarios in one query, so
-// listing N scenarios costs two round trips rather than N+1.
 func (r *Repo) serviceIDsByScenario(ctx context.Context, scenarioIDs []string) (map[string][]string, error) {
 	out := map[string][]string{}
 	if len(scenarioIDs) == 0 {
@@ -238,9 +230,6 @@ func insertUserScenarioMembership(ctx context.Context, tx pgx.Tx, scenarioID str
 	return nil
 }
 
-// scanUserScenario reads one user_scenarios row in userScenarioColumns order.
-// pgx.Row is satisfied by both QueryRow results and pgx.Rows, so the single
-// and list read paths share it.
 func scanUserScenario(row pgx.Row) (transit.UserScenario, error) {
 	var (
 		sc    transit.UserScenario
@@ -259,9 +248,6 @@ func scanUserScenario(row pgx.Row) (transit.UserScenario, error) {
 	return sc, nil
 }
 
-// marshalInterchangePairs marshals a scenario's declared interchange pairs,
-// normalising a nil slice to [] so an empty declaration round-trips as an
-// empty JSON array rather than null.
 func marshalInterchangePairs(sc transit.UserScenario) ([]byte, error) {
 	pairs := sc.InterchangePairs
 	if pairs == nil {

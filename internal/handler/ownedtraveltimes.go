@@ -10,8 +10,6 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// OwnedTravelTimesStore is the slice of the repository the owner-scoped
-// travel-time surface needs.
 type OwnedTravelTimesStore interface {
 	OwnedScenarioStore
 	UpsertTravelTimes(ctx context.Context, tt transit.TravelTimes) error
@@ -20,16 +18,8 @@ type OwnedTravelTimesStore interface {
 	ListRoutesByScenario(ctx context.Context, scenarioID string) ([]transit.Route, error)
 }
 
-const maxTravelTimesBodyBytes = 4 << 20 // 4 MiB
+const maxTravelTimesBodyBytes = 4 << 20
 
-// travelTimesRequest is the client-writable surface of a scenario's segment run
-// times. The scenario is named by the path, not the body, so a client cannot
-// write one scenario's times into another.
-//
-// Segments carry from/to station slugs and a route slug rather than ids, for
-// the reason every other authoring payload names things by slug: a client
-// addresses stations and routes by slug everywhere else, and resolving here
-// means it can never supply an arbitrary id.
 type travelTimesRequest struct {
 	Provenance string                `json:"provenance"`
 	Source     string                `json:"source"`
@@ -37,20 +27,13 @@ type travelTimesRequest struct {
 }
 
 type travelTimeSegmentIn struct {
-	From string `json:"from"`
-	To   string `json:"to"`
-	// RunSeconds is run time only — the train in motion. Dwell is resolved
-	// separately at compile time from vehicle and platform height, so counting
-	// it here would double-count it.
-	RunSeconds int `json:"run_seconds"`
-	// ReverseRunSeconds, when omitted, means the reverse direction reuses
-	// RunSeconds. It exists for genuinely asymmetric hops (SPA-245).
+	From              string `json:"from"`
+	To                string `json:"to"`
+	RunSeconds        int    `json:"run_seconds"`
 	ReverseRunSeconds *int   `json:"reverse_run_seconds"`
 	RouteSlug         string `json:"route_slug"`
 }
 
-// GetOwnedTravelTimes returns the segment run times of a scenario the caller
-// owns.
 func GetOwnedTravelTimes(store OwnedTravelTimesStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sc, ok := loadOwnedScenario(w, r, store)
@@ -76,13 +59,6 @@ func GetOwnedTravelTimes(store OwnedTravelTimesStore) http.HandlerFunc {
 	}
 }
 
-// ReplaceOwnedTravelTimes rewrites a scenario's whole segment set.
-//
-// It is a PUT of the entire collection rather than per-segment CRUD because a
-// segment has no identity a client can address — segments carry a generated row
-// id nothing references — and because the set is meaningful only as a whole:
-// the compiler walks it as one graph, and a half-applied edit is a scenario
-// that no longer compiles.
 func ReplaceOwnedTravelTimes(store OwnedTravelTimesStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sc, ok := loadOwnedScenario(w, r, store)
@@ -114,13 +90,6 @@ func ReplaceOwnedTravelTimes(store OwnedTravelTimesStore) http.HandlerFunc {
 	}
 }
 
-// resolveSegments turns the wire form into domain segments, checking every
-// reference as it goes.
-//
-// Each check is the difference between a 422 naming the offending slug and a
-// scenario that stores fine and then fails to compile with a message about a
-// stop "not on any segment path" — which is far harder to act on. Both station
-// slugs must belong to this scenario, and the route must be one of its own.
 func resolveSegments(
 	w http.ResponseWriter, r *http.Request, store OwnedTravelTimesStore,
 	sc transit.Scenario, in []travelTimeSegmentIn,

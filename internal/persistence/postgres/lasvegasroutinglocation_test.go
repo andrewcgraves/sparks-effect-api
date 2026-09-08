@@ -13,14 +13,6 @@ import (
 
 const lasVegasRoutingLocationMigrationPath = "migrations/00016_las_vegas_routing_location.sql"
 
-// The las-vegas station's routing_location is written down twice — once in
-// internal/transit/data/scenarios/ca-hsr/stations.yaml for databases the seed
-// reaches, once as an UPDATE literal in 00016 for the deployed ones it does
-// not — for the same reason TestLasVegasStationCoordinateMigrationStationMatchesTheSeed
-// pins 00015 against the seed's `location`: two copies of the same data drift,
-// and the drift is invisible, since both databases still compile.
-//
-// This needs no database — it compares the files themselves.
 func TestLasVegasRoutingLocationMigrationMatchesTheSeed(t *testing.T) {
 	store, err := transit.NewStore(transit.DefaultBoardingWaitPolicy())
 	if err != nil {
@@ -59,15 +51,6 @@ func TestLasVegasRoutingLocationMigrationMatchesTheSeed(t *testing.T) {
 	}
 }
 
-// rewindLasVegasRoutingLocationMigration unwinds 00016. It is no longer the
-// tail of the rewind chain that starts in snapmigration_test.go — 00017 sits
-// above it now, so this must unwind that first, the same reason every other
-// link in the chain unwinds the migration above it before its own.
-//
-// 00016 adds a column and then UPDATEs it, so unwinding it both drops the
-// column (undoing the ALTER) and unrecords the version — a plain DELETE from
-// goose_db_version, like 00015's old rewind, would leave the column behind and
-// the next Migrate call would see it already exists.
 func rewindLasVegasRoutingLocationMigration(t *testing.T, url string) {
 	t.Helper()
 	rewindHSRExpressParkedMigration(t, url)
@@ -76,10 +59,6 @@ func rewindLasVegasRoutingLocationMigration(t *testing.T, url string) {
 		`DELETE FROM goose_db_version WHERE version_id = 16`)
 }
 
-// insertPreFixLasVegasStation stages ca-hsr as a deployed database held it
-// before 00016 existed: the scenario and the las-vegas station, carrying its
-// corrected (00015) location but no routing anchor at all — the column has
-// just been dropped by the rewind above.
 func insertPreFixLasVegasStation(t *testing.T, url string) {
 	t.Helper()
 	exec(t, url,
@@ -89,9 +68,6 @@ func insertPreFixLasVegasStation(t *testing.T, url string) {
 		           '{"type":"Point","coordinates":[-115.1778,36.0545]}'::jsonb)`)
 }
 
-// The case that actually matters in production: a seeded ca-hsr the seed will
-// never revisit must come out of the migration holding the routing anchor, not
-// just a routing_location column with nothing in it.
 func TestLasVegasRoutingLocationMigrationCorrectsAnAlreadyPopulatedScenario(t *testing.T) {
 	_, url := freshRepo(t)
 	rewindLasVegasRoutingLocationMigration(t, url)
@@ -108,8 +84,6 @@ func TestLasVegasRoutingLocationMigrationCorrectsAnAlreadyPopulatedScenario(t *t
 		t.Error("las-vegas station was not given the routing anchor")
 	}
 
-	// location itself must be untouched: the routing anchor stands in only for
-	// the routing worker's egress isochrone, never for the station's own place.
 	const terminus = `[-115.1778, 36.0545]`
 	if got := scalarCount(t, url,
 		`SELECT count(*) FROM stations WHERE id = '`+bwVegasID+`'
@@ -118,11 +92,6 @@ func TestLasVegasRoutingLocationMigrationCorrectsAnAlreadyPopulatedScenario(t *t
 	}
 }
 
-// On a fresh database the migration runs before the seed, so the las-vegas row
-// does not exist yet and the UPDATE must touch nothing — the seed inserts the
-// station with its routing_location from YAML a moment later. The ALTER TABLE
-// still runs (the column must exist for that insert), so this only asserts the
-// UPDATE's half is a no-op.
 func TestLasVegasRoutingLocationMigrationIsANoOpOnAnEmptyDatabase(t *testing.T) {
 	_, url := freshRepo(t)
 
@@ -132,8 +101,6 @@ func TestLasVegasRoutingLocationMigrationIsANoOpOnAnEmptyDatabase(t *testing.T) 
 	}
 }
 
-// A database that already holds the routing anchor — seeded from YAML, then
-// migrated — must come out of a re-run unchanged.
 func TestLasVegasRoutingLocationMigrationIsSafeToReRun(t *testing.T) {
 	_, url := freshRepo(t)
 	rewindLasVegasRoutingLocationMigration(t, url)

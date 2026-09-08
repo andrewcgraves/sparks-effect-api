@@ -13,8 +13,6 @@ import (
 //go:embed data
 var dataFS embed.FS
 
-// Store holds all transit domain data loaded from embedded YAML seed files.
-// It is safe for concurrent read-only use after construction.
 type Store struct {
 	scenarios    []Scenario
 	routes       []Route
@@ -25,8 +23,6 @@ type Store struct {
 	graphs       map[string]*TransitGraph
 }
 
-// NewStore loads all embedded seed data and returns a ready Store, compiling
-// each scenario under boardingWait (the global policy from config).
 func NewStore(boardingWait BoardingWaitPolicy) (*Store, error) {
 	s := &Store{
 		travelTimes: make(map[string]TravelTimes),
@@ -50,11 +46,6 @@ func NewStore(boardingWait BoardingWaitPolicy) (*Store, error) {
 	return s, nil
 }
 
-// LoadStore builds a read-optimized, compiled Store from a Repository. It reads
-// every scenario's rows (routes, stations, services, travel-time segments) plus
-// the global vehicle types, then compiles each scenario's in-memory TransitGraph
-// under boardingWait. This is the persisted read path: rows in, isochrone-ready
-// graph out.
 func LoadStore(ctx context.Context, repo Repository, boardingWait BoardingWaitPolicy) (*Store, error) {
 	s := &Store{
 		travelTimes: make(map[string]TravelTimes),
@@ -165,18 +156,15 @@ func (s *Store) loadScenario(slug string, boardingWait BoardingWaitPolicy) error
 	return nil
 }
 
-// Graph returns the compiled TransitGraph for a scenario slug.
 func (s *Store) Graph(scenarioSlug string) (*TransitGraph, bool) {
 	g, ok := s.graphs[scenarioSlug]
 	return g, ok
 }
 
-// GetScenarios returns all scenarios.
 func (s *Store) GetScenarios() []Scenario {
 	return s.scenarios
 }
 
-// GetScenarioBySlug returns the scenario with the given slug, or false if not found.
 func (s *Store) GetScenarioBySlug(slug string) (Scenario, bool) {
 	for _, sc := range s.scenarios {
 		if sc.Slug == slug {
@@ -186,9 +174,6 @@ func (s *Store) GetScenarioBySlug(slug string) (Scenario, bool) {
 	return Scenario{}, false
 }
 
-// GetRoutesByScenario returns all routes belonging to the given scenario ID.
-// Standalone routes — those ingested by an admin, which have no scenario — are
-// never returned here; they are read by slug instead.
 func (s *Store) GetRoutesByScenario(scenarioID string) []Route {
 	var out []Route
 	for _, r := range s.routes {
@@ -199,7 +184,6 @@ func (s *Store) GetRoutesByScenario(scenarioID string) []Route {
 	return out
 }
 
-// GetStationsByScenario returns all stations belonging to the given scenario ID.
 func (s *Store) GetStationsByScenario(scenarioID string) []Station {
 	var out []Station
 	for _, st := range s.stations {
@@ -210,7 +194,6 @@ func (s *Store) GetStationsByScenario(scenarioID string) []Station {
 	return out
 }
 
-// GetServicesByScenario returns all active services belonging to the given scenario ID.
 func (s *Store) GetServicesByScenario(scenarioID string) []Service {
 	var out []Service
 	for _, svc := range s.services {
@@ -221,7 +204,6 @@ func (s *Store) GetServicesByScenario(scenarioID string) []Service {
 	return out
 }
 
-// GetVehicleTypeByID returns the vehicle type with the given ID, or false if not found.
 func (s *Store) GetVehicleTypeByID(id string) (VehicleType, bool) {
 	for _, vt := range s.vehicleTypes {
 		if vt.ID == id {
@@ -231,20 +213,11 @@ func (s *Store) GetVehicleTypeByID(id string) (VehicleType, bool) {
 	return VehicleType{}, false
 }
 
-// GetTravelTimes returns the segment-based travel times for the given scenario slug.
 func (s *Store) GetTravelTimes(scenarioSlug string) (TravelTimes, bool) {
 	tt, ok := s.travelTimes[scenarioSlug]
 	return tt, ok
 }
 
-// TravelTimeBetween returns the Dijkstra travel time in seconds, the boarding wait seconds,
-// the boarding service ID, and reachability over the compiled TransitGraph. Returns false
-// if the scenario is missing or no path exists between the stations.
-//
-// No request path reads this since SPA-181 — the isochrone goes through the
-// compile job's graph instead. It stays as the reference half of the
-// equivalence test (see IsochroneData), which is what guarantees the two
-// produce the same answer.
 func (s *Store) TravelTimeBetween(scenarioSlug, fromSlug, toSlug string) (seconds, waitSecs int, serviceID string, ok bool) {
 	g, gOK := s.graphs[scenarioSlug]
 	if !gOK {

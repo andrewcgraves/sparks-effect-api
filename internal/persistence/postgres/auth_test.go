@@ -5,17 +5,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-
-	"golang.org/x/crypto/bcrypt"
-
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
+	"github.com/jackc/pgx/v5"
+	"golang.org/x/crypto/bcrypt"
 )
 
-// execSQL runs a statement outside the repository, for asserting on behaviour
-// the schema owns (here, the ON DELETE CASCADE from users to sessions) rather
-// than behaviour the Go code implements.
 func execSQL(t *testing.T, url, sql string, args ...any) {
 	t.Helper()
 	ctx := context.Background()
@@ -108,7 +103,6 @@ func TestSessionLifecycle(t *testing.T) {
 	}
 }
 
-// An expired session must not authenticate, and must be prunable.
 func TestExpiredSessionIsRejectedAndPruned(t *testing.T) {
 	ctx := context.Background()
 	repo, _ := freshRepo(t)
@@ -152,8 +146,6 @@ func TestExpiredSessionIsRejectedAndPruned(t *testing.T) {
 	}
 }
 
-// Deprovisioning a user must revoke their sessions, via the FK cascade rather
-// than application cleanup code.
 func TestDeletingUserCascadesToSessions(t *testing.T) {
 	ctx := context.Background()
 	repo, url := freshRepo(t)
@@ -178,7 +170,6 @@ func TestDeletingUserCascadesToSessions(t *testing.T) {
 	}
 }
 
-// Owner-scoped reads are the read half of "a user sees only what they own".
 func TestOwnerScopedReads(t *testing.T) {
 	ctx := context.Background()
 	repo, _ := freshRepo(t)

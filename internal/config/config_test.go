@@ -92,8 +92,6 @@ func TestLoad_logLevel_fromEnv(t *testing.T) {
 	}
 }
 
-// VERBOSE=true predates LOG_LEVEL and stays supported so existing deploy
-// configs keep working unchanged.
 func TestLoad_logLevel_verboseIsABackCompatAliasForDebug(t *testing.T) {
 	t.Setenv("LOG_LEVEL", "")
 	t.Setenv("VERBOSE", "true")
@@ -146,8 +144,6 @@ func TestLoad_boardingWait_fixedWithoutSecondsFallsBackToNone(t *testing.T) {
 	}
 }
 
-// An unreadable seconds value is the same case as an absent one: fixed has no
-// wait to charge, so the policy defaults rather than inventing a number.
 func TestLoad_boardingWait_fixedWithUnparseableSecondsFallsBackToNone(t *testing.T) {
 	t.Setenv("BOARDING_WAIT_POLICY", "fixed")
 	t.Setenv("BOARDING_WAIT_FIXED_SECS", "abc")
@@ -171,8 +167,6 @@ func TestLoad_boardingWait_negativeFixedSecondsFallsBackToNone(t *testing.T) {
 	}
 }
 
-// The seconds companion means nothing to a headway policy, so a leftover or
-// mistyped one must not cost the operator the policy they did set.
 func TestLoad_boardingWait_ignoresFixedSecondsUnderAHeadwayPolicy(t *testing.T) {
 	t.Setenv("BOARDING_WAIT_POLICY", "half_headway")
 	t.Setenv("BOARDING_WAIT_FIXED_SECS", "abc")
@@ -212,8 +206,6 @@ func TestLoad_maxInFlightIsochrones_fromEnv(t *testing.T) {
 	}
 }
 
-// Zero is the documented off switch, so it has to survive being read rather
-// than reading as "unset" and collecting the default.
 func TestLoad_maxInFlightIsochrones_zeroDisablesTheCap(t *testing.T) {
 	t.Setenv("MAX_INFLIGHT_ISOCHRONES", "0")
 
@@ -222,8 +214,6 @@ func TestLoad_maxInFlightIsochrones_zeroDisablesTheCap(t *testing.T) {
 	}
 }
 
-// A typo falls back to the default rather than to "disabled": an accidentally
-// uncapped queue is the failure nobody notices until a flood.
 func TestLoad_maxInFlightIsochrones_malformedKeepsTheDefault(t *testing.T) {
 	for _, v := range []string{"lots", "-1", "3.5"} {
 		t.Setenv("MAX_INFLIGHT_ISOCHRONES", v)

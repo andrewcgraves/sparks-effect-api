@@ -17,13 +17,8 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// stubAuthDeps is a minimal AuthDeps: it knows one admin token and one
-// non-admin token, so route *registration* — which gate each path sits behind —
-// can be exercised without a database. Handler behaviour itself is covered by
-// the handler package's own tests.
 type stubAuthDeps struct {
 	sessions map[string]transit.User
-	// inFlight is the routing backlog the enqueue cap reads (SPA-219).
 	inFlight int
 }
 
@@ -36,8 +31,6 @@ func (s *stubAuthDeps) GetUserCredentialsByEmail(context.Context, string) (trans
 	return transit.User{}, "", false, nil
 }
 
-// User-authored services (SPA-80): stubbed so route registration can be
-// exercised; behaviour lives in the handler package's tests.
 func (s *stubAuthDeps) CreateUserService(context.Context, transit.UserService) error { return nil }
 func (s *stubAuthDeps) UpdateUserService(context.Context, transit.UserService) error { return nil }
 func (s *stubAuthDeps) DeleteUserService(context.Context, string) error              { return nil }
@@ -54,8 +47,6 @@ func (s *stubAuthDeps) ListUserServicesByOwner(context.Context, string) ([]trans
 	return nil, nil
 }
 
-// User-owned scenarios (SPA-81): stubbed so route registration can be
-// exercised; behaviour lives in the handler package's tests.
 func (s *stubAuthDeps) CreateUserScenario(context.Context, transit.UserScenario) error { return nil }
 func (s *stubAuthDeps) UpdateUserScenario(context.Context, transit.UserScenario) error { return nil }
 func (s *stubAuthDeps) DeleteUserScenario(context.Context, string) error               { return nil }
@@ -173,10 +164,6 @@ func (s *stubAuthDeps) ListVehicleTypes(context.Context) ([]transit.VehicleType,
 	return nil, nil
 }
 
-// Routing jobs (SPA-182): stubbed so route registration can be exercised.
-// GetRoutingJobByID reports found=false, which makes the poll route answer 404
-// for any id — enough to prove the route is registered and which gate it sits
-// behind, which is all this file tests.
 func (s *stubAuthDeps) CreateRoutingJob(context.Context, *transit.RoutingJob) error { return nil }
 func (s *stubAuthDeps) FailRoutingJob(context.Context, string, string) error        { return nil }
 func (s *stubAuthDeps) GetRoutingJobByID(context.Context, string) (transit.RoutingJob, bool, error) {
@@ -194,17 +181,10 @@ func (s *stubAuthDeps) PutIsochroneCache(context.Context, []handler.CachedIsochr
 	return nil
 }
 
-// inFlight is what the enqueue cap sees (SPA-219). Zero by default, so the cap
-// admits every request and the gate each isochrone route sits behind stays the
-// only thing this file's assertions turn on.
 func (s *stubAuthDeps) CountInFlightRoutingJobs(context.Context, time.Duration) (int, error) {
 	return s.inFlight, nil
 }
 
-// Prerendered isochrones: stubbed so route registration can be exercised. The
-// scenario lookup above reports not-found, so every one of these paths answers
-// 404 — enough to prove the route exists and which gate it sits behind, which
-// is all this file tests.
 func (s *stubAuthDeps) ListServiceMembershipByScenario(context.Context, string) ([]transit.ServiceMembership, error) {
 	return nil, nil
 }
@@ -244,8 +224,6 @@ func newStubDeps() *stubAuthDeps {
 	}}
 }
 
-// request builds and serves a test request. An optional body (JSON) may be
-// passed as a single trailing arg; omitting it sends an empty body.
 func request(t *testing.T, h http.Handler, method, path, token string, body ...string) *httptest.ResponseRecorder {
 	t.Helper()
 	var req *http.Request
@@ -263,8 +241,6 @@ func request(t *testing.T, h http.Handler, method, path, token string, body ...s
 	return rec
 }
 
-// Every protected route must reject an anonymous caller. This is the guard that
-// keeps a future endpoint from being registered outside the middleware.
 func TestProtectedRoutesRejectAnonymousCallers(t *testing.T) {
 	h := newTestServer(t, newStubDeps())
 
@@ -303,8 +279,6 @@ func TestProtectedRoutesRejectAnonymousCallers(t *testing.T) {
 	}
 }
 
-// Admin-gated routes must reject an authenticated non-admin with 403. Route
-// ingestion sits behind this same gate, which is what keeps it admin-only.
 func TestAdminRoutesRejectNonAdmins(t *testing.T) {
 	h := newTestServer(t, newStubDeps())
 
@@ -344,9 +318,6 @@ func TestAuthenticatedRoutesAdmitValidTokens(t *testing.T) {
 	}
 }
 
-// A valid token must reach the compile-job handlers rather than being stuck
-// at the auth gate. stubAuthDeps has no scenarios or jobs, so the handlers
-// themselves answer 404 — the point here is only that it isn't 401/403.
 func TestCompileJobRoutesAdmitValidTokens(t *testing.T) {
 	h := newTestServer(t, newStubDeps())
 
@@ -368,10 +339,6 @@ func TestCompileJobRoutesAdmitValidTokens(t *testing.T) {
 	}
 }
 
-// A valid token must reach the user-scenario CRUD handlers, and the existing
-// public curated-scenario read at the same base path must be unaffected — the
-// two live at distinct paths (/api/user-scenarios vs /api/scenarios) so
-// neither shadows the other.
 func TestUserScenarioRoutesAdmitValidTokensAndDontShadowPublicReads(t *testing.T) {
 	h := newTestServer(t, newStubDeps())
 
@@ -398,8 +365,6 @@ func TestUserScenarioRoutesAdmitValidTokensAndDontShadowPublicReads(t *testing.T
 	}
 }
 
-// The public read endpoints predate auth and must stay reachable — adding
-// authentication must not silently gate the existing curated data.
 func TestPublicReadRoutesStayOpen(t *testing.T) {
 	h := newTestServer(t, newStubDeps())
 
@@ -413,8 +378,6 @@ func TestPublicReadRoutesStayOpen(t *testing.T) {
 	}
 }
 
-// The route-read endpoint is public: a client previewing /routes/:slug has no
-// session yet, so it must not require one.
 func TestRouteReadEndpointStaysOpenWithoutAToken(t *testing.T) {
 	h := newTestServer(t, newStubDeps())
 
@@ -429,10 +392,6 @@ func TestRouteReadEndpointStaysOpenWithoutAToken(t *testing.T) {
 	}
 }
 
-// The route list shares the read endpoint's public posture: the picker that
-// consumes it runs before the user has picked anything, let alone signed in.
-// A 200 here also proves the sibling /api/routes/{slug} read does not shadow
-// the collection.
 func TestRouteListEndpointStaysOpenWithoutAToken(t *testing.T) {
 	h := newTestServer(t, newStubDeps())
 
@@ -442,9 +401,6 @@ func TestRouteListEndpointStaysOpenWithoutAToken(t *testing.T) {
 	}
 }
 
-// The snap preview is public for the same reason as the route read it
-// projects against, and it is registered under POST — a client sending one
-// must not be met with a 405 from the GET-only read patterns beside it.
 func TestSnapStopsEndpointStaysOpenWithoutAToken(t *testing.T) {
 	h := newTestServer(t, newStubDeps())
 
@@ -460,8 +416,6 @@ func TestSnapStopsEndpointStaysOpenWithoutAToken(t *testing.T) {
 	}
 }
 
-// The compiled-graph read is public, like the other scenario reads — a
-// caller checking whether a compile has finished has no session yet either.
 func TestGraphEndpointStaysOpenWithoutAToken(t *testing.T) {
 	h := newTestServer(t, newStubDeps())
 
@@ -476,15 +430,6 @@ func TestGraphEndpointStaysOpenWithoutAToken(t *testing.T) {
 	}
 }
 
-// The prerendered isochrone reads are public: they are the illustrations a
-// scenario's page shows before anyone has signed in, so neither may require a
-// token — and the admin POST registered at the same collection path must not
-// drag the GET beside it behind the admin gate.
-//
-// This is the public-read counterpart to TestAdminRoutesRejectNonAdmins above,
-// written as its own test for the same reason the route-read, snap-stops and
-// graph reads have theirs: stubAuthDeps holds no data, so these answer the
-// ordinary 404 rather than the 200 TestPublicReadRoutesStayOpen asserts.
 func TestPrerenderedIsochroneReadsStayOpenWithoutAToken(t *testing.T) {
 	h := newTestServer(t, newStubDeps())
 
@@ -506,8 +451,6 @@ func TestPrerenderedIsochroneReadsStayOpenWithoutAToken(t *testing.T) {
 	}
 }
 
-// With no database there is no user or session store, so the auth endpoints
-// must say so plainly rather than 404 or panic.
 func TestAuthRoutesReportUnavailableWithoutADatabase(t *testing.T) {
 	h := newTestServer(t, nil)
 
@@ -582,9 +525,6 @@ func TestAuthRoutesReportUnavailableWithoutADatabase(t *testing.T) {
 	}
 }
 
-// The worker write surface is a shared secret, not a user session. A valid
-// login token must not open it, an absent token must not, and the worker
-// token must (SPA-273).
 func TestWorkerRoutesRequireTheWorkerToken(t *testing.T) {
 	h := newTestServer(t, newStubDeps())
 

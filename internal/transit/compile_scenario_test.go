@@ -2,10 +2,6 @@ package transit
 
 import "testing"
 
-// scenarioFixture builds a two-station, one-route, one-service scenario
-// reusing physicsTestVehicle's clean kinematics, so CompileScenario's edge
-// values can be checked against the same hand-worked motion time as
-// TestCompileServicePhysics_twoStopStraightLine.
 func scenarioFixture() ([]Route, []Station, []Service, []VehicleType) {
 	route := Route{
 		ID:   "rt-1",
@@ -32,9 +28,6 @@ func scenarioFixture() ([]Route, []Station, []Service, []VehicleType) {
 	return []Route{route}, stations, []Service{svc}, []VehicleType{physicsTestVehicle()}
 }
 
-// The headline behaviour: an active service compiles into a ServiceGraph with
-// the same edges CompileServicePhysics itself produces — CompileScenario is
-// just the per-scenario fan-out over it.
 func TestCompileScenario_compilesActiveServices(t *testing.T) {
 	routes, stations, services, vehicleTypes := scenarioFixture()
 
@@ -53,11 +46,6 @@ func TestCompileScenario_compilesActiveServices(t *testing.T) {
 	}
 }
 
-// An inactive service contributes nothing, matching Compile's own convention.
-//
-// This is now the only place Active is honoured on the physics path: the
-// compiler takes a CompilableService and never sees a Service, so scenario
-// assembly is where membership is decided.
 func TestCompileScenario_skipsInactiveServices(t *testing.T) {
 	routes, stations, services, vehicleTypes := scenarioFixture()
 	services[0].Active = false
@@ -71,7 +59,6 @@ func TestCompileScenario_skipsInactiveServices(t *testing.T) {
 	}
 }
 
-// Multiple active services each get their own ServiceGraph.
 func TestCompileScenario_compilesMultipleServices(t *testing.T) {
 	routes, stations, services, vehicleTypes := scenarioFixture()
 	second := services[0]
@@ -87,8 +74,6 @@ func TestCompileScenario_compilesMultipleServices(t *testing.T) {
 	}
 }
 
-// A service referencing a route absent from the supplied slice is a caller
-// error (an id from a different scenario, say), not a silent skip.
 func TestCompileScenario_errorsOnUnknownRoute(t *testing.T) {
 	routes, stations, services, vehicleTypes := scenarioFixture()
 	services[0].RouteID = "no-such-route"
@@ -98,7 +83,6 @@ func TestCompileScenario_errorsOnUnknownRoute(t *testing.T) {
 	}
 }
 
-// Same for an unknown vehicle type id.
 func TestCompileScenario_errorsOnUnknownVehicleType(t *testing.T) {
 	routes, stations, services, vehicleTypes := scenarioFixture()
 	services[0].VehicleTypeID = "no-such-vehicle"
@@ -108,8 +92,6 @@ func TestCompileScenario_errorsOnUnknownVehicleType(t *testing.T) {
 	}
 }
 
-// An empty scenario (no services) compiles to an empty graph rather than an
-// error — the boundary an async job hits for a freshly-created scenario.
 func TestCompileScenario_emptyScenarioCompilesToEmptyGraph(t *testing.T) {
 	got, err := CompileScenario(nil, nil, nil, nil, DefaultBoardingWaitPolicy())
 	if err != nil {

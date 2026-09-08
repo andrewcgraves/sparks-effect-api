@@ -2,9 +2,6 @@ package transit
 
 import "testing"
 
-// userServiceFixture builds a two-stop user-authored service on route rt-1,
-// with stops sitting on that route's alignment so they project cleanly. Slug is
-// set because a stop's identity is namespaced by its owning service.
 func userServiceFixture(id, slug string) UserService {
 	return UserService{
 		ID:      id,
@@ -18,9 +15,6 @@ func userServiceFixture(id, slug string) UserService {
 	}
 }
 
-// The headline behaviour: a user scenario compiles its member services into one
-// ServiceGraph each, the user-authored counterpart to CompileScenario — same
-// per-service loop, same CompileServices seam underneath.
 func TestCompileUserScenario_compilesMemberServices(t *testing.T) {
 	routes := []Route{adapterRoute()}
 	services := []UserService{userServiceFixture("svc-1", "line-a")}
@@ -45,8 +39,6 @@ func TestCompileUserScenario_compilesMemberServices(t *testing.T) {
 	}
 }
 
-// Each member service gets its own ServiceGraph — the fan-out the AC calls the
-// "same per-service loop as CompileScenario".
 func TestCompileUserScenario_compilesMultipleMembers(t *testing.T) {
 	routes := []Route{adapterRoute()}
 	services := []UserService{
@@ -63,8 +55,6 @@ func TestCompileUserScenario_compilesMultipleMembers(t *testing.T) {
 	}
 }
 
-// SPA-109's clustering runs across member services: two members whose stops sit
-// on the same point interchange there — one merged cluster, reported.
 func TestCompileUserScenario_mergesColocatedStopsAcrossMembers(t *testing.T) {
 	routes := []Route{adapterRoute()}
 	services := []UserService{
@@ -86,8 +76,6 @@ func TestCompileUserScenario_mergesColocatedStopsAcrossMembers(t *testing.T) {
 	}
 }
 
-// A member referencing a route absent from the supplied slice is a caller error
-// (a stale route id, say), not a silent skip.
 func TestCompileUserScenario_errorsOnUnknownRoute(t *testing.T) {
 	services := []UserService{userServiceFixture("svc-1", "line-a")}
 
@@ -96,9 +84,6 @@ func TestCompileUserScenario_errorsOnUnknownRoute(t *testing.T) {
 	}
 }
 
-// An empty scenario (no members) compiles to an empty graph rather than an
-// error — the boundary a compile hits for a freshly-created, unpopulated
-// scenario.
 func TestCompileUserScenario_emptyScenarioCompilesToEmptyGraph(t *testing.T) {
 	got, err := CompileUserScenario(nil, nil, nil, nil, DefaultBoardingWaitPolicy())
 	if err != nil {

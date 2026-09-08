@@ -254,8 +254,6 @@ func TestGetTravelTimes(t *testing.T) {
 	}
 }
 
-// Every seeded segment names the route it is a span of, so a client can group
-// "time between stations" by corridor once a scenario carries more than one.
 func TestGetTravelTimesSegmentsCarryKnownRouteID(t *testing.T) {
 	store := mustNewStore(t)
 
@@ -343,8 +341,6 @@ func TestTravelTimeBetween(t *testing.T) {
 	}
 }
 
-// serviceEdges returns the named service's compiled edges keyed "from→to", so a
-// test can assert an end-to-end time by naming the stops it runs through.
 func serviceEdges(t *testing.T, g *TransitGraph, serviceID, name string) map[string]int {
 	t.Helper()
 	for i := range g.Services {
@@ -361,8 +357,6 @@ func serviceEdges(t *testing.T, g *TransitGraph, serviceID, name string) map[str
 	return nil
 }
 
-// sumStopToStop walks consecutive stops through adj, failing if any hop is
-// missing rather than silently under-counting the total.
 func sumStopToStop(t *testing.T, adj map[string]int, name string, stops []string) int {
 	t.Helper()
 	total := 0
@@ -448,9 +442,6 @@ func TestLocalSFToAnaheim_compiledTime_approx306min(t *testing.T) {
 	}
 }
 
-// The seeded travel-time set is what feeds the isochrone "Time between
-// stations" table, which groups by route. Brightline West run times are only a
-// distinct group there if they carry a route id of their own.
 func TestSeededTravelTimes_brightlineWestIsADistinctRouteGroup(t *testing.T) {
 	store := mustNewStore(t)
 	tt, ok := store.GetTravelTimes("ca-hsr")
@@ -485,9 +476,6 @@ func TestSeededTravelTimes_brightlineWestIsADistinctRouteGroup(t *testing.T) {
 	}
 }
 
-// spurEndToEndSecs is the compiled Palmdale→Las Vegas time: run-only
-// 1050 + 5310 = 6360 s, plus one 90 s dwell at the intermediate Victor Valley
-// stop = 6450 s (107.5 min).
 const spurEndToEndSecs = 6450
 
 func TestBrightlineWest_compiledPalmdaleToLasVegas(t *testing.T) {
@@ -510,9 +498,6 @@ func TestBrightlineWest_compiledPalmdaleToLasVegas(t *testing.T) {
 	}
 }
 
-// The spur hangs off Palmdale rather than rejoining Phase 1, so reaching Las
-// Vegas from the Bay Area has to traverse Phase 1 first — it must never come
-// out as the spur's own length.
 func TestBrightlineWest_spurDoesNotShortcutPhase1(t *testing.T) {
 	store := mustNewStore(t)
 
@@ -531,22 +516,6 @@ func TestBrightlineWest_spurDoesNotShortcutPhase1(t *testing.T) {
 	}
 }
 
-// Seeded services never pass through SnapToRoute — they are written from YAML
-// with a station_id per stop, so nothing checks that the station is anywhere
-// near the alignment the service runs on. The physics compile path
-// (CompileScenario → CompileServicePhysics → physics.ProjectStops) projects
-// them anyway and does so silently, clamping a stop past either end of the line
-// to that terminus. A seeded stop far off its route therefore produces no error
-// and no warning; it produces wrong chainage, and from that wrong span
-// distances and run times.
-//
-// This holds the seed to the same OffRouteThresholdM the authoring API enforces
-// on user-drawn services. The bar is deliberately the shared constant rather
-// than a number of its own: seed data a user could not have authored through
-// the product is seed data the product's own rules call invalid.
-//
-// It caught the Brightline West spur starting ~1.5 km short of Palmdale, where
-// the offset was 1471 m and Palmdale clamped to chainage 0.
 func TestSeededServiceStopsLieOnTheirRouteAlignment(t *testing.T) {
 	store := mustNewStore(t)
 	sc, ok := store.GetScenarioBySlug("ca-hsr")

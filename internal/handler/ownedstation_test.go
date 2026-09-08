@@ -14,16 +14,12 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// fakeOwnedStationStore is an in-memory handler.OwnedStationStore and
-// handler.OwnedTravelTimesStore — both surfaces read the same scenario's
-// children, so one fake serves both rather than two that must agree.
 type fakeOwnedStationStore struct {
 	*fakeOwnedScenarioStore
-
-	stations   map[string][]transit.Station // by scenario id
-	routes     map[string][]transit.Route   // by scenario id
+	stations   map[string][]transit.Station
+	routes     map[string][]transit.Route
 	travel     map[string]transit.TravelTimes
-	dependents map[string]int // station id -> service stops
+	dependents map[string]int
 	storeErr   error
 }
 
@@ -128,7 +124,6 @@ func (f *fakeOwnedStationStore) GetTravelTimes(_ context.Context, slug string) (
 	return tt, ok, nil
 }
 
-// asStationUser binds both wildcards the station paths use.
 func asStationUser(t *testing.T, h http.HandlerFunc, user transit.User,
 	method, scenarioSlug, stationSlug, body string) *httptest.ResponseRecorder {
 	t.Helper()
@@ -176,7 +171,6 @@ func TestCreateOwnedStationInheritsTheScenariosOwner(t *testing.T) {
 	}
 }
 
-// Nobody may add stations to a scenario they do not own, curated or otherwise.
 func TestCreateOwnedStationRefusesAScenarioTheCallerDoesNotOwn(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -199,7 +193,6 @@ func TestCreateOwnedStationRefusesAScenarioTheCallerDoesNotOwn(t *testing.T) {
 	}
 }
 
-// jsonb will happily store a longitude of 500, so the bounds are checked here.
 func TestCreateOwnedStationValidatesCoordinates(t *testing.T) {
 	for _, tc := range []struct{ name, body, wantIn string }{
 		{"no name", `{"name":"  ","lat":37,"lng":-121.9}`, "name is required"},
@@ -221,8 +214,6 @@ func TestCreateOwnedStationValidatesCoordinates(t *testing.T) {
 	}
 }
 
-// Travel-time segments address stations by slug, so a rename must not re-slug
-// or every segment naming the station is orphaned.
 func TestUpdateOwnedStationKeepsTheSlug(t *testing.T) {
 	store := newFakeOwnedStationStore()
 	store.stations[ownedScrID] = []transit.Station{
@@ -245,8 +236,6 @@ func TestUpdateOwnedStationKeepsTheSlug(t *testing.T) {
 	}
 }
 
-// service_stops.station_id is RESTRICT, so the pre-check is what turns an
-// opaque 500 into a 409 naming what is in the way.
 func TestDeleteOwnedStationRefusesWhileAServiceStopsThere(t *testing.T) {
 	store := newFakeOwnedStationStore()
 	store.stations[ownedScrID] = []transit.Station{
@@ -311,8 +300,6 @@ func TestReplaceOwnedTravelTimesResolvesSlugsToIds(t *testing.T) {
 	}
 }
 
-// A bad segment is a 422 naming it, not a scenario that stores fine and then
-// fails to compile with a message about a stop "not on any segment path".
 func TestReplaceOwnedTravelTimesRejectsBadSegments(t *testing.T) {
 	seed := func() *fakeOwnedStationStore {
 		store := newFakeOwnedStationStore()
@@ -342,8 +329,6 @@ func TestReplaceOwnedTravelTimesRejectsBadSegments(t *testing.T) {
 	}
 }
 
-// A scenario with no segment times yet has an empty set, which the editor
-// renders — not a 404, which it would have to special-case.
 func TestGetOwnedTravelTimesAnswersEmptyBeforeAnyAreWritten(t *testing.T) {
 	store := newFakeOwnedStationStore()
 

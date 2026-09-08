@@ -17,28 +17,14 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// fakeServiceStore is an in-memory handler.ServiceStore. It also backs
-// handler.ServiceIsochroneStore (userisochrone_test.go) via jobs and the
-// embedded routing store, rather than a second fake, since all three seams read
-// the same service rows.
 type fakeServiceStore struct {
 	fakeRoutingStore
-
-	services map[string]transit.UserService // keyed by ID
-	routes   map[string]transit.Route       // keyed by slug
-	jobs     map[string]transit.Job         // service slug -> latest succeeded job
+	services map[string]transit.UserService
+	routes   map[string]transit.Route
+	jobs     map[string]transit.Job
 	failWith error
 }
 
-// newFakeServiceStore stocks two routes with real geometry, because stops are
-// snapped onto it on every write and a route without an alignment cannot be
-// authored against.
-//
-//   - "sf-sj" runs straight from San Francisco to San Jose, so createPayload's
-//     two stops are its endpoints and snap to themselves.
-//   - "diagonal" runs along lat == lng, so the small round coordinates the
-//     ownership and validation tests use ((1,1), (2,2), …) all lie exactly on
-//     it, in increasing order.
 func newFakeServiceStore() *fakeServiceStore {
 	return &fakeServiceStore{
 		services: map[string]transit.UserService{},
@@ -135,9 +121,6 @@ func (f *fakeServiceStore) GetLatestSucceededUserServiceJob(_ context.Context, s
 	return job, ok, nil
 }
 
-// seedServiceRow stores a service directly, bypassing the write path's
-// validation and stop snapping — the isochrone tests care only about its id,
-// slug, owner, and UpdatedAt, which is what staleness turns on.
 func seedServiceRow(f *fakeServiceStore, id, slug, ownerID string, updatedAt time.Time) {
 	f.services[id] = transit.UserService{
 		ID: id, Slug: slug, OwnerID: ownerID, RouteID: "route-1", UpdatedAt: updatedAt,
@@ -163,10 +146,6 @@ const createPayload = `{
 	"frequency_windows": [{"start_time": "06:00", "end_time": "10:00", "headway_s": 900}]
 }`
 
-// serviceMux registers the CRUD handlers without the auth middleware, so tests
-// drive the handlers directly and inject identity via auth.WithUser — the same
-// approach as mine_test.go. That the routes actually sit behind RequireAuth is
-// covered in the server package.
 func serviceMux(store handler.ServiceStore) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/services", handler.CreateService(store, transit.DefaultBoardingWaitPolicy()))
@@ -177,7 +156,6 @@ func serviceMux(store handler.ServiceStore) *http.ServeMux {
 	return mux
 }
 
-// serveAs routes a request as user. A zero-valued user is anonymous.
 func serveAs(t *testing.T, store handler.ServiceStore, user transit.User, method, target, body string) *httptest.ResponseRecorder {
 	t.Helper()
 
@@ -206,7 +184,6 @@ func decodeService(t *testing.T, rec *httptest.ResponseRecorder) transit.UserSer
 	return svc
 }
 
-// seedService puts a service owned by owner straight into the store.
 func seedService(store *fakeServiceStore, id, slug, owner string) transit.UserService {
 	svc := transit.UserService{
 		ID: id, Slug: slug, OwnerID: owner, RouteID: "route-1", Name: "Seeded",
@@ -467,8 +444,6 @@ func TestCreateIgnoresClientSuppliedOwner(t *testing.T) {
 
 // --- Auth gating ---
 
-// TestAnonymousIsRejectedOnEveryRoute covers the handlers' own identity check.
-// In the running server RequireAuth rejects first; this is defence in depth.
 func TestAnonymousIsRejectedOnEveryRoute(t *testing.T) {
 	tests := []struct {
 		method, target, body string
@@ -624,8 +599,6 @@ func TestSlugCollisionGetsSuffix(t *testing.T) {
 
 // --- Snapping on write (SPA-108) ---
 
-// snapPayload builds a create/update body on route with the given stops, each
-// "name,lat,lng".
 func snapPayload(routeSlug string, stops ...[3]string) string {
 	parts := make([]string, len(stops))
 	for i, s := range stops {
@@ -677,10 +650,6 @@ func TestCreateRejectsStopsOutOfChainageOrder(t *testing.T) {
 
 // --- Structured placement faults (SPA-151) ---
 
-// stopPlacementBody is the machine-readable half of a 422 from the write path.
-// Declared here rather than reusing a handler type so the test pins the wire
-// contract by name: a renamed JSON key has to fail here, not silently pass by
-// following the struct it broke.
 type stopPlacementBody struct {
 	Error  string `json:"error"`
 	Code   string `json:"code"`
@@ -779,9 +748,7 @@ func TestCreateChainageOrderRejectionCarriesBothStopsInDetail(t *testing.T) {
 	if got.Detail.Stops[0].Seq != 1 || got.Detail.Stops[1].Seq != 2 {
 		t.Errorf("detail seqs = %d, %d, want 1 then 2", got.Detail.Stops[0].Seq, got.Detail.Stops[1].Seq)
 	}
-	// An order fault is not measured against a distance, so echoing one would
-	// invite a client to render a boundary that decided nothing here. Checked
-	// on the raw keys, since a decoded zero cannot be told from an absent one.
+
 	var raw struct {
 		Detail map[string]any `json:"detail"`
 	}
@@ -793,9 +760,6 @@ func TestCreateChainageOrderRejectionCarriesBothStopsInDetail(t *testing.T) {
 	}
 }
 
-// TestUpdateRejectionCarriesStructuredDetailToo pins that the two write paths
-// answer the same way. The authoring UI edits far more often than it creates,
-// so a detail that only appeared on create would be missing where it matters.
 func TestUpdateRejectionCarriesStructuredDetailToo(t *testing.T) {
 	store := newFakeServiceStore()
 	seedService(store, "svc-1", "seeded", svcOwner.ID)
@@ -815,9 +779,6 @@ func TestUpdateRejectionCarriesStructuredDetailToo(t *testing.T) {
 	}
 }
 
-// TestOtherValidationFailuresCarryNoPlacementDetail keeps the detail meaning
-// one specific thing. A client that branched on its presence would otherwise
-// have to re-check the fault kind on every 422 the write path can produce.
 func TestOtherValidationFailuresCarryNoPlacementDetail(t *testing.T) {
 	body := `{"route_slug":"nonexistent","name":"No route",
 		"vehicle":{"max_speed_kmh":100,"acceleration_ms2":1,"deceleration_ms2":1},
@@ -828,8 +789,6 @@ func TestOtherValidationFailuresCarryNoPlacementDetail(t *testing.T) {
 		t.Fatalf("got %d, want %d (body %s)", rec.Code, http.StatusUnprocessableEntity, rec.Body)
 	}
 
-	// Decoded rather than string-matched: the message itself is free to contain
-	// the words "code" or "detail", and only the keys are the contract.
 	var body422 map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &body422); err != nil {
 		t.Fatalf("decoding error body: %v (body %s)", err, rec.Body)
@@ -857,8 +816,6 @@ func TestCreateRequiresARouteSlug(t *testing.T) {
 	}
 }
 
-// TestCreateResolvesTheRouteSlugToItsID pins that the client names a route by
-// slug and never supplies an ID: what is stored is the ID the server resolved.
 func TestCreateResolvesTheRouteSlugToItsID(t *testing.T) {
 	store := newFakeServiceStore()
 	rec := serveAs(t, store, svcOwner, http.MethodPost, "/api/services", createPayload)
@@ -870,8 +827,6 @@ func TestCreateResolvesTheRouteSlugToItsID(t *testing.T) {
 	}
 }
 
-// TestCreateResponseCarriesTheSnap covers the client that skips the preview:
-// the create response alone must show where each stop landed.
 func TestCreateResponseCarriesTheSnap(t *testing.T) {
 	store := newFakeServiceStore()
 	// Both stops sit a little off the diagonal, so offsets are non-zero.
@@ -948,9 +903,6 @@ func TestUpdateRejectsAnOffRouteStop(t *testing.T) {
 	}
 }
 
-// TestResavingAServiceUnchangedDoesNotMoveItsStops is the idempotency
-// guarantee: the coordinates a create returns, sent straight back as an update,
-// must land in the same place.
 func TestResavingAServiceUnchangedDoesNotMoveItsStops(t *testing.T) {
 	store := newFakeServiceStore()
 	rec := serveAs(t, store, svcOwner, http.MethodPost, "/api/services",
@@ -1005,9 +957,6 @@ func TestUnusableRouteGeometryIs500(t *testing.T) {
 	}
 }
 
-// TestEditingOneStopOverTheAPIDoesNotMoveTheOthers is the second half of the
-// idempotency guarantee: not "resave everything unchanged" but "change one stop
-// and the rest stay put", which is what a user dragging a single marker does.
 func TestEditingOneStopOverTheAPIDoesNotMoveTheOthers(t *testing.T) {
 	store := newFakeServiceStore()
 	rec := serveAs(t, store, svcOwner, http.MethodPost, "/api/services",

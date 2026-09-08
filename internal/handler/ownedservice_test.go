@@ -19,12 +19,11 @@ const (
 	vehicleTypeID = "00000000-0000-4105-8000-000000000001"
 )
 
-// fakeOwnedServiceStore is an in-memory handler.OwnedServiceStore.
 type fakeOwnedServiceStore struct {
-	services  map[string]transit.Service // by id
+	services  map[string]transit.Service
 	scenarios map[string]transit.Scenario
 	routes    map[string]transit.Route
-	stations  map[string][]transit.Station // by scenario id
+	stations  map[string][]transit.Station
 	vehicles  map[string]transit.VehicleType
 	failWith  error
 }
@@ -109,7 +108,6 @@ func (f *fakeOwnedServiceStore) ListStationsByScenario(_ context.Context, scenar
 	return f.stations[scenarioID], nil
 }
 
-// serviceBody builds a create/update payload with the parts a test varies.
 func serviceBody(scenarioSlug, routeSlug, vehicleID string, stopSlugs ...string) string {
 	stops := make([]string, len(stopSlugs))
 	for i, slug := range stopSlugs {
@@ -156,9 +154,6 @@ func TestCreateOwnedServiceStampsTheCallerAsOwner(t *testing.T) {
 	}
 }
 
-// A curated route is a public building block; someone else's private draft is
-// not. This is the CanReference / CanAccess split, and it is easy to get
-// backwards.
 func TestCreateOwnedServiceReferencesCuratedRoutesButNotPrivateOnes(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
@@ -181,8 +176,6 @@ func TestCreateOwnedServiceReferencesCuratedRoutesButNotPrivateOnes(t *testing.T
 	}
 }
 
-// Authoring a service into a scenario is mutating that scenario, so unlike
-// referencing a route it stays admin-only for curated data.
 func TestCreateOwnedServiceRefusesAScenarioTheCallerDoesNotOwn(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
@@ -204,8 +197,6 @@ func TestCreateOwnedServiceRefusesAScenarioTheCallerDoesNotOwn(t *testing.T) {
 	}
 }
 
-// Every NOT NULL foreign key gets a 422 naming the offending value rather than
-// an opaque 500 from the constraint.
 func TestCreateOwnedServiceRejectsUnknownReferences(t *testing.T) {
 	for _, tc := range []struct {
 		name, body string
@@ -251,8 +242,6 @@ func TestCreateOwnedServiceRejectsUnknownReferences(t *testing.T) {
 	}
 }
 
-// provenance is an editorial claim about where a service's numbers came from,
-// so a user cannot make it about their own work.
 func TestCreateOwnedServiceIgnoresClientSuppliedProvenance(t *testing.T) {
 	store := newFakeOwnedServiceStore()
 
@@ -272,9 +261,6 @@ func TestCreateOwnedServiceIgnoresClientSuppliedProvenance(t *testing.T) {
 	}
 }
 
-// Sequence numbers are renumbered from the caller's ordering: the PK is
-// (service_id, sequence), so sparse or duplicate numbers from a client would be
-// a constraint violation or a gap the compiler misreads.
 func TestCreateOwnedServiceRenumbersStopSequences(t *testing.T) {
 	store := newFakeOwnedServiceStore()
 
@@ -330,8 +316,6 @@ func TestOwnedServiceAnswers404ToStrangers(t *testing.T) {
 	}
 }
 
-// A curated seeded service has no owner, so it stays read-only for everyone but
-// admins — the ca-hsr services included.
 func TestCuratedServiceIsNotEditableByANonAdmin(t *testing.T) {
 	store := newFakeOwnedServiceStore()
 	store.services["curated-svc"] = transit.Service{ID: "curated-svc", Name: "HSR Express"}
@@ -369,9 +353,6 @@ func TestUpdateOwnedServiceKeepsIdentity(t *testing.T) {
 	}
 }
 
-// SPA-237 put a boarding-wait override on services but no write path for a
-// seeded one; this CRUD is that path, so the three states its convention
-// distinguishes have to survive the round trip.
 func TestOwnedServiceCarriesTheBoardingWaitOverride(t *testing.T) {
 	store := newFakeOwnedServiceStore()
 	store.services[ownedSvcID] = transit.Service{

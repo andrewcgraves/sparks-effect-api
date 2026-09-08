@@ -7,60 +7,17 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/physics"
 )
 
-// OffRouteThresholdM is how far a stop may sit from its route's alignment
-// before the write is refused. It is loose enough that a user pinning a station
-// building rather than the track centreline is not rejected.
-//
-// This is the one copy: the snap-stops preview flags at the same distance, and
-// a preview that warned at a different distance from the one the save enforced
-// would be worse than no warning — the user would fix what it complained about
-// and still be refused.
-//
-// The comparison is strict (offset > threshold), so a stop exactly on the
-// boundary saves. The preview draws the boundary the same way.
-//
-// It is a movement *budget*, and SPA-109's co-located-stop merge has to
-// reckon with a stop having spent up to all of it: two stops authored metres
-// apart can each snap up to this far and still miss a merge measured only on
-// where they landed. SPA-113 settled that by widening the merge radius by
-// each stop's OffsetM rather than by shrinking this number — see
-// effectiveMergeRadius and MaxMergeRadiusM in cluster.go, the latter of which
-// reuses this same 500 m as its ceiling.
 const OffRouteThresholdM = 500.0
 
-// ErrRouteGeometry marks a snap that failed because of the stored route rather
-// than the submitted stops. A caller mapping this to HTTP should answer 500,
-// not 422: the client has done nothing wrong and cannot fix it.
 var ErrRouteGeometry = errors.New("route geometry is unusable")
 
-// StopPlacementFaultKind names which placement rule a submitted service broke.
-// The values are the wire contract a client branches on, so they are stable
-// strings rather than an integer enum whose meaning depends on declaration
-// order.
 type StopPlacementFaultKind string
 
 const (
-	// OffRouteFault is a stop further than OffRouteThresholdM from the
-	// alignment. One stop is at fault.
-	OffRouteFault StopPlacementFaultKind = "off_route"
-	// ChainageOrderFault is an authored sequence that doubles back along the
-	// line — see FirstChainageOrderFault. Two adjacent stops are at fault.
+	OffRouteFault      StopPlacementFaultKind = "off_route"
 	ChainageOrderFault StopPlacementFaultKind = "chainage_order"
 )
 
-// FaultedStop identifies one stop a fault is about, and where it landed.
-//
-// Seq is the one field that always maps back to a row in what the client
-// submitted, since it is that stop's position in the request. Name and Slug are
-// reported alongside it for display and for a caller working from a stored
-// service, but neither is a reliable key on a refused write: the slug is minted
-// from the name (MintStopSlugs), so an edit that renames a stop reports a slug
-// the client has never seen, and a rejected create stores nothing under it.
-//
-// The json tags are here rather than on a handler copy of this struct because
-// the fields are the same either way, and a second struct to restate them is a
-// clone that can drift. The surrounding fault is not serialized directly —
-// see StopPlacementFault.Backwards.
 type FaultedStop struct {
 	Seq       int     `json:"seq"`
 	Name      string  `json:"name"`
@@ -69,42 +26,14 @@ type FaultedStop struct {
 	OffsetM   float64 `json:"offset_m"`
 }
 
-// StopPlacementFault is a refusal SnapToRoute can attribute to specific stops,
-// as opposed to ErrRouteGeometry, which is the stored route's fault.
-//
-// It exists so the placement rules have a machine-readable form. The prose from
-// Error() remains what a user reads, but it is no longer the contract: SPA-146
-// recovered stop identities from that wording with regular expressions, which
-// made every rewording a silent break of the authoring UI's per-stop feedback.
-//
-// A caller mapping this to HTTP should answer 422 — the client submitted stops
-// it can move.
 type StopPlacementFault struct {
-	Kind      StopPlacementFaultKind
-	RouteSlug string
-	// ThresholdM is the distance the fault was measured against. It is echoed
-	// for OffRouteFault only, so a client renders the boundary the server
-	// applied rather than keeping its own copy of the number.
+	Kind       StopPlacementFaultKind
+	RouteSlug  string
 	ThresholdM float64
-	// Backwards records that the sequence had established a descending
-	// direction along the line before it doubled back. It decides only how the
-	// message reads — running against the drawn direction is not itself a
-	// fault — and is deliberately absent from the wire contract.
-	Backwards bool
-	// Stops are the offending stops in authored order: one for OffRouteFault,
-	// the adjacent pair for ChainageOrderFault.
-	Stops []FaultedStop
+	Backwards  bool
+	Stops      []FaultedStop
 }
 
-// Error renders the fault as the sentence a user reads. The wording is
-// unchanged from when it was the whole of the refusal, so nothing that displays
-// it has to change; it is simply no longer what a client reasons about.
-//
-// Each kind is matched together with the stops its message needs, and anything
-// that satisfies neither falls back to a bare sentence. A fault this package
-// did not construct is the only way to get there, but the alternative is
-// indexing into Stops on faith, and a message that confidently names the wrong
-// rule is worse than one that names none.
 func (f *StopPlacementFault) Error() string {
 	switch {
 	case f.Kind == OffRouteFault && len(f.Stops) >= 1:
@@ -124,42 +53,6 @@ func (f *StopPlacementFault) Error() string {
 	}
 }
 
-// SnapToRoute projects every stop onto rt's alignment and rewrites it in place
-// with where it landed: snapped lat/lng, chainage along the line, and how far
-// it moved to get there.
-//
-// This is what makes a stored stop have one coordinate rather than three. The
-// raw authored position is deliberately not retained — the authoring UI holds
-// it in its own draft state for as long as the user is looking at it, and after
-// that the only position anything should reason about is the one on the line.
-// A persisted snap can go stale, and the comment here used to say it could not,
-// on the grounds that route geometry is immutable. It is not: UpdateOwnedRoute
-// rewrites a route's geometry and re-snaps nothing that references it, so a
-// stop's stored ChainageM and OffsetM both describe an alignment that may since
-// have moved. Nothing re-runs this on the dependent services.
-//
-// What follows from that is where chainage is read rather than what is stored
-// here: CompileServicePhysics reports an edge's chainages from the projection it
-// performs at compile time, against the geometry as it stands, precisely so a
-// redrawn route does not leave a progress stub following a shape that no longer
-// exists (SPA-264). MergeColocatedStops, which widens its merge radius by the
-// stored OffsetM, has the same exposure and has not been revisited.
-//
-// It rejects, without mutating the service, when:
-//
-//   - a stop lands more than OffRouteThresholdM from the alignment, which means
-//     the user pointed at somewhere the route does not go; or
-//   - chainage runs against the authored sequence, which means the compiler
-//     would build a different stopping pattern from the one the service states.
-//
-// rt must be the route svc references; SnapToRoute does not check that, since
-// the caller resolved it. Both refusals come back as a *StopPlacementFault,
-// which names the offending stops in fields and whose message is safe to return
-// to the client verbatim. Only ErrRouteGeometry is anything else.
-//
-// Stop identity in the fault is whatever svc carries, so a caller that wants
-// slugs in it must have minted them (MintStopSlugs) first — as the write path
-// does, well before it snaps.
 func (s *UserService) SnapToRoute(rt Route) error {
 	line, err := ToPhysicsLine(rt.Geometry)
 	if err != nil {
@@ -222,39 +115,6 @@ func (s *UserService) SnapToRoute(rt Route) error {
 	return nil
 }
 
-// FirstChainageOrderFault finds the first place a sequence of chainages
-// contradicts the direction the sequence itself established. It reports the
-// index i of the earlier stop of the offending pair (so the pair is i, i+1),
-// whether the established direction was backwards along the line (which decides
-// only how the fault reads), and whether there is a fault at all.
-//
-// The rule is monotonicity, not ascent, and the distinction is load-bearing:
-//
-// physics.ProjectStops sorts stops by chainage before building spans, so the
-// pattern the compiler builds is the chainage-sorted one whatever order the
-// author gave. That is only safe when sorting cannot change which stops are
-// adjacent. For a monotonic sequence it cannot: sorting a descending sequence
-// reverses it, and reversing a list preserves every adjacent pair. Compiled
-// edges are emitted in both directions, each carrying the dwell of the end it
-// arrives at, so a reversed span list yields the same graph. A service authored
-// east-to-west along a line drawn west-to-east is therefore an ordinary
-// service, not a mistake, and rejecting it would make westbound patterns
-// unauthorable on an eastward-drawn alignment.
-//
-// A sequence that doubles back is the case that genuinely breaks: authored
-// A→C→B has adjacent pairs {A,C} and {C,B}, while sorting yields A→B→C with
-// pairs {A,B} and {B,C}. Different pairs, so a different graph — the service
-// says one thing and the compiler builds another, with nothing reporting it.
-// That is what this refuses.
-//
-// Stops at equal chainage neither set nor break the direction. Two stops
-// projecting to the same point is its own problem (it compiles to a zero-length
-// span), but it is not an ordering disagreement, and reporting it as one would
-// name the wrong fault.
-//
-// It is exported so the snap preview reports against the same rule the write
-// path enforces. A preview that called a westbound service out of order would
-// send the user to fix something that was never going to be refused.
 func FirstChainageOrderFault(chainageM []float64) (i int, backwards, faulty bool) {
 	direction := 0 // 0 until a pair with distinct chainage establishes one
 	for i := 0; i < len(chainageM)-1; i++ {
@@ -275,9 +135,6 @@ func FirstChainageOrderFault(chainageM []float64) (i int, backwards, faulty bool
 	return 0, false, false
 }
 
-// formatDistance renders a distance for a user-facing message: metres up close,
-// kilometres once that stops being readable. A stop 3200 m off the alignment is
-// more usefully described as 3.2 km.
 func formatDistance(m float64) string {
 	if m >= 1000 {
 		return fmt.Sprintf("%.1f km", m/1000)

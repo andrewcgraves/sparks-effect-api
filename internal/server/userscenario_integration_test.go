@@ -12,14 +12,6 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// This file exercises SPA-81 end-to-end against a real database and the real
-// mux: a user assembles a curated set of their own saved services into a
-// scenario, reads it back, updates membership, and deletes it — and a
-// stranger can do none of that.
-
-// provisionAdminAndLogin provisions the bootstrap admin directly through the
-// repository (mirroring main's bootstrap path) and logs in, returning its
-// bearer token.
 func provisionAdminAndLogin(t *testing.T, h http.Handler, repo *postgres.Repo) string {
 	t.Helper()
 	provisionAdmin(t, repo, "admin@example.com", "admin-password")
@@ -30,8 +22,6 @@ func provisionAdminAndLogin(t *testing.T, h http.Handler, repo *postgres.Repo) s
 	return token
 }
 
-// provisionMember creates and logs in a non-admin account, returning its
-// bearer token.
 func provisionMember(t *testing.T, h http.Handler, adminToken, email, password string) string {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/users",
@@ -51,13 +41,6 @@ func provisionMember(t *testing.T, h http.Handler, adminToken, email, password s
 	return token
 }
 
-// createUserServiceOverAPI creates a user-authored service through the real
-// POST /api/services handler and returns its id.
-//
-// The route is named by slug, and the stops sit on the alignment the callers
-// ingest (lat 37, running west to east): stops are snapped and range-checked
-// against the route on write, so a service cannot be authored against a line it
-// is nowhere near.
 func createUserServiceOverAPI(t *testing.T, h http.Handler, token, routeSlug, name string) string {
 	t.Helper()
 	body := `{
@@ -80,8 +63,6 @@ func createUserServiceOverAPI(t *testing.T, h http.Handler, token, routeSlug, na
 	return svc.ID
 }
 
-// AC1 + AC2: a user assembles multiple of their own saved services into a
-// scenario and reads exactly that curated set back — nothing auto-included.
 func TestIntegration_UserScenarioAssembleAndReadBack(t *testing.T) {
 	h, repo := integrationServer(t)
 	adminToken := provisionAdminAndLogin(t, h, repo)
@@ -124,8 +105,6 @@ func TestIntegration_UserScenarioAssembleAndReadBack(t *testing.T) {
 	}
 }
 
-// AC3: only the owner may update membership or delete the scenario; a
-// stranger sees 404 rather than the resource or its contents.
 func TestIntegration_UserScenarioOnlyOwnerCanMutate(t *testing.T) {
 	h, repo := integrationServer(t)
 	adminToken := provisionAdminAndLogin(t, h, repo)
@@ -185,8 +164,6 @@ func TestIntegration_UserScenarioOnlyOwnerCanMutate(t *testing.T) {
 	}
 }
 
-// A scenario may only curate services the caller owns — it cannot reach into
-// another user's saved services even by guessing their id.
 func TestIntegration_UserScenarioCannotCurateAnotherUsersService(t *testing.T) {
 	h, repo := integrationServer(t)
 	adminToken := provisionAdminAndLogin(t, h, repo)

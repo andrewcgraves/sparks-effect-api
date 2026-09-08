@@ -15,10 +15,8 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// fakeRouteStore is an in-memory stand-in for the repository slice route
-// ingestion uses, so the handler's behaviour is testable without Postgres.
 type fakeRouteStore struct {
-	routes    map[string]transit.Route // by slug
+	routes    map[string]transit.Route
 	scenarios map[string]transit.Scenario
 	createErr error
 	getErr    error
@@ -76,7 +74,6 @@ func (f *fakeRouteStore) ListCuratedRouteSummaries(_ context.Context) ([]transit
 	return out, nil
 }
 
-// validRoute is a three-point alignment with physics on both of its segments.
 const validRoute = `{
   "type": "LineString",
   "coordinates": [[-122.4, 37.79], [-122.3, 37.70], [-122.2, 37.60]],
@@ -90,7 +87,6 @@ const validRoute = `{
   }
 }`
 
-// The headline acceptance criterion: an admin posts a route and gets a slug.
 func TestCreateRouteReturnsASlug(t *testing.T) {
 	store := newFakeRouteStore()
 	rec := postJSON(t, handler.CreateRoute(store), "/api/admin/routes", validRoute)
@@ -119,8 +115,6 @@ func TestCreateRouteReturnsASlug(t *testing.T) {
 	}
 }
 
-// Geometry and per-segment physics must both survive the round trip — this is
-// the "persists and can be read back" criterion at the handler seam.
 func TestCreateRoutePersistsGeometryAndPhysics(t *testing.T) {
 	store := newFakeRouteStore()
 	rec := postJSON(t, handler.CreateRoute(store), "/api/admin/routes", validRoute)
@@ -197,8 +191,6 @@ func TestCreateRouteRejectsInvalidPayloads(t *testing.T) {
 	}
 }
 
-// A route may opt into a scenario by slug; the handler resolves it to an ID
-// rather than trusting a client-supplied one.
 func TestCreateRouteAttachesToScenarioBySlug(t *testing.T) {
 	store := newFakeRouteStore()
 	body := `{"type":"LineString","coordinates":[[-122,37],[-121,37]],
@@ -218,8 +210,6 @@ func TestCreateRouteAttachesToScenarioBySlug(t *testing.T) {
 	}
 }
 
-// Slugs address routes globally, so a collision must be reported rather than
-// silently overwriting the existing alignment.
 func TestCreateRouteRejectsDuplicateSlug(t *testing.T) {
 	store := newFakeRouteStore()
 	if rec := postJSON(t, handler.CreateRoute(store), "/api/admin/routes", validRoute); rec.Code != http.StatusCreated {
@@ -235,7 +225,6 @@ func TestCreateRouteRejectsDuplicateSlug(t *testing.T) {
 	}
 }
 
-// An explicit slug overrides the one derived from the name.
 func TestCreateRouteHonoursExplicitSlug(t *testing.T) {
 	store := newFakeRouteStore()
 	body := `{"type":"LineString","coordinates":[[-122,37],[-121,37]],
@@ -249,7 +238,6 @@ func TestCreateRouteHonoursExplicitSlug(t *testing.T) {
 	}
 }
 
-// A storage failure must surface as a 500, not a misleading success.
 func TestCreateRouteReportsStorageFailure(t *testing.T) {
 	store := newFakeRouteStore()
 	store.createErr = errors.New("database is down")
@@ -264,8 +252,6 @@ func TestCreateRouteReportsStorageFailure(t *testing.T) {
 	}
 }
 
-// A bbox is legal GeoJSON, so a standards-conformant export must not be turned
-// away by the strict field decoding that catches misspelled physics keys.
 func TestCreateRouteAcceptsGeoJSONBBox(t *testing.T) {
 	store := newFakeRouteStore()
 	body := `{"type":"LineString","bbox":[-122,37,-121,38],
@@ -285,8 +271,6 @@ func getRoute(t *testing.T, h http.Handler, slug string) *httptest.ResponseRecor
 	return rec
 }
 
-// The headline acceptance criterion: geometry, per-segment physics, and
-// metadata all come back for a known slug.
 func TestRouteBySlugReturnsGeometryPhysicsAndMetadata(t *testing.T) {
 	store := newFakeRouteStore()
 	if rec := postJSON(t, handler.CreateRoute(store), "/api/admin/routes", validRoute); rec.Code != http.StatusCreated {
@@ -319,8 +303,6 @@ func TestRouteBySlugReturnsGeometryPhysicsAndMetadata(t *testing.T) {
 	}
 }
 
-// The second acceptance criterion: an unknown slug is a 404, not a 200 with an
-// empty body or a 500.
 func TestRouteBySlugUnknownSlugIsNotFound(t *testing.T) {
 	store := newFakeRouteStore()
 	rec := getRoute(t, handler.RouteBySlug(store), "no-such-route")
@@ -329,8 +311,6 @@ func TestRouteBySlugUnknownSlugIsNotFound(t *testing.T) {
 	}
 }
 
-// A storage failure must surface as a 500, not a misleading 404 or a leaked
-// database error.
 func TestRouteBySlugReportsStorageFailure(t *testing.T) {
 	store := newFakeRouteStore()
 	store.getErr = errors.New("database is down")
@@ -351,10 +331,6 @@ func listRoutes(t *testing.T, h http.Handler) *httptest.ResponseRecorder {
 	return rec
 }
 
-// The headline acceptance criterion: the list carries exactly what a route
-// picker needs to offer a choice — slug, name, mode — and nothing else. The
-// geometry is large and irrelevant to choosing, and the internal UUID must stay
-// off the wire since routes are addressed by slug.
 func TestRoutesListsIngestedRoutesForAPicker(t *testing.T) {
 	store := newFakeRouteStore()
 	if rec := postJSON(t, handler.CreateRoute(store), "/api/admin/routes", validRoute); rec.Code != http.StatusCreated {
@@ -366,8 +342,6 @@ func TestRoutesListsIngestedRoutesForAPicker(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body.String())
 	}
 
-	// Decoded loosely rather than into the response type, so a field that is
-	// meant to be absent is actually proven absent rather than silently dropped.
 	var got []map[string]any
 	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -386,8 +360,6 @@ func TestRoutesListsIngestedRoutesForAPicker(t *testing.T) {
 	}
 }
 
-// An empty collection is an empty list, not a null — a picker iterating the
-// response should not have to special-case "no routes ingested yet".
 func TestRoutesReturnsAnEmptyListWhenNothingIsIngested(t *testing.T) {
 	rec := listRoutes(t, handler.Routes(newFakeRouteStore()))
 	if rec.Code != http.StatusOK {
@@ -398,8 +370,6 @@ func TestRoutesReturnsAnEmptyListWhenNothingIsIngested(t *testing.T) {
 	}
 }
 
-// A storage failure must surface as a 500 rather than an empty list, which a
-// picker would render as "no routes exist".
 func TestRoutesReportsStorageFailure(t *testing.T) {
 	store := newFakeRouteStore()
 	store.listErr = errors.New("database is down")

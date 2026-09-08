@@ -5,16 +5,10 @@ import (
 	"testing"
 )
 
-// stationsAt builds a graph whose nodes sit at the given positions. Only the
-// node set matters here — the reach check never looks at an edge.
 func stationsAt(positions ...GraphNode) *TransitGraph {
 	return &TransitGraph{Nodes: positions}
 }
 
-// northOf returns a point km kilometres due north of the origin below. Going
-// north rather than east keeps the conversion exact at any latitude: a degree
-// of latitude is the same distance everywhere, while a degree of longitude is
-// not.
 const (
 	reachLat    = 37.7
 	reachLng    = -122.4
@@ -25,9 +19,6 @@ func northOf(km float64) GraphNode {
 	return GraphNode{Slug: "far", Lat: reachLat + km/kmPerDegLat, Lng: reachLng}
 }
 
-// The boundary, per mode, at the budgets the UI offers. A station just inside
-// the radius is a request worth enqueueing; one just outside is provably
-// unreachable and is the whole point of the check.
 func TestCheckOriginReach_theBoundaryPerMode(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -67,8 +58,6 @@ func TestCheckOriginReach_theBoundaryPerMode(t *testing.T) {
 	}
 }
 
-// The comparison is inclusive: a station exactly at the limit is reachable in
-// exactly the budget, so refusing it would refuse a request that works.
 func TestCheckOriginReach_aStationExactlyAtTheLimitIsInRange(t *testing.T) {
 	got, ok := CheckOriginReach(stationsAt(northOf(2.5)), reachLat, reachLng, TravelModeWalk, 30)
 	if !ok {
@@ -79,8 +68,6 @@ func TestCheckOriginReach_aStationExactlyAtTheLimitIsInRange(t *testing.T) {
 	}
 }
 
-// One station in range is enough, however far away the rest are — and it is the
-// nearest that gets reported, not whichever the graph happened to list first.
 func TestCheckOriginReach_reportsTheNearestStation(t *testing.T) {
 	graph := stationsAt(
 		GraphNode{Slug: "far", Lat: reachLat + 1, Lng: reachLng},
@@ -100,8 +87,6 @@ func TestCheckOriginReach_reportsTheNearestStation(t *testing.T) {
 	}
 }
 
-// Out of range still names the nearest station and how far it was, because
-// that is what turns the refusal into something a person can act on.
 func TestCheckOriginReach_outOfRangeStillDescribesTheNearest(t *testing.T) {
 	graph := stationsAt(
 		GraphNode{Slug: "further", Lat: reachLat + 2, Lng: reachLng},
@@ -123,9 +108,6 @@ func TestCheckOriginReach_outOfRangeStillDescribesTheNearest(t *testing.T) {
 	}
 }
 
-// A graph the check cannot see any stations in tells us nothing about the
-// origin, so it must not be read as "out of range". Each of these is a
-// different request problem, and none of them is this one.
 func TestCheckOriginReach_unanswerableWhenThereIsNothingToMeasureAgainst(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -145,13 +127,6 @@ func TestCheckOriginReach_unanswerableWhenThereIsNothingToMeasureAgainst(t *test
 	}
 }
 
-// Every mode TravelMode.Valid accepts has a speed here. Without this, adding a
-// mode would silently make the check unanswerable for it — permissive, so
-// nothing would break loudly, and the guard would just stop applying.
-//
-// It walks travelModes rather than a list written out here, because a list
-// written out here is one more thing a new mode has to be added to, and
-// forgetting it is exactly the failure this test exists to catch.
 func TestCheckOriginReach_coversEveryValidMode(t *testing.T) {
 	for _, mode := range travelModes {
 		if !mode.Valid() {

@@ -13,13 +13,6 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// OwnedRouteStore is the slice of the repository the owner-scoped route CRUD
-// needs. It is narrower than transit.Repository so these handlers can be tested
-// against a small fake.
-//
-// GetRouteBySlug is unfiltered on purpose: routes.slug is globally unique
-// across curated and owned rows, so minting a slug has to be able to see the
-// whole namespace. Ownership is decided here, against the row it returns.
 type OwnedRouteStore interface {
 	CreateRoute(ctx context.Context, rt transit.Route) error
 	GetRouteBySlug(ctx context.Context, slug string) (transit.Route, bool, error)
@@ -30,21 +23,8 @@ type OwnedRouteStore interface {
 	GetScenarioBySlug(ctx context.Context, slug string) (transit.Scenario, bool, error)
 }
 
-// maxRouteBodyBytes caps a request body. Route geometry is the largest payload
-// this API accepts by a wide margin — a real alignment runs to thousands of
-// coordinates — so the ceiling is higher than the 1 MiB the other authoring
-// endpoints use, while still bounding what a single request can cost.
-const maxRouteBodyBytes = 8 << 20 // 8 MiB
+const maxRouteBodyBytes = 8 << 20
 
-// CreateOwnedRoute persists an alignment the caller owns.
-//
-// It shares route.Validate and buildRouteFromIngest with the admin ingestion
-// endpoint, and differs in exactly two ways. The slug is always minted from the
-// name rather than honoured from the payload: an admin curating platform data
-// is choosing a public address, while a user naming their own draft is not, and
-// letting them claim an arbitrary slug would let them squat one. And the route
-// is stamped with the caller's id, which is what keeps it out of the public
-// picker.
 func CreateOwnedRoute(store OwnedRouteStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := auth.UserFrom(r.Context())
@@ -98,12 +78,6 @@ func CreateOwnedRoute(store OwnedRouteStore) http.HandlerFunc {
 	}
 }
 
-// MyRoutes returns the alignments owned by the authenticated caller, standalone
-// and scenario-bound alike.
-//
-// The owner ID comes from the request context — the identity the middleware
-// resolved from the bearer token — and never from the request itself, so there
-// is no parameter a caller could set to read someone else's rows.
 func MyRoutes(store OwnedRouteStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := auth.UserFrom(r.Context())
@@ -123,8 +97,6 @@ func MyRoutes(store OwnedRouteStore) http.HandlerFunc {
 	}
 }
 
-// GetOwnedRoute returns one of the caller's own alignments, whole — geometry
-// and per-segment physics included, unlike the summary the list returns.
 func GetOwnedRoute(store OwnedRouteStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rt, ok := loadOwnedRoute(w, r, store)
@@ -135,13 +107,6 @@ func GetOwnedRoute(store OwnedRouteStore) http.HandlerFunc {
 	}
 }
 
-// UpdateOwnedRoute rewrites an alignment the caller owns. The payload is the
-// same shape a create takes, so a client edits by reading, changing, and
-// sending the whole thing back.
-//
-// The slug is not re-derived from a changed name: it is the route's address,
-// and re-slugging would break every link to it and orphan the travel-time
-// segments that name it.
 func UpdateOwnedRoute(store OwnedRouteStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rt, ok := loadOwnedRoute(w, r, store)
@@ -172,13 +137,6 @@ func UpdateOwnedRoute(store OwnedRouteStore) http.HandlerFunc {
 	}
 }
 
-// DeleteOwnedRoute removes an alignment the caller owns, once nothing depends
-// on it.
-//
-// The dependency check is not politeness. user_services.route_id is ON DELETE
-// CASCADE, so an unchecked delete here would silently destroy saved services —
-// including other people's, since a curated route is referenceable by anyone.
-// Refusing with a 409 makes that cascade unreachable through the API.
 func DeleteOwnedRoute(store OwnedRouteStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rt, ok := loadOwnedRoute(w, r, store)
@@ -205,17 +163,6 @@ func DeleteOwnedRoute(store OwnedRouteStore) http.HandlerFunc {
 	}
 }
 
-// loadOwnedRoute resolves the {slug} path value and applies the ownership rule,
-// writing the response itself and reporting ok=false when the caller should
-// stop.
-//
-// A route the caller does not own answers 404 rather than 403, the convention
-// the authored-service and authored-scenario handlers already follow: unlike
-// the curated data, the set of authored slugs is not public knowledge, and a
-// slug derived from a user-chosen name is guessable enough that 403 would
-// confirm it exists. A curated route lands here too — its owner is nil, so
-// CanAccess admits only admins — which is what keeps the seeded alignments
-// read-only for everyone else.
 func loadOwnedRoute(w http.ResponseWriter, r *http.Request, store OwnedRouteStore) (transit.Route, bool) {
 	user, ok := auth.UserFrom(r.Context())
 	if !ok {
@@ -235,14 +182,6 @@ func loadOwnedRoute(w http.ResponseWriter, r *http.Request, store OwnedRouteStor
 	return rt, true
 }
 
-// resolveOwnScenarioOrFail turns an optional scenario slug into a scenario id
-// the caller may author inside. An empty slug is not an error — it yields a nil
-// (standalone) scenario.
-//
-// This is the enforcement point for the ownership-uniformity invariant on the
-// create and update paths. Note it is CanAccess, not CanReference: a curated
-// scenario is a public building block to *reference*, but authoring a route
-// into one is mutating it, and that stays admin-only.
 func resolveOwnScenarioOrFail(
 	w http.ResponseWriter, r *http.Request, store OwnedRouteStore,
 	user transit.User, slug string,
@@ -265,13 +204,6 @@ func resolveOwnScenarioOrFail(
 	return &sc.ID, true
 }
 
-// decodeRouteIngest reads and validates the GeoJSON ingestion payload shared by
-// both create paths.
-//
-// Unknown fields are rejected rather than ignored, as they are for admin
-// ingestion: a misspelled physics key (cant__mm) would otherwise decode to a
-// zero-valued segment and sail through range validation as tangent, level
-// track — silently storing physics the author never wrote.
 func decodeRouteIngest(w http.ResponseWriter, r *http.Request) (route.Ingest, bool) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxRouteBodyBytes)
 
@@ -299,18 +231,6 @@ func decodeRouteIngest(w http.ResponseWriter, r *http.Request) (route.Ingest, bo
 	return in, true
 }
 
-// mintRouteSlug derives a URL-safe slug from name, appending -2, -3, ... until
-// it finds one no route is using. It returns "" when the name slugifies to
-// nothing, which the caller reports as a 422.
-//
-// The namespace it probes spans curated and owned routes alike, because
-// routes.slug is globally unique: a user naming their draft "Phase 1" gets
-// phase-1-2 rather than a constraint violation.
-//
-// This is check-then-insert, so two concurrent creates of the same name can
-// both see a slug free and the loser will fail the UNIQUE constraint with a
-// 500. Acceptable at present scale, and the same trade mintSlug already makes;
-// the constraint is what keeps it correct.
 func mintRouteSlug(ctx context.Context, store OwnedRouteStore, name string) (string, error) {
 	base := route.Slugify(name)
 	if base == "" {

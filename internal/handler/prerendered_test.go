@@ -14,9 +14,6 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// preNow anchors every timestamp in this file, so "the member changed after
-// the entry was curated" is a fact about the fixtures rather than about how
-// long the test took to run.
 var preNow = time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
 
 const preScenarioSlug = "ca-hsr"
@@ -28,24 +25,13 @@ var (
 	preUserToken = "prerendered-user-token"
 )
 
-// samplePayload stands in for a real isochrone payload. Its shape is
-// deliberately arbitrary: the API stores and serves these opaquely, so a test
-// that used a "correct" GeoJSON shape would be asserting a contract this
-// repository does not have.
 const samplePayload = `{"contours":[{"minutes":30,"polygon":"opaque"}],"note":"not parsed by the API"}`
 
-// fakePrerenderedStore is an in-memory handler.PrerenderedStore.
-//
-// It mirrors the one thing about the real store that the endpoints' contract
-// depends on: the list read does not carry payloads. Returning them here would
-// let a handler that forgot to drop Result pass a test the Postgres store
-// would fail, which is precisely the regression these tests exist to catch.
 type fakePrerenderedStore struct {
-	scenarios map[string]transit.Scenario            // by slug
-	members   map[string][]transit.ServiceMembership // by scenario id
-	entries   map[string]transit.PrerenderedIsochrone
-	order     []string // insertion order, standing in for ORDER BY created_at
-
+	scenarios   map[string]transit.Scenario
+	members     map[string][]transit.ServiceMembership
+	entries     map[string]transit.PrerenderedIsochrone
+	order       []string
 	scenarioErr error
 	membersErr  error
 	listErr     error
@@ -87,8 +73,7 @@ func (f *fakePrerenderedStore) ListPrerenderedIsochronesByScenario(_ context.Con
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
-	// Deliberately nil, not [], when there is nothing: the [] on the wire must
-	// be the handler's guarantee and not an accident of what the store returned.
+
 	var out []transit.PrerenderedIsochrone
 	for _, id := range f.order {
 		p := f.entries[id]
@@ -123,8 +108,6 @@ func (f *fakePrerenderedStore) CreatePrerenderedIsochrone(_ context.Context, p *
 	return nil
 }
 
-// put seeds an entry directly, for the read tests that need rows without
-// curating them through the admin endpoint first.
 func (f *fakePrerenderedStore) put(p transit.PrerenderedIsochrone) transit.PrerenderedIsochrone {
 	if p.ScenarioSlug == "" {
 		p.ScenarioSlug = preScenarioSlug
@@ -137,8 +120,6 @@ func (f *fakePrerenderedStore) put(p transit.PrerenderedIsochrone) transit.Prere
 	return p
 }
 
-// seededEntry is a curated entry that is current: its snapshot names exactly
-// the scenario's members, all of which last changed before it was curated.
 func seededEntry(id, label string) transit.PrerenderedIsochrone {
 	return transit.PrerenderedIsochrone{
 		ID:                 id,
@@ -154,11 +135,6 @@ func seededEntry(id, label string) transit.PrerenderedIsochrone {
 	}
 }
 
-// prerenderedMux registers the three endpoints the way server.New does: the
-// two reads open, the write behind auth.RequireAdmin. The gate is composed
-// here rather than assumed away because "who may curate one" is half the
-// contract of the POST, and the handler itself deliberately does not check —
-// it trusts its registration, so the registration is what a test must include.
 func prerenderedMux(store handler.PrerenderedStore) *http.ServeMux {
 	lookup := func(_ context.Context, tokenHash string) (transit.User, bool, error) {
 		switch tokenHash {
@@ -178,8 +154,6 @@ func prerenderedMux(store handler.PrerenderedStore) *http.ServeMux {
 	return mux
 }
 
-// preRequest serves one request through that mux, with an optional bearer
-// token. An empty token is an anonymous caller.
 func preRequest(t *testing.T, store handler.PrerenderedStore, method, target, token, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	var r *http.Request
@@ -197,9 +171,6 @@ func preRequest(t *testing.T, store handler.PrerenderedStore, method, target, to
 	return rec
 }
 
-// decodePrerenderedList decodes a response body as raw JSON objects, so a test can ask
-// whether a key is present at all rather than whether a struct field ended up
-// zero — the difference the list contract turns on.
 func decodePrerenderedList(t *testing.T, rec *httptest.ResponseRecorder) []map[string]any {
 	t.Helper()
 	var out []map[string]any
@@ -226,9 +197,6 @@ func listPrerendered(t *testing.T, store handler.PrerenderedStore) *httptest.Res
 
 // --- list ---
 
-// The list is metadata only. Payloads run 300-500KB apiece, so a list that
-// carried them would be megabytes of data the caller discards to render a row
-// of labels — and the store's query does not even select the column.
 func TestPrerenderedIsochrones_200_listsMetadataWithoutResult(t *testing.T) {
 	store := newFakePrerenderedStore()
 	store.put(seededEntry("entry-1", "San Jose — 240 min by bike"))
@@ -266,8 +234,6 @@ func TestPrerenderedIsochrones_200_listsMetadataWithoutResult(t *testing.T) {
 	}
 }
 
-// A scenario with nothing curated answers [], never null. A client mapping
-// over the response should not have to special-case an absent list.
 func TestPrerenderedIsochrones_200_emptyScenarioReturnsEmptyArray(t *testing.T) {
 	rec := listPrerendered(t, newFakePrerenderedStore())
 	if rec.Code != http.StatusOK {
@@ -278,8 +244,6 @@ func TestPrerenderedIsochrones_200_emptyScenarioReturnsEmptyArray(t *testing.T) 
 	}
 }
 
-// An unknown slug is a mistake the caller made; an empty list would say the
-// scenario exists and has nothing, which is a different fact.
 func TestPrerenderedIsochrones_404_unknownScenario(t *testing.T) {
 	rec := preRequest(t, newFakePrerenderedStore(), http.MethodGet,
 		"/api/scenarios/no-such-scenario/prerendered-isochrones", "", "")
@@ -290,8 +254,6 @@ func TestPrerenderedIsochrones_404_unknownScenario(t *testing.T) {
 
 // --- detail ---
 
-// The detail read is the one that exists to move a payload, and it serves it
-// back exactly as stored — the API neither produced nor parsed it.
 func TestPrerenderedIsochrone_200_returnsFullResult(t *testing.T) {
 	store := newFakePrerenderedStore()
 	store.put(seededEntry("entry-1", "San Jose — 240 min by bike"))
@@ -316,8 +278,6 @@ func TestPrerenderedIsochrone_200_returnsFullResult(t *testing.T) {
 		t.Fatal("detail response carries no result payload")
 	}
 
-	// Compared as decoded JSON rather than as bytes: the payload must survive
-	// the round trip semantically, and only the encoder decides its spacing.
 	var want, have any
 	if err := json.Unmarshal([]byte(samplePayload), &want); err != nil {
 		t.Fatalf("unmarshal fixture: %v", err)
@@ -349,8 +309,6 @@ func TestPrerenderedIsochrone_404_unknownID(t *testing.T) {
 
 // --- outdated, computed on read ---
 
-// The membership arm: the scenario gained a service after the entry was
-// curated, so the snapshot no longer describes it.
 func TestPrerenderedIsochrones_200_outdatedWhenMembershipChanged(t *testing.T) {
 	store := newFakePrerenderedStore()
 	store.put(seededEntry("entry-1", "curated before svc-2 existed"))
@@ -363,8 +321,6 @@ func TestPrerenderedIsochrones_200_outdatedWhenMembershipChanged(t *testing.T) {
 	}
 }
 
-// A member that was deleted cascades out of membership without touching any
-// timestamp, which is the case timestamps alone cannot see (SPA-116).
 func TestPrerenderedIsochrones_200_outdatedWhenMemberRemoved(t *testing.T) {
 	store := newFakePrerenderedStore()
 	store.put(seededEntry("entry-1", "curated while svc-2 was a member"))
@@ -375,8 +331,6 @@ func TestPrerenderedIsochrones_200_outdatedWhenMemberRemoved(t *testing.T) {
 	}
 }
 
-// The fallback arm: membership is unchanged, but a still-present member was
-// edited after the entry was curated, so the payload predates that edit.
 func TestPrerenderedIsochrones_200_outdatedWhenMemberEditedAfterCreation(t *testing.T) {
 	store := newFakePrerenderedStore()
 	store.put(seededEntry("entry-1", "curated before svc-2 was edited"))
@@ -399,9 +353,6 @@ func TestPrerenderedIsochrones_200_notOutdatedWhenFresh(t *testing.T) {
 	}
 }
 
-// An outdated entry is reported, never withheld: the payload is still the
-// thing the caller asked for, and "this was computed before the scenario
-// changed" is a caption rather than a refusal.
 func TestPrerenderedIsochrone_200_outdatedEntryIsStillServedWithItsPayload(t *testing.T) {
 	store := newFakePrerenderedStore()
 	store.put(seededEntry("entry-1", "curated before the scenario changed"))
@@ -497,8 +448,6 @@ func TestCreatePrerenderedIsochrone_201_admin(t *testing.T) {
 	}
 }
 
-// The payload is opaque: anything that is JSON at all is accepted, because
-// this API does not produce isochrones and has no shape to check one against.
 func TestCreatePrerenderedIsochrone_201_acceptsAnyResultShape(t *testing.T) {
 	for _, payload := range []string{
 		`{"anything":"at all"}`,
@@ -557,8 +506,6 @@ func TestCreatePrerenderedIsochrone_404_unknownScenario(t *testing.T) {
 	}
 }
 
-// An entry curated through the endpoint is immediately listable and fetchable,
-// which is the only proof that the write and the two reads agree on identity.
 func TestCreatePrerenderedIsochrone_201_isImmediatelyReadable(t *testing.T) {
 	store := newFakePrerenderedStore()
 	created := createPrerendered(t, store, preAdminTok, createPrerenderedBody)
@@ -586,7 +533,6 @@ func TestCreatePrerenderedIsochrone_201_isImmediatelyReadable(t *testing.T) {
 
 // --- helpers ---
 
-// outdatedOf reads the outdated flag of the nth listed entry.
 func outdatedOf(t *testing.T, rec *httptest.ResponseRecorder, n int) bool {
 	t.Helper()
 	if rec.Code != http.StatusOK {
@@ -603,7 +549,6 @@ func outdatedOf(t *testing.T, rec *httptest.ResponseRecorder, n int) bool {
 	return flag
 }
 
-// jsonEqual compares two decoded JSON values structurally.
 func jsonEqual(a, b any) bool {
 	x, errA := json.Marshal(a)
 	y, errB := json.Marshal(b)

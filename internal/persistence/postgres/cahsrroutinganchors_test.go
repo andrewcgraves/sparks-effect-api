@@ -19,11 +19,6 @@ const (
 	bakersfieldID = "00000000-0000-4005-8001-000000000009"
 )
 
-// The three stations 00023 anchors, with the `location` each must keep. The
-// anchors themselves are deliberately absent: the seed is the single source
-// for those, and TestCAHSRRoutingAnchorsMigrationMatchesTheSeed reads them from
-// it rather than restating them here, so a third copy cannot drift from the
-// other two.
 var caHSRAnchoredStations = []struct {
 	id, slug, name string
 	location       string
@@ -33,8 +28,6 @@ var caHSRAnchoredStations = []struct {
 	{bakersfieldID, "bakersfield", "Bakersfield", `{"type":"Point","coordinates":[-119.022,35.391]}`},
 }
 
-// seededRoutingLocation reads one station's routing anchor out of the embedded
-// YAML seed.
 func seededRoutingLocation(t *testing.T, slug string) *transit.GeoPoint {
 	t.Helper()
 	store, err := transit.NewStore(transit.DefaultBoardingWaitPolicy())
@@ -57,13 +50,6 @@ func seededRoutingLocation(t *testing.T, slug string) *transit.GeoPoint {
 	return nil
 }
 
-// Each anchor is written down twice — once in the YAML seed for databases the
-// seed reaches, once as an UPDATE literal in 00023 for the deployed ones it
-// does not — for the same reason TestLasVegasRoutingLocationMigrationMatchesTheSeed
-// pins 00016: two copies of the same data drift, and the drift is invisible,
-// since both databases still compile and both still answer.
-//
-// This needs no database — it compares the files themselves.
 func TestCAHSRRoutingAnchorsMigrationMatchesTheSeed(t *testing.T) {
 	sql, err := os.ReadFile(caHSRRoutingAnchorsMigrationPath)
 	if err != nil {
@@ -81,19 +67,6 @@ func TestCAHSRRoutingAnchorsMigrationMatchesTheSeed(t *testing.T) {
 	}
 }
 
-// rewindCAHSRRoutingAnchorsMigration unwinds 00023, unwinding the migration
-// above it first the way every link in this chain does. 00024 sits above it, so
-// the tail of the rewind chain that starts in snapmigration_test.go is now
-// rewindIsochroneCacheDepartsOnMigration. Goose refuses to re-apply a migration
-// older than the highest version recorded, so anything rewinding a migration
-// below this one must unrecord that too — rewindOwnedDomainModelsMigration does
-// that by calling this.
-//
-// 00023 changes no schema, so unwinding it is its own Down: clear the three
-// anchors it set, then unrecord the version. Clearing matters even though a
-// re-run of the UPDATEs would be harmless — a test that stages a pre-00023
-// database wants rows that genuinely have no anchor, not rows that already
-// hold the value the migration is supposed to write.
 func rewindCAHSRRoutingAnchorsMigration(t *testing.T, url string) {
 	t.Helper()
 	rewindIsochroneCacheDepartsOnMigration(t, url)
@@ -103,9 +76,6 @@ func rewindCAHSRRoutingAnchorsMigration(t *testing.T, url string) {
 		`DELETE FROM goose_db_version WHERE version_id = 23`)
 }
 
-// insertPreFixCAHSRAnchoredStations stages ca-hsr as a deployed database held
-// it before 00023 existed: the scenario and the three stations, each carrying
-// its surveyed location and no routing anchor at all.
 func insertPreFixCAHSRAnchoredStations(t *testing.T, url string) {
 	t.Helper()
 	stmts := []string{
@@ -120,8 +90,6 @@ func insertPreFixCAHSRAnchoredStations(t *testing.T, url string) {
 	exec(t, url, stmts...)
 }
 
-// assertAnchored is the shared assertion: every station holds the anchor the
-// seed says it should, and none of them has had its `location` moved.
 func assertAnchored(t *testing.T, url string) {
 	t.Helper()
 	for _, st := range caHSRAnchoredStations {
@@ -145,8 +113,6 @@ func assertAnchored(t *testing.T, url string) {
 	}
 }
 
-// The case that actually matters in production: a seeded ca-hsr the seed will
-// never revisit must come out of the migration holding all three anchors.
 func TestCAHSRRoutingAnchorsMigrationCorrectsAnAlreadyPopulatedScenario(t *testing.T) {
 	_, url := freshRepo(t)
 	rewindCAHSRRoutingAnchorsMigration(t, url)
@@ -158,9 +124,6 @@ func TestCAHSRRoutingAnchorsMigrationCorrectsAnAlreadyPopulatedScenario(t *testi
 	assertAnchored(t, url)
 }
 
-// On a fresh database the migration runs before the seed, so none of the three
-// rows exists yet and the UPDATEs must touch nothing — the seed inserts the
-// stations with their routing_location from YAML a moment later.
 func TestCAHSRRoutingAnchorsMigrationIsANoOpOnAnEmptyDatabase(t *testing.T) {
 	_, url := freshRepo(t)
 
@@ -172,8 +135,6 @@ func TestCAHSRRoutingAnchorsMigrationIsANoOpOnAnEmptyDatabase(t *testing.T) {
 	}
 }
 
-// A database that already holds the anchors — seeded from YAML, then migrated —
-// must come out of a re-run unchanged.
 func TestCAHSRRoutingAnchorsMigrationIsSafeToReRun(t *testing.T) {
 	_, url := freshRepo(t)
 	rewindCAHSRRoutingAnchorsMigration(t, url)
