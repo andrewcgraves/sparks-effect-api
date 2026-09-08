@@ -106,7 +106,7 @@ jobs:
 
   # Staging is whatever `main` last published. Linear's staging pipeline is a
   # separate stream from production because the two environments can (and do)
-  # hold different commits at the same time — see docs/releases.md.
+  # hold different commits at the same time.
   linear-staging:
     name: Record staging release in Linear
     needs: [check, build, publish]

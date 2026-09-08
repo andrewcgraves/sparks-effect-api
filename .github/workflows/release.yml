@@ -130,7 +130,7 @@ jobs:
 
       # Production is a different Linear pipeline from staging: the same issue
       # can sit on staging for a while before a tag promotes it, and staging
-      # can already be several commits ahead. See docs/releases.md.
+      # can already be several commits ahead.
       #
       # Secrets cannot be referenced in `if:` (GitHub treats that as a
       # workflow-file error), so the empty check lives in a shell step.

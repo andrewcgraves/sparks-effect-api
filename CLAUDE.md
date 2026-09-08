@@ -20,4 +20,3 @@ One trunk: `main`. Branch from it, PR into it. There is no `prd` branch —
 production is promoted by pushing a `vX.Y.Z` tag on a commit that is already on
 `main`, which re-tags that commit's existing image as `:prd`. Linear staging
 and production pipelines record which issues those publishes and tags contain.
-See `docs/releases.md`.
