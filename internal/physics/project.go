@@ -50,11 +50,21 @@ type SpanSegment struct {
 // ordered by chainage, split into the physics-uniform sub-segments the
 // run-time integrator needs to walk. DistanceM is the span's total length —
 // the sum of Segments' distances.
+//
+// FromChainageM and ToChainageM are where the two stops sit along the whole
+// line, which DistanceM (their difference) does not recover: a caller that wants
+// to point at a place on the alignment rather than measure a length needs the
+// absolute positions. transit.Edge carries them onto the compiled graph so a map
+// can slice this span out of the route geometry (SPA-264). They are reported
+// rather than recomputed by the caller because a second snap would be a second
+// chance to disagree with the one that produced these spans.
 type InterStopSpan struct {
-	FromStopID string
-	ToStopID   string
-	DistanceM  float64
-	Segments   []SpanSegment
+	FromStopID    string
+	ToStopID      string
+	DistanceM     float64
+	FromChainageM float64
+	ToChainageM   float64
+	Segments      []SpanSegment
 }
 
 // SnappedStop is one stop projected onto a route line.
@@ -142,10 +152,12 @@ func ProjectStops(line []Point, physicsSegs []Segment, stops []Stop) ([]InterSto
 	for i := 0; i < len(projected)-1; i++ {
 		from, to := projected[i], projected[i+1]
 		spans = append(spans, InterStopSpan{
-			FromStopID: from.ID,
-			ToStopID:   to.ID,
-			DistanceM:  to.ChainageM - from.ChainageM,
-			Segments:   splitSpan(lineSegs, from.ChainageM, to.ChainageM),
+			FromStopID:    from.ID,
+			ToStopID:      to.ID,
+			DistanceM:     to.ChainageM - from.ChainageM,
+			FromChainageM: from.ChainageM,
+			ToChainageM:   to.ChainageM,
+			Segments:      splitSpan(lineSegs, from.ChainageM, to.ChainageM),
 		})
 	}
 

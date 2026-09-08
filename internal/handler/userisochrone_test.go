@@ -39,7 +39,14 @@ func freshGraph() *transit.TransitGraph {
 	return &transit.TransitGraph{
 		Services: []transit.ServiceGraph{{
 			ServiceID: "svc-1", WaitSecs: 0, WaitPolicy: string(transit.BoardingWaitNone),
-			Edges: []transit.Edge{{FromSlug: "a", ToSlug: "b", Seconds: 300}},
+			// The edge names its corridor and endpoint chainages because a
+			// freshly compiled authored graph always does, and SPA-264's
+			// staleness rule reads a graph without them as one compiled before
+			// the feature existed — which is what this helper is not.
+			Edges: []transit.Edge{{
+				FromSlug: "a", ToSlug: "b", Seconds: 300,
+				RouteID: "rt-1", FromChainageM: 0, ToChainageM: 1400,
+			}},
 		}},
 		Nodes: []transit.GraphNode{
 			{Slug: "a", Lat: 37.7, Lng: -122.4, Names: []string{"A"}},

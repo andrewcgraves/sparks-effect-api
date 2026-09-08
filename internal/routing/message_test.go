@@ -47,7 +47,17 @@ func goldenGraph() *transit.TransitGraph {
 		Services: []transit.ServiceGraph{{
 			ServiceID: "svc-express",
 			Edges: []transit.Edge{
-				{FromSlug: "north", ToSlug: "south", Seconds: 1800},
+				// The edge names the corridor it runs over and where its two
+				// stations sit along that corridor's alignment (SPA-264), which
+				// is what lets the worker emit trip progress for a hop a rider's
+				// budget does not finish. Descending chainage — the hop runs
+				// against the direction the alignment was drawn in — because the
+				// contract has to be pinned in the shape that is easiest to get
+				// wrong, not the tidiest one.
+				{
+					FromSlug: "north", ToSlug: "south", Seconds: 1800,
+					RouteID: "rt-spine", FromChainageM: 27798.4, ToChainageM: 8123.9,
+				},
 			},
 			WaitSecs:   300,
 			WaitPolicy: string(transit.BoardingWaitFixed),
