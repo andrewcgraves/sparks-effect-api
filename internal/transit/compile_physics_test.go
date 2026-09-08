@@ -2,10 +2,6 @@ package transit
 
 import "testing"
 
-// compileSeeded runs the seeded model through the adapter into the one
-// physics compiler — the same path CompileScenario takes. These cases predate
-// the CompilableService refactor and are kept as its regression net: only how
-// the input is constructed changed, never what is asserted.
 func compileSeeded(t *testing.T, route Route, stations []Station, svc Service, vt VehicleType) (ServiceGraph, error) {
 	t.Helper()
 	cs, err := CompilableFromService(route, stations, svc, vt)
@@ -27,27 +23,6 @@ func physicsTestVehicle() VehicleType {
 	}
 }
 
-// TestCompileServicePhysics_twoStopStraightLine pins the whole pipeline —
-// geometry -> stop projection -> speed-profile integration -> dwell -> Edge —
-// against an independently hand-worked example.
-//
-// The route is a straight equatorial line from (0,0) to (1,0) degrees, whose
-// great-circle length is the same independently-derived formula
-// project_test.go's TestProjectStops_twoStopsAtLineEndpointsOnStraightLine
-// already pins: R * deltaRadians = 6371000 * (pi/180) = 111194.926644... m.
-//
-// With vmax=10 m/s and accel=decel=1 m/s^2 (physicsTestVehicle), the
-// accelerate-cruise-decelerate motion time is:
-//
-//	accel/decel distance: 50 m each (100 m total)
-//	cruise distance: 111194.926644 - 100 = 111094.926644 m, at 10 m/s = 11109.4926644 s
-//	motion time: 10 + 10 + 11109.4926644 = 11129.4926644 s, rounds to 11129 s
-//
-// Station b's platform matches the vehicle's floor height, so it dwells
-// DwellLevelS (30s); station a's does not, so it dwells DwellStepS (60s) —
-// this also exercises that each Edge's Seconds carries its *destination*
-// stop's dwell, matching the hand-authored-table compiler's convention in
-// compile.go (pathDwellSecs sums dwell over path[1:], excluding the origin).
 func TestCompileServicePhysics_twoStopStraightLine(t *testing.T) {
 	route := Route{
 		ID:   "rt-1",
@@ -103,8 +78,6 @@ func TestCompileServicePhysics_twoStopStraightLine(t *testing.T) {
 	}
 }
 
-// The physics compiler reports each edge's destination dwell alongside the
-// total it is already folded into, so a consumer can recover it.
 func TestCompileServicePhysics_edgesReportDwellAlongsideTotal(t *testing.T) {
 	route := Route{
 		ID:   "rt-1",
@@ -152,10 +125,6 @@ func TestCompileServicePhysics_edgesReportDwellAlongsideTotal(t *testing.T) {
 	}
 }
 
-// TestCompileServicePhysics_feedsDijkstra proves the Edges CompileServicePhysics
-// produces are consumable by the existing TransitGraph/Dijkstra machinery —
-// the acceptance criterion that physics-compiled services "feed the
-// TransitGraph -> Dijkstra -> isochrone chain."
 func TestCompileServicePhysics_feedsDijkstra(t *testing.T) {
 	route := Route{
 		Geometry: GeoLineString{Coordinates: [][]float64{{0, 0}, {1, 0}}},
@@ -187,10 +156,6 @@ func TestCompileServicePhysics_feedsDijkstra(t *testing.T) {
 	}
 }
 
-// TestCompileServicePhysics_threeStopsProduceTwoSpans covers a
-// representative multi-stop service: each consecutive stop pair gets its own
-// InterStopSpan, so a 3-stop service compiles to 2 forward + 2 reverse edges,
-// none of which skip the middle stop.
 func TestCompileServicePhysics_threeStopsProduceTwoSpans(t *testing.T) {
 	route := Route{
 		Geometry: GeoLineString{Coordinates: [][]float64{{0, 0}, {2, 0}}},
@@ -234,12 +199,6 @@ func TestCompileServicePhysics_threeStopsProduceTwoSpans(t *testing.T) {
 	}
 }
 
-// TestCompileServicePhysics_gradeThreadsThroughToRunTime confirms a route's
-// per-segment GradePct actually reaches SpanRunSeconds through
-// toPhysicsSegments and affects the compiled edge — the physics package's
-// own TestSpanRunSeconds_descendingGradeIncreasesTime pins the GradePct/100
-// conversion in isolation; this closes the same gap for the wiring between
-// RouteSegment and physics.Segment.
 func TestCompileServicePhysics_gradeThreadsThroughToRunTime(t *testing.T) {
 	stations := []Station{
 		{ID: "st-a", Slug: "a", Location: GeoPoint{Coordinates: []float64{0, 0}}, PlatformHeight: "high"},
@@ -322,11 +281,6 @@ func TestCompileServicePhysics_errorsOnRouteWithFewerThanTwoPoints(t *testing.T)
 	}
 }
 
-// Slug uniqueness is load-bearing: physics.Stop.ID is the stop slug, so a
-// duplicate would collapse two stops onto one graph node and silently drop a
-// span. The seeded adapter cannot guarantee it — Station.Slug is whatever the
-// scenario data says — so the compiler checks. SPA-109 merges co-located stops
-// across services and so never produces this case; see the check itself.
 func TestCompileServicePhysics_errorsOnDuplicateStopSlug(t *testing.T) {
 	svc := CompilableService{
 		ID:    "svc-1",

@@ -1,10 +1,3 @@
-// Package route validates admin-ingested route alignments: a GeoJSON
-// LineString whose per-segment track physics are authored into its properties.
-//
-// Everything here is pure — value in, error out, no I/O and no state — so the
-// ingestion rules can be exercised without a database or an HTTP server. The
-// handler owns transport concerns (auth, status codes, persistence); this
-// package owns "is this a coherent route?".
 package route
 
 import (
@@ -12,37 +5,14 @@ import (
 	"strings"
 )
 
-// Physics ranges accepted for authored track geometry. These are sanity bounds
-// meant to catch unit mistakes and typos (a cant in centimeters, a radius in
-// kilometers), not to encode any particular design standard — the speed-limit
-// model in internal/physics is what actually interprets these values.
 const (
-	// MaxCantMM is the ceiling on applied superelevation, in millimeters.
-	// Real-world applied cant tops out around 180 mm; 300 mm leaves generous
-	// headroom while still rejecting a value entered in the wrong unit.
-	MaxCantMM = 300.0
-
-	// MinCurveRadiusM and MaxCurveRadiusM bound real curvature, in meters.
-	// The minimum is around the tightest street-running tram curve; the
-	// maximum is the point past which a curve is straight for any practical
-	// purpose and should be expressed as tangent track instead.
-	//
-	// A radius of exactly 0 is the tangent-track sentinel and is always
-	// accepted — see validateSegment.
+	MaxCantMM       = 300.0
 	MinCurveRadiusM = 20.0
 	MaxCurveRadiusM = 100000.0
-
-	// MaxGradePct bounds grade magnitude, in percent, in both directions.
-	// 15% is far beyond adhesion rail (rack railways aside) and exists to
-	// reject a grade supplied as a ratio scaled wrongly.
-	MaxGradePct = 15.0
-
-	// MinCoordinates is the fewest positions that describe a line.
-	MinCoordinates = 2
+	MaxGradePct     = 15.0
+	MinCoordinates  = 2
 )
 
-// validModes are the transport modes a route may declare. An empty mode is
-// also accepted and left for the caller to default.
 var validModes = map[string]bool{
 	"rail":      true,
 	"metro":     true,
@@ -52,53 +22,29 @@ var validModes = map[string]bool{
 	"funicular": true,
 }
 
-// Segment is the authored track physics for one span between two consecutive
-// coordinates. The zero value means tangent, level, uncanted track, which is
-// why an omitted segment list is legitimate.
 type Segment struct {
 	CantMM       float64 `json:"cant_mm"`
 	CurveRadiusM float64 `json:"curve_radius_m"`
 	GradePct     float64 `json:"grade_pct"`
 }
 
-// Properties carries the non-geometric half of the ingestion payload.
 type Properties struct {
-	Name string `json:"name"`
-	// Description is free prose about the alignment. It is optional and
-	// unvalidated beyond the length cap: unlike the physics fields, there is no
-	// wrong value for it, only a missing one.
-	Description string `json:"description"`
-	// Slug is optional; when empty the handler derives one from Name via
-	// Slugify. When present it must already be in slug form.
-	Slug string `json:"slug"`
-	Mode string `json:"mode"`
-	// Bidirectional is a pointer so an omitted field is distinguishable from
-	// an explicit false, letting the caller default it to true.
-	Bidirectional *bool `json:"bidirectional"`
-	// ScenarioSlug optionally attaches the route to an existing scenario. An
-	// ingested route is standalone by default — it belongs to no scenario and
-	// carries no stops.
-	ScenarioSlug string `json:"scenario_slug"`
-	// Segments, when present, must have exactly one entry per span between
-	// consecutive coordinates.
-	Segments []Segment `json:"segments"`
+	Name          string    `json:"name"`
+	Description   string    `json:"description"`
+	Slug          string    `json:"slug"`
+	Mode          string    `json:"mode"`
+	Bidirectional *bool     `json:"bidirectional"`
+	ScenarioSlug  string    `json:"scenario_slug"`
+	Segments      []Segment `json:"segments"`
 }
 
-// Ingest is the admin route-ingestion payload: a GeoJSON LineString geometry
-// with route metadata and per-segment physics in its properties.
 type Ingest struct {
 	Type        string      `json:"type"`
 	Coordinates [][]float64 `json:"coordinates"`
 	Properties  Properties  `json:"properties"`
-	// BBox is accepted and ignored. GeoJSON permits it on any geometry, and
-	// the handler rejects unknown fields, so it is declared here purely so a
-	// standards-conformant export is not turned away.
-	BBox []float64 `json:"bbox,omitempty"`
+	BBox        []float64   `json:"bbox,omitempty"`
 }
 
-// Validate reports the first problem with an ingestion payload, or nil if the
-// route is coherent. Errors are phrased for the client: they name the offending
-// field and, for physics, the index of the segment at fault.
 func Validate(in Ingest) error {
 	if in.Type != "LineString" {
 		return fmt.Errorf("geometry type must be %q, got %q", "LineString", in.Type)
@@ -147,8 +93,6 @@ func Validate(in Ingest) error {
 	return nil
 }
 
-// validatePosition checks a single GeoJSON position. Altitude is not modeled —
-// grade is authored per segment instead — so a position is exactly two numbers.
 func validatePosition(pos []float64) error {
 	if len(pos) != 2 {
 		return fmt.Errorf("must be [longitude, latitude], got %d values", len(pos))
@@ -178,17 +122,10 @@ func validateSegment(seg Segment) error {
 	return nil
 }
 
-// inRange reports whether v is finite and within [lo, hi]. Non-finite values
-// need no separate check: NaN fails both comparisons, and each infinity fails
-// one of them.
 func inRange(v, lo, hi float64) bool {
 	return v >= lo && v <= hi
 }
 
-// samePosition reports whether two validated positions are identical. Exact
-// equality is the right test here: these are authored values that round-trip
-// through JSON unchanged, not the result of arithmetic, so a tolerance would
-// only start rejecting legitimately close points.
 func samePosition(a, b []float64) bool {
 	return a[0] == b[0] && a[1] == b[1]
 }

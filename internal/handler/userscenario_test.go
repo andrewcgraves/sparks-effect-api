@@ -14,17 +14,12 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// fakeScenarioStore is an in-memory handler.ScenarioStore. It also backs
-// handler.ScenarioIsochroneStore (userisochrone_test.go) via members, jobs and
-// the embedded routing store, rather than a second fake, since all three seams
-// read the same scenario rows.
 type fakeScenarioStore struct {
 	fakeRoutingStore
-
-	scenarios map[string]transit.UserScenario // keyed by ID
-	services  map[string]string               // service id -> owner id
-	members   map[string]transit.UserService  // service id -> full record
-	jobs      map[string]transit.Job          // scenario slug -> latest succeeded job
+	scenarios map[string]transit.UserScenario
+	services  map[string]string
+	members   map[string]transit.UserService
+	jobs      map[string]transit.Job
 	failWith  error
 }
 

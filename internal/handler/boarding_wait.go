@@ -10,18 +10,11 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// boardingWaitTarget is a service model that can carry the boarding wait
-// resolved from its own frequency windows. Both the seeded transit.Service and
-// the user-authored transit.UserService satisfy it through a pointer, which is
-// what lets one helper fill either instead of a copy per model.
 type boardingWaitTarget[T any] interface {
 	*T
 	ResolveBoardingWait(*transit.BoardingWaitOverride, transit.BoardingWaitPolicy) error
 }
 
-// withBoardingWait fills the response-only boarding-wait fields on a service
-// from the precedence chain (the service's own override, an optional scenario
-// override, then global) and the service's frequency windows.
 func withBoardingWait[T any, P boardingWaitTarget[T]](ctx context.Context, svc T, scenario *transit.BoardingWaitOverride, global transit.BoardingWaitPolicy) T {
 	if err := P(&svc).ResolveBoardingWait(scenario, global); err != nil {
 		// Policy was validated at config load / write time; a resolution fault
@@ -65,8 +58,6 @@ func withScenarioBoardingWaits(ctx context.Context, scenarios []transit.UserScen
 	return out
 }
 
-// resolvedBoardingWaitByService is the map GraphStale compares against: each
-// member's policy as the next compile would bake it in.
 func resolvedBoardingWaitByService(members []transit.UserService, scenario *transit.BoardingWaitOverride, global transit.BoardingWaitPolicy) map[string]transit.BoardingWaitPolicy {
 	out := make(map[string]transit.BoardingWaitPolicy, len(members))
 	for _, svc := range members {
@@ -79,10 +70,6 @@ func resolvedBoardingWaitByService(members []transit.UserService, scenario *tran
 	return out
 }
 
-// optionalBoardingWait distinguishes an omitted field (leave the stored
-// override unchanged) from JSON null (clear it back to inherit). The two are
-// not the same on the wire, and a full-replace PUT would otherwise treat omit
-// as clear.
 type optionalBoardingWait struct {
 	set   bool
 	raw   []byte

@@ -10,21 +10,6 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/physics"
 )
 
-// chainageFixture is the shared statement of what "chainage" means, checked in
-// as data rather than expressed only in Go.
-//
-// SPA-264 puts a second implementation of this arithmetic in the website, which
-// slices a route alignment to a fraction handed to it by a chain result. That
-// front end has no access to this package, so the only thing that can stop the
-// two drifting is a fixture both assert against: a synthetic alignment and the
-// chainage each of its vertices is at. Changing earthRadiusM, the projection,
-// or the reference latitude turns this red here and turns its mirror red there,
-// which is the point — a silent disagreement would move a drawn stub along the
-// line with nothing to notice it.
-//
-// The alignment is deliberately synthetic and small enough to read: four
-// vertices, some due north-south and some due east-west, at a latitude where
-// the cosine correction is nowhere near 1.
 type chainageFixture struct {
 	Line            [][2]float64 `json:"line"`
 	VertexChainageM []float64    `json:"vertex_chainage_m"`
@@ -51,9 +36,6 @@ func (f chainageFixture) points() []physics.Point {
 	return pts
 }
 
-// Each vertex snaps to itself, so its chainage is the fixture's claim about the
-// distance along the line to that vertex. Asserting through SnapStops rather
-// than an unexported walk keeps this on the package's public seam.
 func TestChainageFixture_vertexChainagesMatch(t *testing.T) {
 	f := loadChainageFixture(t)
 	line := f.points()
@@ -70,8 +52,7 @@ func TestChainageFixture_vertexChainagesMatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SnapStops: %v", err)
 	}
-	// A tenth of a millimetre: far tighter than any rendering difference could
-	// be, and loose enough that the fixture can carry human-readable numbers.
+
 	const tolM = 1e-4
 	for i, s := range got {
 		if math.Abs(s.ChainageM-f.VertexChainageM[i]) > tolM {

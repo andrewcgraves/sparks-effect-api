@@ -10,11 +10,6 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// seedCompilableScenario writes a scenario with one route, two stations, one
-// vehicle type, and one active service straight through the repository —
-// standing in for whatever future ticket (SPA-80/81) lets a user author this
-// data over HTTP. What matters here is only that it is real, physics-compilable
-// data sitting in Postgres for the job to compile.
 func seedCompilableScenario(t *testing.T, repo interface {
 	CreateScenario(ctx context.Context, sc transit.Scenario) error
 	CreateRoute(ctx context.Context, r transit.Route) error
@@ -82,8 +77,6 @@ func seedCompilableScenario(t *testing.T, repo interface {
 	return sc
 }
 
-// pollJob polls GET /api/jobs/{id} until it leaves queued/running or the
-// timeout elapses, returning the final observed job.
 func pollJob(t *testing.T, h http.Handler, token, jobID string) transit.Job {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -105,9 +98,6 @@ func pollJob(t *testing.T, h http.Handler, token, jobID string) transit.Job {
 	return transit.Job{}
 }
 
-// The whole SPA-82 acceptance surface, end to end against a real database and
-// mux: POST kicks off a job, GET polls it through to succeeded, and the
-// compiled graph is retrievable by the scenario's slug — with no job id.
 func TestIntegration_AsyncCompileJobLifecycle(t *testing.T) {
 	h, repo := integrationServer(t)
 	provisionAdmin(t, repo, "admin@example.com", "admin-password")
@@ -159,8 +149,6 @@ func TestIntegration_AsyncCompileJobLifecycle(t *testing.T) {
 	}
 }
 
-// A scenario whose service data the physics compiler rejects fails the job
-// with an error, rather than hanging or panicking the background goroutine.
 func TestIntegration_CompileJobSurfacesFailure(t *testing.T) {
 	h, repo := integrationServer(t)
 	provisionAdmin(t, repo, "admin@example.com", "admin-password")

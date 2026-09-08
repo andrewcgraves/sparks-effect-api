@@ -9,9 +9,6 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// A user compiles their own service: 202 with a queued job targeting the
-// service by kind, and the worker runs it through to a stored graph whose
-// compiled member ids are recorded.
 func TestCompileUserServiceReturnsQueuedJobAndCompilesAsync(t *testing.T) {
 	store := newFakeCompileStore()
 	svcID, _ := store.compilableUserFixture("user-1")
@@ -48,8 +45,6 @@ func TestCompileUserServiceReturnsQueuedJobAndCompilesAsync(t *testing.T) {
 	}
 }
 
-// A caller may not compile someone else's service: a non-owner sees the same
-// 404 as an unknown slug, so ownership is not probeable.
 func TestCompileUserServiceRejectsNonOwner(t *testing.T) {
 	store := newFakeCompileStore()
 	store.compilableUserFixture("owner")
@@ -81,7 +76,6 @@ func TestCompileUserServiceRequiresAuth(t *testing.T) {
 	}
 }
 
-// A user compiles their own scenario's curated members into one graph.
 func TestCompileUserScenarioReturnsQueuedJobAndCompilesAsync(t *testing.T) {
 	store := newFakeCompileStore()
 	svcID, scenarioID := store.compilableUserFixture("user-1")
@@ -123,8 +117,6 @@ func TestCompileUserScenarioRejectsNonOwner(t *testing.T) {
 	}
 }
 
-// The compiled graph is retrievable by the scenario's slug once a compile has
-// succeeded — owner-scoped, unlike the public seeded graph.
 func TestUserScenarioGraphReturnsCompiledResultForOwner(t *testing.T) {
 	store := newFakeCompileStore()
 	_, scenarioID := store.compilableUserFixture("user-1")
@@ -211,8 +203,6 @@ func TestUserScenarioGraphNotYetCompiledIsNotFound(t *testing.T) {
 
 // --- single-service graph read (SPA-140) ---
 
-// seedServiceCompileJob records a succeeded single-service compile for the
-// service the fixture stocks, which is what the graph read resolves by slug.
 func seedServiceCompileJob(store *fakeCompileStore, svcID string, result *transit.TransitGraph) {
 	store.jobs["job-1"] = transit.Job{
 		ID: "job-1", Kind: transit.JobKindCompileUserService, Status: transit.JobStatusSucceeded,
@@ -221,9 +211,6 @@ func seedServiceCompileJob(store *fakeCompileStore, svcID string, result *transi
 	}
 }
 
-// A service compiled on its own is readable by its own slug, with its route
-// bundled alongside — the whole point of the endpoint, since the compiled graph
-// is pure topology and a client cannot draw the alignment without it.
 func TestUserServiceGraphReturnsCompiledGraphAndRouteForOwner(t *testing.T) {
 	store := newFakeCompileStore()
 	svcID, _ := store.compilableUserFixture("user-1")
@@ -281,8 +268,6 @@ func TestUserServiceGraphUnknownSlugIsNotFound(t *testing.T) {
 	}
 }
 
-// A never-compiled service is a 404 the frontend acts on: it is the signal to
-// fire a compile, so it must stay distinguishable from a genuine failure.
 func TestUserServiceGraphNotYetCompiledIsNotFound(t *testing.T) {
 	store := newFakeCompileStore()
 	store.compilableUserFixture("user-1")
@@ -294,9 +279,6 @@ func TestUserServiceGraphNotYetCompiledIsNotFound(t *testing.T) {
 	}
 }
 
-// A scenario compile of the same service is not a single-service graph: the
-// reader is keyed on the service FK and the service compile kind, so a
-// scenario's result must not satisfy the service read.
 func TestUserServiceGraphIgnoresScenarioCompileJobs(t *testing.T) {
 	store := newFakeCompileStore()
 	_, scenarioID := store.compilableUserFixture("user-1")

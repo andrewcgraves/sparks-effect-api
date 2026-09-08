@@ -5,27 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/andrewcgraves/sparks-effect-api/internal/persistence/postgres"
+	"github.com/jackc/pgx/v5"
 )
 
-// The migration that makes stops snapped (00007) chose to assert rather than
-// backfill: it refuses to run if any pre-snap row exists, because snapping in
-// SQL would mean a second implementation of the projection in internal/physics.
-// These tests pin that choice, so a later reader finds out what the migration
-// does with legacy data from a test rather than from a production incident.
-
-// rewindSnapMigration puts the database back to how it looked immediately
-// before 00007 ran: constraint gone, version row removed. goose then re-applies
-// 00007 on the next Migrate, which is what lets a test put a pre-snap row in
-// front of it. Doing it this way rather than migrating partially keeps the test
-// honest — it runs the real migration file, not a copy of its SQL.
-//
-// 00008 is rewound with it, because a state before 00007 is necessarily also a
-// state before 00008: leaving 00008's constraint in place would refuse the
-// pre-snap rows these tests insert, and they would fail on the fixture rather
-// than on the migration under test.
 func rewindSnapMigration(t *testing.T, url string) {
 	t.Helper()
 	exec(t, url,
@@ -35,13 +18,6 @@ func rewindSnapMigration(t *testing.T, url string) {
 	rewindJobTargetsMigration(t, url)
 }
 
-// rewindJobTargetsMigration unwinds 00009 (the job-targets columns) alongside
-// the migration under test, for the same reason 00008 is unwound with 00007: a
-// state before 00007/00008 is necessarily before 00009 too, and goose refuses
-// to re-apply an earlier migration while a later one (version 9) is still
-// recorded as applied. 00009 touches only the jobs table — empty in these
-// user_services tests — so dropping and re-applying it changes nothing under
-// test; it just keeps the migration order goose insists on intact.
 func rewindJobTargetsMigration(t *testing.T, url string) {
 	t.Helper()
 	exec(t, url,
@@ -55,13 +31,6 @@ func rewindJobTargetsMigration(t *testing.T, url string) {
 	rewindInterchangePairsMigration(t, url)
 }
 
-// rewindInterchangePairsMigration unwinds 00010 (user_scenarios'
-// interchange_pairs column), for the same reason 00009 is unwound alongside
-// 00007/00008: a state before any earlier migration is necessarily before
-// 00010 too, and goose refuses to re-apply an earlier migration while a later
-// one (version 10) is still recorded as applied. 00010 touches only
-// user_scenarios — untouched by these user_services tests — so dropping and
-// re-applying it changes nothing under test.
 func rewindInterchangePairsMigration(t *testing.T, url string) {
 	t.Helper()
 	exec(t, url,
@@ -85,9 +54,6 @@ func exec(t *testing.T, url string, statements ...string) {
 	}
 }
 
-// insertLegacyUserService writes a row in the pre-SPA-108 shape: raw
-// coordinates, no chainage_m, no offset_m. It goes in through raw SQL because
-// the Go model can no longer express a stop without them.
 func insertLegacyUserService(t *testing.T, url, stopsJSON string) {
 	t.Helper()
 	exec(t, url, `INSERT INTO user_services (id, slug, route_id, owner_id, name, vehicle, stops)
@@ -96,11 +62,6 @@ func insertLegacyUserService(t *testing.T, url, stopsJSON string) {
 		        '`+stopsJSON+`')`)
 }
 
-// TestSnapMigrationRefusesAPreSnapRow is the backfill test SPA-108 asks for.
-// The legacy row's second stop sits ~1.1 km north of route us-route-0, well
-// past the 500 m off-route threshold — the case a backfill would have had to
-// make a judgement call about with no user to ask. The chosen behaviour is that
-// it does not make one: the deploy stops and a human decides.
 func TestSnapMigrationRefusesAPreSnapRow(t *testing.T) {
 	_, _, url := userServiceFixture(t)
 	rewindSnapMigration(t, url)
@@ -120,12 +81,6 @@ func TestSnapMigrationRefusesAPreSnapRow(t *testing.T) {
 	}
 }
 
-// TestSnapMigrationRefusesAnOnRouteRowToo pins the other half of the choice:
-// the migration stops for *any* pre-snap row, not only for one the 500 m rule
-// would reject. Distance does not enter into it, because the coordinates it
-// would have to measure are the ones it cannot compute without the projection
-// in internal/physics. Without this test the pairing with the over-threshold
-// case above would read as if the threshold were what triggered the refusal.
 func TestSnapMigrationRefusesAnOnRouteRowToo(t *testing.T) {
 	_, _, url := userServiceFixture(t)
 	rewindSnapMigration(t, url)
@@ -141,8 +96,6 @@ func TestSnapMigrationRefusesAnOnRouteRowToo(t *testing.T) {
 	}
 }
 
-// TestSnapMigrationRunsOnAnEmptyTable is the case actually expected in every
-// environment: nothing to backfill, so the migration is just the invariant.
 func TestSnapMigrationRunsOnAnEmptyTable(t *testing.T) {
 	_, _, url := userServiceFixture(t)
 	rewindSnapMigration(t, url)
@@ -152,10 +105,6 @@ func TestSnapMigrationRunsOnAnEmptyTable(t *testing.T) {
 	}
 }
 
-// TestSnappedStopsConstraintRejectsAnUnsnappedStop covers the invariant the
-// migration leaves behind. Without it a stop missing chainage_m would decode to
-// 0 — a real position at the start of every route — so missing data would read
-// as a stop at the line's origin rather than as an error.
 func TestSnappedStopsConstraintRejectsAnUnsnappedStop(t *testing.T) {
 	_, _, url := userServiceFixture(t)
 
@@ -179,9 +128,6 @@ func TestSnappedStopsConstraintRejectsAnUnsnappedStop(t *testing.T) {
 	}
 }
 
-// TestSnappedStopsConstraintAcceptsWhatTheModelWrites guards against the
-// constraint and the Go struct's json tags drifting apart: every stop the write
-// path produces must satisfy it.
 func TestSnappedStopsConstraintAcceptsWhatTheModelWrites(t *testing.T) {
 	repo, ctx, _ := userServiceFixture(t)
 

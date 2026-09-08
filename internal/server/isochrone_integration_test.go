@@ -12,10 +12,6 @@ import (
 
 const seededIsochroneBody = `{"lat":37.79,"lng":-122.397,"budget_mins":30,"mode":"walk","scenario_slug":"ca-hsr"}`
 
-// The boot sequence, end to end against a real database: an empty database
-// answers the public isochrone with a 404, seeding gives it the scenario, and
-// compiling what was seeded is what makes the isochrone answerable — with no
-// manual step and no admin credentials anywhere in it (SPA-181).
 func TestIntegration_SeededIsochroneServedFromCompiledGraph(t *testing.T) {
 	h, repo := integrationServer(t)
 	ctx := context.Background()
@@ -55,8 +51,6 @@ func TestIntegration_SeededIsochroneServedFromCompiledGraph(t *testing.T) {
 		t.Fatalf("after compiling: status %d, want 202; body %s", rec.Code, rec.Body.String())
 	}
 
-	// The 202 hands back a routing job, and the whole point of it having no
-	// owner is that the anonymous caller who asked for it can poll it back.
 	var job transit.RoutingJob
 	if err := json.Unmarshal(rec.Body.Bytes(), &job); err != nil {
 		t.Fatalf("decode routing job: %v", err)
@@ -96,8 +90,6 @@ func TestIntegration_SeededIsochroneServedFromCompiledGraph(t *testing.T) {
 	}
 }
 
-// Restarting against an already-compiled database must not recompile: the
-// second boot finds the graph the first one wrote and leaves it alone.
 func TestIntegration_BootDoesNotRecompileASeededDatabase(t *testing.T) {
 	_, repo := integrationServer(t)
 	ctx := context.Background()
@@ -141,10 +133,6 @@ func TestIntegration_BootDoesNotRecompileASeededDatabase(t *testing.T) {
 	}
 }
 
-// The enqueue cap end to end against a real database (SPA-219): real routing
-// job rows are what the count reads, so this is the only place the threshold,
-// the refusal, and the recovery are exercised over the query that actually
-// decides them.
 func TestIntegration_IsochroneEnqueueCap(t *testing.T) {
 	const limit = 2
 
@@ -158,8 +146,6 @@ func TestIntegration_IsochroneEnqueueCap(t *testing.T) {
 		t.Fatalf("CompileSeededIfNeeded: %v", err)
 	}
 
-	// Up to the limit, the backlog is work the worker is expected to get
-	// through, so the requests are accepted.
 	var accepted []string
 	for i := 0; i < limit; i++ {
 		rec := request(t, h, http.MethodPost, "/api/isochrone", "", seededIsochroneBody)

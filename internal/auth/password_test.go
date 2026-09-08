@@ -24,8 +24,6 @@ func TestHashPasswordVerifies(t *testing.T) {
 	}
 }
 
-// Equal passwords must produce different hashes — bcrypt salts per call, so a
-// leaked table can't be attacked by grouping identical hashes.
 func TestHashPasswordIsSalted(t *testing.T) {
 	a, err := auth.DefaultHasher.Hash("same-password")
 	if err != nil {
@@ -51,9 +49,6 @@ func TestVerifyPasswordRejectsEmptyHash(t *testing.T) {
 	}
 }
 
-// VerifyNothing exists to make an unknown-account login cost the same as a
-// wrong-password one. It must always fail, and must actually do the bcrypt
-// work — a stub returning false immediately would reintroduce the timing leak.
 func TestVerifyNothingAlwaysFailsAndCostsRealWork(t *testing.T) {
 	for _, pw := range []string{"", "anything", "no account has this password"} {
 		if auth.DefaultHasher.VerifyNothing(pw) {

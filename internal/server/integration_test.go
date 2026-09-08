@@ -9,8 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/crypto/bcrypt"
-
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
 	"github.com/andrewcgraves/sparks-effect-api/internal/ids"
@@ -19,24 +17,11 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/routing"
 	"github.com/andrewcgraves/sparks-effect-api/internal/testdb"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
+	"golang.org/x/crypto/bcrypt"
 )
 
-// This file exercises the SPA-74 acceptance criteria end-to-end against a real
-// database and the real mux: an admin-provisioned account logs in, its token
-// works on protected routes, admin gating holds, and ownership scoping is
-// enforced server-side.
-
-// TestMain drops the migrated template database every test here is cloned
-// from. See internal/testdb.
 func TestMain(m *testing.M) { testdb.Main(m) }
 
-// testHasher is the bcrypt cost these tests provision and log in at. Every one
-// of them creates at least one account and logs into it, and several do so
-// three or four times over; at bcrypt.DefaultCost that is ~46ms of deliberate
-// key-stretching per operation, which was the single largest thing this file
-// spent its time on. Nothing hashed here outlives the throwaway database, so
-// the cost buys nothing. auth's own tests still cover the properties that do
-// depend on the production cost.
 var testHasher = auth.NewHasher(bcrypt.MinCost)
 
 func integrationServer(t *testing.T) (http.Handler, *postgres.Repo) {
@@ -44,10 +29,6 @@ func integrationServer(t *testing.T) (http.Handler, *postgres.Repo) {
 	return integrationServerCapped(t, 0)
 }
 
-// integrationServerCapped is integrationServer with the isochrone enqueue cap
-// set (SPA-219). Zero, which is what integrationServer passes, disables it —
-// so every test written before the cap existed goes on seeing the API it was
-// written against.
 func integrationServerCapped(t *testing.T, maxInFlight int) (http.Handler, *postgres.Repo) {
 	t.Helper()
 	ctx := context.Background()
@@ -74,7 +55,6 @@ func integrationServerCapped(t *testing.T, maxInFlight int) (http.Handler, *post
 	return New(cfg, store, repo, &routing.FakePublisher{}, logger.Discard()).Handler, repo
 }
 
-// provisionAdmin stands in for the bootstrap-admin path in main.
 func provisionAdmin(t *testing.T, repo *postgres.Repo, email, password string) string {
 	t.Helper()
 	hash, err := testHasher.Hash(password)
@@ -113,8 +93,6 @@ func login(t *testing.T, h http.Handler, email, password string) (token string, 
 	return resp.Token, rec.Code
 }
 
-// AC1 + AC2: an admin-provisioned account logs in and its token opens the
-// protected routes; a wrong password does not.
 func TestIntegration_ProvisionedAccountLogsInAndUsesItsToken(t *testing.T) {
 	h, repo := integrationServer(t)
 	provisionAdmin(t, repo, "admin@example.com", "admin-password")
@@ -149,9 +127,6 @@ func TestIntegration_ProvisionedAccountLogsInAndUsesItsToken(t *testing.T) {
 	}
 }
 
-// AC1 + AC3: an admin provisions a second account over the API; that account
-// can log in, but cannot itself reach the admin-gated endpoint. There is no
-// public path by which it could have created itself.
 func TestIntegration_AdminProvisioningAndGating(t *testing.T) {
 	h, repo := integrationServer(t)
 	provisionAdmin(t, repo, "admin@example.com", "admin-password")
@@ -187,8 +162,6 @@ func TestIntegration_AdminProvisioningAndGating(t *testing.T) {
 	}
 }
 
-// AC4 (read half): each user sees only the scenarios they own, enforced by the
-// server from the token's identity — not by anything the client sends.
 func TestIntegration_OwnershipScopingIsEnforcedServerSide(t *testing.T) {
 	h, repo := integrationServer(t)
 	ctx := context.Background()

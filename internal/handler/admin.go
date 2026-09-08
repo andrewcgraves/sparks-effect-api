@@ -12,7 +12,6 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// UserStore is the slice of the repository account provisioning needs.
 type UserStore interface {
 	CreateUser(ctx context.Context, u transit.User, passwordHash string) error
 	GetUserByEmail(ctx context.Context, email string) (transit.User, bool, error)
@@ -25,11 +24,6 @@ type createUserRequest struct {
 	IsAdmin  bool   `json:"is_admin"`
 }
 
-// CreateUser provisions an account. This is the system's only account-creation
-// path — it is registered behind RequireAdmin, which is what makes the API
-// invite-only: without an existing admin, no account can come into being.
-//
-// hasher fixes the bcrypt cost new passwords are stored at; see auth.Hasher.
 func CreateUser(store UserStore, hasher auth.Hasher) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req createUserRequest

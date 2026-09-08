@@ -9,23 +9,10 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// ptr returns the address of v, for the optional (pointer) fields on the
-// domain types — scenario ids on routes, owner ids on services.
 func ptr[T any](v T) *T { return &v }
 
-// TestMain drops the migrated template database this package's tests are all
-// cloned from. See internal/testdb.
 func TestMain(m *testing.M) { testdb.Main(m) }
 
-// freshRepo returns a Repo against a migrated database that belongs to this
-// test alone. It is a clone of the package's template rather than a
-// freshly-migrated database, which is both faster and — because no two tests
-// share a database any more — what lets this package run alongside the other
-// integration package instead of behind it.
-//
-// The "migrations apply cleanly to an empty database" property that the old
-// reset-and-migrate-per-test setup asserted incidentally is now asserted
-// directly, once, by TestMigrationsRunCleanlyOnEmptyDB.
 func freshRepo(t *testing.T) (*postgres.Repo, string) {
 	t.Helper()
 	url := testdb.Fresh(t)
@@ -243,9 +230,6 @@ func TestJobsRoundTrip(t *testing.T) {
 	}
 }
 
-// TestJobCompletionStoresResultRetrievableBySlug pins the async job model's
-// headline behaviour (SPA-82): a compile job's result survives as jsonb and
-// can be found by the scenario's slug alone, with no job id in hand.
 func TestJobCompletionStoresResultRetrievableBySlug(t *testing.T) {
 	ctx := context.Background()
 	repo, _ := freshRepo(t)
@@ -316,9 +300,6 @@ func TestJobCompletionStoresResultRetrievableBySlug(t *testing.T) {
 	}
 }
 
-// TestWritableDomainRoundTrip proves arbitrary domain rows (not just the seed)
-// can be written through the repository and read back with their embedded
-// aggregates intact, using native types (jsonb geometry, uuid FKs, boolean).
 func TestWritableDomainRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	repo, _ := freshRepo(t)
@@ -416,11 +397,6 @@ func TestWritableDomainRoundTrip(t *testing.T) {
 	}
 }
 
-// An admin-ingested route is standalone: no scenario, addressed by slug, with
-// per-segment physics stored alongside its geometry. This is the persistence
-// half of SPA-75's "geometry + per-segment physics persists and can be read
-// back" — the jsonb segment array and the nullable scenario_id are both things
-// the in-memory handler tests cannot prove.
 func TestIngestedRouteRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	repo, _ := freshRepo(t)
@@ -479,9 +455,6 @@ func TestIngestedRouteRoundTrip(t *testing.T) {
 	}
 }
 
-// ListCuratedRouteSummaries backs the route picker (SPA-104): every route, in a
-// stable order, reduced to the three fields a picker needs. Scenario-attached
-// and standalone routes are both listed — a picker offers whatever exists.
 func TestListRouteSummariesReturnsEveryRouteInSlugOrder(t *testing.T) {
 	ctx := context.Background()
 	repo, _ := freshRepo(t)
@@ -521,8 +494,6 @@ func TestListRouteSummariesReturnsEveryRouteInSlugOrder(t *testing.T) {
 	}
 }
 
-// A route with no authored physics must read back as an empty segment list
-// rather than a NULL that breaks decoding.
 func TestRouteWithoutSegmentsRoundTrips(t *testing.T) {
 	ctx := context.Background()
 	repo, _ := freshRepo(t)

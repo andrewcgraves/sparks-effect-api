@@ -6,18 +6,10 @@ import (
 	"testing"
 )
 
-// seededCompileFake is a SeededCompileStore backed by the embedded seed data,
-// so the boot compile can be driven end to end — read rows, compile, persist a
-// succeeded job — with no database.
 type seededCompileFake struct {
-	store *Store
-	jobs  []Job
-	// createdJobs counts CreateJob calls, so a test can tell "compiled again"
-	// from "left alone".
-	createdJobs int
-	// movedStations overrides a station's coordinates by slug, standing in for
-	// the correcting UPDATE a migration runs against a deployed database (see
-	// moveStation).
+	store         *Store
+	jobs          []Job
+	createdJobs   int
 	movedStations map[string]GeoPoint
 }
 
@@ -79,13 +71,6 @@ func (f *seededCompileFake) CreateJob(_ context.Context, j Job) error {
 	return nil
 }
 
-// CompleteJob stores the result through a JSON round trip rather than keeping
-// the caller's value, because jobs.result is a jsonb column and that round trip
-// is the one thing a stored graph has been through that a freshly compiled one
-// has not. CompileSeededIfNeeded now compares the two to decide whether to
-// recompile, so a fake that skipped the encoding would be unable to catch the
-// failure that comparison most plausibly has: reporting a graph changed because
-// of how storage represents it, and recompiling on every boot forever.
 func (f *seededCompileFake) CompleteJob(_ context.Context, id string, result TransitGraph, compiledServiceIDs []string) error {
 	stored, err := roundTripGraph(result)
 	if err != nil {
@@ -102,7 +87,6 @@ func (f *seededCompileFake) CompleteJob(_ context.Context, id string, result Tra
 	return nil
 }
 
-// roundTripGraph encodes and decodes a graph the way jobs.result does.
 func roundTripGraph(g TransitGraph) (*TransitGraph, error) {
 	b, err := json.Marshal(g)
 	if err != nil {
@@ -115,9 +99,6 @@ func roundTripGraph(g TransitGraph) (*TransitGraph, error) {
 	return &out, nil
 }
 
-// moveStation repositions a station in the rows this fake reads, without
-// touching any graph already compiled from them — the state a deployed database
-// is left in by a migration that corrects a coordinate (SPA-222's 00015).
 func (f *seededCompileFake) moveStation(t *testing.T, slug string, lng, lat float64) {
 	t.Helper()
 	if f.movedStations == nil {
@@ -126,7 +107,6 @@ func (f *seededCompileFake) moveStation(t *testing.T, slug string, lng, lat floa
 	f.movedStations[slug] = GeoPoint{Type: "Point", Coordinates: []float64{lng, lat}}
 }
 
-// graphFor returns the graph the fake's latest succeeded job holds for a slug.
 func (f *seededCompileFake) graphFor(t *testing.T, slug string) *TransitGraph {
 	t.Helper()
 	job, found, err := f.GetLatestSucceededJob(context.Background(), slug, JobKindCompileScenario)
@@ -142,12 +122,6 @@ func (f *seededCompileFake) graphFor(t *testing.T, slug string) *TransitGraph {
 	return job.Result
 }
 
-// The seeded isochrone reads its transit data from the compile job's graph
-// rather than the embedded store, so the two must answer identically or the
-// swap silently changes what the public endpoint returns (SPA-181).
-//
-// This is a pure data comparison over both IsochroneData implementations — no
-// routing calls, no chainer.
 func TestCompileSeededIfNeeded_graphMatchesEmbeddedStore(t *testing.T) {
 	ctx := context.Background()
 	fake := newSeededCompileFake(t)
@@ -204,15 +178,6 @@ func TestCompileSeededIfNeeded_graphMatchesEmbeddedStore(t *testing.T) {
 	}
 }
 
-// A corrected station coordinate must reach the isochrone (SPA-222 follow-up).
-//
-// The graph carries the coordinates the isochrone is centred on, and it used to
-// be compiled once and never again — so correcting a station in the seed and in
-// the deployed rows left the polygon being cut around the old position
-// indefinitely, while the map pin (served from the embedded store) moved. This
-// is that failure in miniature, in the order it actually happened: seed the
-// pre-correction coordinate, compile, apply the correction to the rows, and
-// require the next boot to carry it into the graph.
 func TestCompileSeededIfNeeded_recompilesAfterAStationMoves(t *testing.T) {
 	ctx := context.Background()
 	fake := newSeededCompileFake(t)
@@ -223,7 +188,6 @@ func TestCompileSeededIfNeeded_recompilesAfterAStationMoves(t *testing.T) {
 		t.Fatalf("CompileSeededIfNeeded: %v", err)
 	}
 
-	// Migration 00015 corrects the station row under the stored graph.
 	const slug = "ca-hsr"
 	moved := Node{Slug: "las-vegas", Lat: 36.0545, Lng: -115.1778}
 	fake.moveStation(t, moved.Slug, moved.Lng, moved.Lat)
@@ -253,14 +217,6 @@ func TestCompileSeededIfNeeded_recompilesAfterAStationMoves(t *testing.T) {
 	t.Fatalf("no %q node in the recompiled graph", moved.Slug)
 }
 
-// Compiling at boot must be idempotent: a database that already carries a
-// compiled graph is left alone, so a restart is not a recompile.
-//
-// Since the skip is now a comparison against what the rows compile to rather
-// than a bare "a job exists", this is also what holds the comparison itself
-// honest: a graph that reports itself changed when nothing changed would
-// recompile on every boot forever, and the createdJobs count below is what
-// catches that.
 func TestCompileSeededIfNeeded_skipsAlreadyCompiledScenarios(t *testing.T) {
 	ctx := context.Background()
 	fake := newSeededCompileFake(t)
@@ -287,9 +243,6 @@ func TestCompileSeededIfNeeded_skipsAlreadyCompiledScenarios(t *testing.T) {
 	}
 }
 
-// A global boarding-wait policy change is invisible to membership/updated_at,
-// but it changes WaitSecs / WaitPolicy on every ServiceGraph, so the stored
-// graph must compare unequal and a new compile job must be written (SPA-236).
 func TestCompileSeededIfNeeded_recompilesAfterBoardingWaitPolicyChange(t *testing.T) {
 	ctx := context.Background()
 	fake := newSeededCompileFake(t)
@@ -320,9 +273,6 @@ func TestCompileSeededIfNeeded_recompilesAfterBoardingWaitPolicyChange(t *testin
 	}
 }
 
-// The job a boot compile writes carries no owner: seeding happens before any
-// account exists, and requiring admin credentials to get a public graph is the
-// manual step this closes.
 func TestCompileSeededIfNeeded_jobIsUnowned(t *testing.T) {
 	ctx := context.Background()
 	fake := newSeededCompileFake(t)

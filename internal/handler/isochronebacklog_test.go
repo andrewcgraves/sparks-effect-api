@@ -14,9 +14,6 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/logger"
 )
 
-// fakeBacklogStore is a handler.RoutingBacklogStore whose answer the test sets.
-// It records the window it was asked for, which is the one argument the cap
-// chooses rather than passes through.
 type fakeBacklogStore struct {
 	mu     sync.Mutex
 	count  int
@@ -39,8 +36,6 @@ func (f *fakeBacklogStore) set(n int) {
 	f.count = n
 }
 
-// capped wraps a handler that records whether it ran, which is what "admitted"
-// means here — the cap's whole job is deciding that.
 func capped(t *testing.T, store handler.RoutingBacklogStore, limit int) (http.Handler, *bool) {
 	t.Helper()
 	reached := false
@@ -58,9 +53,6 @@ func postCapped(h http.Handler) *httptest.ResponseRecorder {
 	return rec
 }
 
-// The threshold is a ceiling, not a target: the backlog is allowed to reach the
-// limit and is refused from there on, so the limit is the most that can ever be
-// outstanding.
 func TestCapIsochroneBacklogThresholdCrossing(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -89,8 +81,6 @@ func TestCapIsochroneBacklogThresholdCrossing(t *testing.T) {
 	}
 }
 
-// A refusal has to say enough for a client to act: a code it can branch on
-// rather than parse prose for, and a Retry-After telling it when to come back.
 func TestCapIsochroneBacklogRefusalCarriesCodeAndRetryAfter(t *testing.T) {
 	store := &fakeBacklogStore{count: 5}
 	h, _ := capped(t, store, 5)
@@ -126,9 +116,6 @@ func TestCapIsochroneBacklogRefusalCarriesCodeAndRetryAfter(t *testing.T) {
 	}
 }
 
-// Recovery is the other half of the cap: nothing resets it, so the backlog
-// falling below the limit has to be enough on its own to let work through
-// again.
 func TestCapIsochroneBacklogRecovers(t *testing.T) {
 	store := &fakeBacklogStore{count: 4}
 	h, reached := capped(t, store, 4)
@@ -149,9 +136,6 @@ func TestCapIsochroneBacklogRecovers(t *testing.T) {
 	}
 }
 
-// A count that cannot be read admits the request. This is a protective cap, not
-// a correctness gate: failing it closed would take the isochrone down over a
-// read nothing else on the path needed.
 func TestCapIsochroneBacklogAdmitsWhenTheCountFails(t *testing.T) {
 	store := &fakeBacklogStore{count: 100, err: errors.New("database is down")}
 	h, reached := capped(t, store, 1)
@@ -165,8 +149,6 @@ func TestCapIsochroneBacklogAdmitsWhenTheCountFails(t *testing.T) {
 	}
 }
 
-// A limit of zero or less is the documented off switch, and off means the store
-// is not even asked.
 func TestCapIsochroneBacklogDisabled(t *testing.T) {
 	for _, limit := range []int{0, -1} {
 		store := &fakeBacklogStore{count: 1000}

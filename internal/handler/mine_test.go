@@ -15,9 +15,6 @@ import (
 
 const timeHour = time.Hour
 
-// fakeOwnerStore records which owner ID it was asked about, so tests can prove
-// the handler scopes by the *authenticated* identity rather than by anything
-// the client supplied.
 type fakeOwnerStore struct {
 	scenarios map[string][]transit.Scenario
 	services  map[string][]transit.Service
@@ -89,9 +86,6 @@ func TestMyServicesReturnsOnlyTheCallersRows(t *testing.T) {
 	}
 }
 
-// Ownership scoping must come from the authenticated identity, never from a
-// client-supplied owner_id — otherwise any user could read another's rows by
-// passing their ID.
 func TestOwnerScopingIgnoresClientSuppliedOwnerID(t *testing.T) {
 	store := newFakeOwnerStore()
 	rec := getAs(t, handler.MyScenarios(store),
@@ -109,8 +103,6 @@ func TestOwnerScopingIgnoresClientSuppliedOwnerID(t *testing.T) {
 	}
 }
 
-// A user owning nothing gets an empty JSON array, not null — clients iterate
-// the response directly.
 func TestMyScenariosReturnsEmptyArrayNotNull(t *testing.T) {
 	store := newFakeOwnerStore()
 	rec := getAs(t, handler.MyScenarios(store), "/api/me/scenarios", transit.User{ID: "user-nothing"})
@@ -120,8 +112,6 @@ func TestMyScenariosReturnsEmptyArrayNotNull(t *testing.T) {
 	}
 }
 
-// Admins are not exempt from scoping here: "my scenarios" means theirs, not
-// everyone's. Admin power applies to gated endpoints, not to this read.
 func TestMyScenariosScopesAdminsToo(t *testing.T) {
 	store := newFakeOwnerStore()
 	getAs(t, handler.MyScenarios(store), "/api/me/scenarios",

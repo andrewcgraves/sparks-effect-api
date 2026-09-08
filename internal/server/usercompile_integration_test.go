@@ -9,9 +9,6 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// ingestCompileRoute writes a west–east route at lat 37 that the stops in
-// createUserServiceOverAPI (lng -121.8 and -121.4) sit on, so a service authored
-// against it snaps and compiles.
 func ingestCompileRoute(t *testing.T, repo interface {
 	CreateRoute(ctx context.Context, r transit.Route) error
 }, slug string) {
@@ -24,10 +21,6 @@ func ingestCompileRoute(t *testing.T, repo interface {
 	}
 }
 
-// A user compiles a single service of their own: the whole async surface —
-// POST enqueues, the job polls through to succeeded, and its result carries the
-// physics-compiled graph with the SPA-111 nodes — reused end to end for
-// user-authored content, against a real database and the migration under test.
 func TestIntegration_UserServiceCompileLifecycle(t *testing.T) {
 	h, repo := integrationServer(t)
 	adminToken := provisionAdminAndLogin(t, h, repo)
@@ -67,9 +60,6 @@ func TestIntegration_UserServiceCompileLifecycle(t *testing.T) {
 	}
 }
 
-// A user compiles a curated scenario of two co-located services: they merge at
-// their shared stops, the graph is retrievable by the scenario's slug, and the
-// job records both member ids — while a stranger can reach none of it.
 func TestIntegration_UserScenarioCompileAndGraphBySlug(t *testing.T) {
 	h, repo := integrationServer(t)
 	adminToken := provisionAdminAndLogin(t, h, repo)
@@ -139,9 +129,6 @@ func TestIntegration_UserScenarioCompileAndGraphBySlug(t *testing.T) {
 	}
 }
 
-// getUserServiceByID reads a user service back over the API by looping the
-// owner's list — the create helper returns only the id, but a compile is
-// addressed by slug.
 func getUserServiceByID(t *testing.T, h http.Handler, token, id string) transit.UserService {
 	t.Helper()
 	rec := request(t, h, http.MethodGet, "/api/services", token)

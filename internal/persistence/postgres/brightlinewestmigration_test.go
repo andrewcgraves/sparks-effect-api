@@ -4,17 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/andrewcgraves/sparks-effect-api/internal/persistence/postgres"
+	"github.com/jackc/pgx/v5"
 )
-
-// The migration that adds the Brightline West spur (00012) exists because the
-// seed cannot reach a database that is already populated: SeedIfEmpty returns
-// early there, so YAML alone would leave every deployed environment on a
-// single-corridor ca-hsr. These tests pin both sides of that — it must do the
-// work on a seeded database and nothing at all on a fresh one, since on a fresh
-// one the seed is what writes the spur moments later.
 
 const (
 	bwRouteID   = "00000000-0000-4002-8001-000000000002"
@@ -23,16 +15,6 @@ const (
 	bwVegasID   = "00000000-0000-4005-8001-00000000000f"
 )
 
-// rewindBrightlineWestMigration puts the database back to how it looked
-// immediately before 00012 ran, so a test can stage pre-SPA-153 data and let
-// goose re-apply the real migration file rather than a copy of its SQL.
-//
-// Every later migration is unwound with it: goose refuses to run a migration
-// older than the highest one already recorded unless WithAllowMissing is set,
-// so leaving a later version behind would turn 12 into an "out-of-order"
-// migration and fail the run outright. The chain is walked latest-first, so a
-// migration is never unrecorded while something built on top of it still
-// stands.
 func rewindBrightlineWestMigration(t *testing.T, url string) {
 	t.Helper()
 	rewindPhase1GeometryMigration(t, url)
@@ -45,9 +27,6 @@ func rewindBrightlineWestMigration(t *testing.T, url string) {
 		`DELETE FROM goose_db_version WHERE version_id = 12`)
 }
 
-// insertPreSpa153CaHsr stages ca-hsr as a deployed database held it before this
-// ticket: the scenario, its Phase 1 route, the Palmdale station the spur
-// branches from, and the vehicle type the new service references.
 func insertPreSpa153CaHsr(t *testing.T, url string) {
 	t.Helper()
 	const (
@@ -70,8 +49,6 @@ func insertPreSpa153CaHsr(t *testing.T, url string) {
 		   VALUES ('`+scenarioID+`', 'bakersfield', 'palmdale', 1660, '`+phase1ID+`')`)
 }
 
-// The case that actually matters in production: a seeded ca-hsr that the seed
-// will never revisit must come out of the migration holding the spur.
 func TestBrightlineWestMigrationSeedsAnAlreadyPopulatedScenario(t *testing.T) {
 	_, url := freshRepo(t)
 	rewindBrightlineWestMigration(t, url)
@@ -113,9 +90,6 @@ func TestBrightlineWestMigrationSeedsAnAlreadyPopulatedScenario(t *testing.T) {
 	}
 }
 
-// On a fresh database the migration runs before the seed, so there is no ca-hsr
-// row to attach to and it must write nothing — the seed inserts the spur from
-// YAML a moment later, and a second copy here would double every row.
 func TestBrightlineWestMigrationIsANoOpOnAnEmptyDatabase(t *testing.T) {
 	_, url := freshRepo(t)
 
@@ -131,8 +105,6 @@ func TestBrightlineWestMigrationIsANoOpOnAnEmptyDatabase(t *testing.T) {
 	}
 }
 
-// A database that already holds the spur — seeded from YAML, then migrated —
-// must not end up with a second copy of it.
 func TestBrightlineWestMigrationDoesNotDuplicateAnExistingSpur(t *testing.T) {
 	_, url := freshRepo(t)
 	rewindBrightlineWestMigration(t, url)

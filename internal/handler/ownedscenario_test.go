@@ -13,10 +13,9 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// fakeOwnedScenarioStore is an in-memory handler.OwnedScenarioStore.
 type fakeOwnedScenarioStore struct {
-	scenarios map[string]transit.Scenario // by slug
-	curated   map[string]int              // scenario id -> curated child count
+	scenarios map[string]transit.Scenario
+	curated   map[string]int
 	failWith  error
 }
 
@@ -80,7 +79,6 @@ func scenarioBody(name, description, status string) string {
 	return `{"name":"` + name + `","description":"` + description + `","status":"` + status + `"}`
 }
 
-// asScenarioUser is asUser with the {slug} wildcard bound from the scenario path.
 func asScenarioUser(t *testing.T, h http.HandlerFunc, user transit.User, method, target, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	slug := strings.Trim(strings.TrimPrefix(target, "/api/me/scenarios"), "/")
@@ -114,8 +112,6 @@ func TestCreateOwnedScenarioStampsTheCallerAsOwner(t *testing.T) {
 	}
 }
 
-// scenarios.slug is globally unique, so naming a scenario after the curated
-// baseline must yield the next free slug rather than a constraint violation.
 func TestCreateOwnedScenarioWorksAroundACollidingCuratedSlug(t *testing.T) {
 	store := newFakeOwnedScenarioStore()
 
@@ -139,7 +135,6 @@ func TestCreateOwnedScenarioRequiresAName(t *testing.T) {
 	}
 }
 
-// A name of pure punctuation validates but cannot produce an address.
 func TestCreateOwnedScenarioRejectsAnUnsluggableName(t *testing.T) {
 	store := newFakeOwnedScenarioStore()
 
@@ -150,7 +145,6 @@ func TestCreateOwnedScenarioRejectsAnUnsluggableName(t *testing.T) {
 	}
 }
 
-// The curated ca-hsr baseline must stay read-only for everyone but admins.
 func TestCuratedScenarioIsNotEditableByANonAdmin(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -199,8 +193,6 @@ func TestOwnedScenarioAnswers404ToStrangers(t *testing.T) {
 	}
 }
 
-// The slug is the address, and it is also what the travel-time set is keyed on,
-// so a rename must not move it.
 func TestUpdateOwnedScenarioKeepsTheSlugAndTheOwner(t *testing.T) {
 	store := newFakeOwnedScenarioStore()
 	store.scenarios["a-draft"] = transit.Scenario{
@@ -226,8 +218,6 @@ func TestUpdateOwnedScenarioKeepsTheSlugAndTheOwner(t *testing.T) {
 	}
 }
 
-// Deleting cascades over everything under the scenario, which is safe only
-// while the uniformity invariant holds. A curated child means it does not.
 func TestDeleteOwnedScenarioRefusesWhenItHoldsCuratedContent(t *testing.T) {
 	store := newFakeOwnedScenarioStore()
 	store.scenarios["a-draft"] = transit.Scenario{
@@ -264,8 +254,6 @@ func TestDeleteOwnedScenarioSucceedsWhenEverythingUnderItIsTheCallersOwn(t *test
 	}
 }
 
-// A client must not be able to claim an id or reassign ownership by putting
-// them on the wire — the DTO carries neither, so both are silently ignored.
 func TestOwnedScenarioIgnoresClientSuppliedIdentity(t *testing.T) {
 	store := newFakeOwnedScenarioStore()
 

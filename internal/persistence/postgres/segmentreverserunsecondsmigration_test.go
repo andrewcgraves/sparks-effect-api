@@ -4,29 +4,11 @@ import (
 	"context"
 	"testing"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/andrewcgraves/sparks-effect-api/internal/persistence/postgres"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
+	"github.com/jackc/pgx/v5"
 )
 
-// 00018 adds reverse_run_seconds on segments and writes the two CA HSR
-// mountain-hop overrides. The seed cannot deliver that fix to a database that
-// is already populated — SeedIfEmpty returns early there — so these tests pin
-// both sides: the migration must correct a deployed database and do nothing at
-// all to a fresh one, where the seed writes the overrides from YAML moments
-// later.
-
-// rewindSegmentReverseRunSecondsMigration unwinds 00018, and 00019 above it —
-// goose refuses to re-apply a migration older than the highest version already
-// recorded, so a test rewinding to before 00018 must unrecord everything after
-// it too. That is the same rule every other link in this chain follows; the
-// tail is now rewindPrerenderedIsochronesMigration (prerendered_test.go).
-//
-// 00018 adds a column and then UPDATEs it, so unwinding it both drops the
-// column (undoing the ALTER) and unrecords the version — a plain DELETE from
-// goose_db_version would leave the column behind and the next Migrate call
-// would see it already exists.
 func rewindSegmentReverseRunSecondsMigration(t *testing.T, url string) {
 	t.Helper()
 	exec(t, url,
@@ -35,9 +17,6 @@ func rewindSegmentReverseRunSecondsMigration(t *testing.T, url string) {
 	rewindPrerenderedIsochronesMigration(t, url)
 }
 
-// insertPreFixAsymmetricSegments stages ca-hsr as a deployed database held it
-// before SPA-245: the scenario, its Phase 1 route, the two mountain hops
-// carrying only a forward run time, and a symmetric hop that must stay NULL.
 func insertPreFixAsymmetricSegments(t *testing.T, url string) {
 	t.Helper()
 	exec(t, url,
@@ -52,9 +31,6 @@ func insertPreFixAsymmetricSegments(t *testing.T, url string) {
 		     ('`+phase1ScenarioID+`', 'sf', 'millbrae', 760, '`+phase1RouteID+`')`)
 }
 
-// A second scenario whose gilroy→merced would be rewritten if 00018 matched
-// on slugs alone. Distinct from phase1ScenarioID so the ca-hsr UPDATE cannot
-// hit it through scenario_id.
 const (
 	otherScenarioID = "00000000-0000-4001-8008-000000000001"
 	otherRouteID    = "00000000-0000-4002-8008-000000000001"
@@ -103,9 +79,6 @@ func assertReverseSecs(t *testing.T, url, from, to string, want int) {
 	}
 }
 
-// The case that actually matters in production: a seeded ca-hsr the seed will
-// never revisit must come out of the migration holding the two reverse
-// overrides, not mirroring the forward times.
 func TestSegmentReverseRunSecondsMigrationCorrectsAnAlreadyPopulatedScenario(t *testing.T) {
 	_, url := freshRepo(t)
 	rewindSegmentReverseRunSecondsMigration(t, url)
@@ -126,11 +99,6 @@ func TestSegmentReverseRunSecondsMigrationCorrectsAnAlreadyPopulatedScenario(t *
 	}
 }
 
-// 00018's UPDATEs must not invent rows, and must not rewrite a hop that is
-// not ca-hsr's. On a fresh database they match nothing (migrations run before
-// SeedIfEmpty). After the seed runs, the compiled gilroy↔merced edges must
-// match the embedded store: 3140 southbound (3050+90 dwell) and 3030
-// northbound (2940+90 dwell).
 func TestSegmentReverseRunSecondsMigrationIsANoOpOnAnEmptyDatabase(t *testing.T) {
 	t.Run("unrelated pair is left alone", func(t *testing.T) {
 		_, url := freshRepo(t)
@@ -188,8 +156,6 @@ func TestSegmentReverseRunSecondsMigrationIsANoOpOnAnEmptyDatabase(t *testing.T)
 	})
 }
 
-// A database that already holds the overrides — seeded from YAML, then
-// migrated — must come out of a re-run unchanged.
 func TestSegmentReverseRunSecondsMigrationIsSafeToReRun(t *testing.T) {
 	_, url := freshRepo(t)
 	rewindSegmentReverseRunSecondsMigration(t, url)

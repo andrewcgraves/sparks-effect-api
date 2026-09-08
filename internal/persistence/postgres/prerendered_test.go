@@ -10,11 +10,6 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// Prerendered isochrones (00019) are keyed on scenario_slug rather than a
-// scenario id, and their payloads are deliberately absent from the list read.
-// Both are properties of the schema and the SQL, so neither can be shown by an
-// in-memory fake — these are the assertions that need a real database.
-
 const (
 	prerenderedScenarioID = "00000000-0000-4001-8003-000000000001"
 	prerenderedSlug       = "prerendered-test-scenario"
@@ -22,9 +17,6 @@ const (
 	prerenderedEntryB     = "00000000-0000-400c-8003-000000000002"
 )
 
-// bigPayload stands in for a real isochrone: large enough that selecting it by
-// accident would be a visible mistake, and opaque, because nothing in this
-// repository parses one.
 func bigPayload(t *testing.T, marker string) json.RawMessage {
 	t.Helper()
 	coords := make([][]float64, 0, 4096)
@@ -38,16 +30,6 @@ func bigPayload(t *testing.T, marker string) json.RawMessage {
 	return b
 }
 
-// rewindPrerenderedIsochronesMigration unwinds 00019. 00020–00024 sit above
-// it, so this is not the tail of the rewind chain that starts in
-// snapmigration_test.go — rewindIsochroneCacheDepartsOnMigration is. Goose refuses
-// to re-apply an earlier migration while a later version is still recorded, so
-// anything rewinding 00019 must unrecord those first, which the link below
-// does by delegating to the next one up.
-//
-// 00019 creates a table, so unwinding it drops the table as well as unrecording
-// the version: a bare DELETE from goose_db_version would leave the table behind
-// and the next Migrate call would fail on CREATE TABLE.
 func rewindPrerenderedIsochronesMigration(t *testing.T, url string) {
 	t.Helper()
 	rewindBoardingWaitOverrideMigration(t, url)
@@ -56,8 +38,6 @@ func rewindPrerenderedIsochronesMigration(t *testing.T, url string) {
 		`DELETE FROM goose_db_version WHERE version_id = 19`)
 }
 
-// A schema change re-applied over a database that already holds its table
-// must not fail — the same property every other migration here is held to.
 func TestPrerenderedIsochronesMigrationIsSafeToReRun(t *testing.T) {
 	repo, url := freshRepo(t)
 	seedPrerenderedScenario(t, repo)
@@ -143,8 +123,6 @@ func TestPrerenderedIsochronesRoundTrip(t *testing.T) {
 		t.Errorf("compiled_service_ids = %v, want the snapshot that was written", got.CompiledServiceIDs)
 	}
 
-	// The payload survives jsonb byte-for-byte in meaning, which is the only
-	// promise this repository makes about it.
 	var want, have any
 	if err := json.Unmarshal(entry.Result, &want); err != nil {
 		t.Fatalf("unmarshal written payload: %v", err)
@@ -163,9 +141,6 @@ func TestPrerenderedIsochronesRoundTrip(t *testing.T) {
 	}
 }
 
-// The list read must not carry payloads. This is the assertion an in-memory
-// fake cannot make honestly: it is a property of the SELECT, not of the Go
-// code around it.
 func TestPrerenderedIsochronesListOmitsPayloads(t *testing.T) {
 	ctx := context.Background()
 	repo, _ := freshRepo(t)
@@ -219,9 +194,6 @@ func TestPrerenderedIsochronesListOmitsPayloads(t *testing.T) {
 	}
 }
 
-// The whole point of keying on scenario_slug is that it is a real foreign key
-// (scenarios.slug is UNIQUE), so deleting a scenario takes its curated
-// isochrones with it rather than leaving rows nothing can reach.
 func TestPrerenderedIsochronesCascadeOnScenarioDelete(t *testing.T) {
 	ctx := context.Background()
 	repo, url := freshRepo(t)
@@ -259,8 +231,6 @@ func TestPrerenderedIsochronesCascadeOnScenarioDelete(t *testing.T) {
 	}
 }
 
-// An entry naming a scenario that does not exist must be refused by the
-// foreign key rather than stored unreachable.
 func TestPrerenderedIsochroneRejectsUnknownScenarioSlug(t *testing.T) {
 	repo, _ := freshRepo(t)
 	entry := transit.PrerenderedIsochrone{
@@ -273,9 +243,6 @@ func TestPrerenderedIsochroneRejectsUnknownScenarioSlug(t *testing.T) {
 	}
 }
 
-// The membership read staleness is computed from must see the curated
-// scenario_service join and each member's updated_at — the shape
-// transit.MembershipStale consumes.
 func TestListServiceMembershipByScenario(t *testing.T) {
 	ctx := context.Background()
 	repo, _ := freshRepo(t)

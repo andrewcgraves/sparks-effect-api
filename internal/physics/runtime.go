@@ -5,30 +5,12 @@ import (
 	"math"
 )
 
-// VehicleLimits are the rolling-stock kinematic parameters the run-time
-// integrator needs: how fast the vehicle can go, and how quickly it can
-// speed up or slow down. Fields mirror transit.VehicleType's
-// physics-relevant subset; kept separate so this package stays free of a
-// transit dependency, the same seam Segment and Stop already keep.
 type VehicleLimits struct {
-	MaxSpeedKMH     float64 // must be > 0
-	AccelerationMS2 float64 // must be > 0
-	DecelerationMS2 float64 // must be > 0
+	MaxSpeedKMH     float64
+	AccelerationMS2 float64
+	DecelerationMS2 float64
 }
 
-// SpanRunSeconds integrates an accelerate -> cruise -> decelerate speed
-// profile across an inter-stop span and returns the motion time in
-// seconds — the vehicle in motion only; it does not include dwell.
-//
-// The vehicle is at rest at both ends of the span (span boundaries are
-// stops), and at every point along it, speed never exceeds the pointwise cap
-// SpeedLimit computes for that point's segment, nor what
-// vehicle.AccelerationMS2 / DecelerationMS2 make reachable from either
-// boundary. Two passes over the segment boundaries (forward, accel-limited;
-// backward, decel-limited) find the fastest speed achievable at each
-// boundary under both constraints; each segment is then walked as either an
-// accelerate-cruise-decelerate trapezoid, if there is room to reach its cap,
-// or a triangular accelerate/decelerate peak if there is not.
 func SpanRunSeconds(span InterStopSpan, vehicle VehicleLimits) (float64, error) {
 	if !(vehicle.MaxSpeedKMH > 0) {
 		return 0, fmt.Errorf("vehicle max speed must be > 0, got %v", vehicle.MaxSpeedKMH)
@@ -79,10 +61,6 @@ func SpanRunSeconds(span InterStopSpan, vehicle VehicleLimits) (float64, error) 
 
 func kmhToMS(kmh float64) float64 { return kmh / msToKMH }
 
-// boundedNodeSpeeds returns the fastest speed achievable at each of the n+1
-// segment boundaries (index 0 is the span start, index n is the span end),
-// given both boundaries are at rest, using a forward accel-limited pass and a
-// backward decel-limited pass and taking the minimum of the two at each node.
 func boundedNodeSpeeds(distsM, capsMS []float64, accel, decel float64) []float64 {
 	n := len(distsM)
 
@@ -105,14 +83,6 @@ func boundedNodeSpeeds(distsM, capsMS []float64, accel, decel float64) []float64
 	return out
 }
 
-// segmentSeconds integrates the motion time across one physics-uniform
-// segment given its entry and exit speeds (already bounded by cap and
-// accel/decel reachability via boundedNodeSpeeds), its length, and its own
-// speed cap. When there is enough distance to accelerate up to the cap and
-// decelerate back down again, the vehicle cruises at the cap in between;
-// otherwise it accelerates and decelerates directly between entry and exit,
-// meeting at a peak speed found via the standard v^2 = u^2 + 2*a*d kinematic
-// relation.
 func segmentSeconds(entryMS, exitMS, distM, capMS, accel, decel float64) float64 {
 	if distM <= 0 {
 		return 0

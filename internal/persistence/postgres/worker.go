@@ -6,21 +6,13 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
+	"github.com/jackc/pgx/v5"
 )
 
 var _ handler.WorkerStore = (*Repo)(nil)
 
-// MarkRoutingJobRunning moves a job to running.
-//
-// It is the one transition allowed to be a no-op: a job redelivered after a
-// crash is already running, and refusing to re-mark it would fail work that
-// is otherwise recoverable. Terminal statuses are excluded so a late
-// redelivery cannot drag a finished job backwards; that case, and a missing
-// row, both report handler.ErrJobNotFound.
 func (r *Repo) MarkRoutingJobRunning(ctx context.Context, id string) error {
 	return r.execRoutingJob(ctx, "MarkRoutingJobRunning", id,
 		`UPDATE routing_jobs
@@ -30,11 +22,6 @@ func (r *Repo) MarkRoutingJobRunning(ctx context.Context, id string) error {
 		id, transit.JobStatusRunning, transit.JobStatusSucceeded, transit.JobStatusFailed)
 }
 
-// SucceedRoutingJob records the computed isochrone and completes the job.
-//
-// An unconditional overwrite keyed by id: recomputing over an immutable graph
-// produces the same answer, so a second write is indistinguishable from the
-// first.
 func (r *Repo) SucceedRoutingJob(ctx context.Context, id string, result json.RawMessage) error {
 	return r.execRoutingJob(ctx, "SucceedRoutingJob", id,
 		`UPDATE routing_jobs
@@ -54,21 +41,6 @@ func (r *Repo) execRoutingJob(ctx context.Context, op, id, sql string, args ...a
 	return nil
 }
 
-// GetIsochroneCache looks every key up in one round trip.
-//
-// The keys arrive as parallel arrays unnested into a join, rather than as a
-// statement built per call: a chain over a large scenario asks about as many
-// stations as it found reachable, and a query whose text grows with that
-// would defeat the statement cache on every differently sized request.
-//
-// The keys it returns are the caller's own, echoed back out of the join rather
-// than read off the row. Postgres normalises a uuid on the way in, so a caller
-// that spelled one with different casing would otherwise get back a key it
-// could not find in its own map — a hit that reads as a miss.
-//
-// departs_on is compared with IS NOT DISTINCT FROM so a missing date (walk /
-// bike / drive, or a worker that has not started sending one) matches the
-// NULL row, while two transit dates stay two rows (SPA-269).
 func (r *Repo) GetIsochroneCache(ctx context.Context, keys []handler.IsochroneKey) (map[handler.IsochroneKey]json.RawMessage, error) {
 	found := make(map[handler.IsochroneKey]json.RawMessage, len(keys))
 	if len(keys) == 0 {
@@ -121,15 +93,6 @@ func (r *Repo) GetIsochroneCache(ctx context.Context, keys []handler.IsochroneKe
 	return found, nil
 }
 
-// PutIsochroneCache writes the batch in one round trip.
-//
-// DO NOTHING rather than DO UPDATE: a row is only ever written after a miss,
-// so a conflict means another worker chained over the same graph concurrently
-// and computed the same inputs into the same polygon.
-//
-// An empty DepartsOn is stored NULL. Walk/bike/drive have no service date;
-// transit sends YYYY-MM-DD so two dates stay two rows (SPA-269). ON CONFLICT
-// targets the five-column unique (isochrone_cache_key) 00024 introduced.
 func (r *Repo) PutIsochroneCache(ctx context.Context, entries []handler.CachedIsochrone) error {
 	if len(entries) == 0 {
 		return nil

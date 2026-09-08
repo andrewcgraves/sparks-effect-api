@@ -6,7 +6,6 @@ import (
 	"testing"
 )
 
-// line builds a valid n-point LineString with matching zero-valued segments.
 func line(n int) Ingest {
 	coords := make([][]float64, n)
 	for i := range coords {
@@ -34,7 +33,6 @@ func TestValidateAcceptsWellFormedRoute(t *testing.T) {
 	}
 }
 
-// Segments are optional: omitting them means tangent, level, uncanted track.
 func TestValidateAcceptsOmittedSegments(t *testing.T) {
 	in := line(3)
 	in.Properties.Segments = nil
@@ -85,9 +83,6 @@ func TestValidateRejectsBadGeometry(t *testing.T) {
 	}
 }
 
-// The segment list describes the gaps between points, so a route of n points
-// has exactly n-1 segments. A mismatch means the physics do not line up with
-// the geometry they describe.
 func TestValidateRejectsSegmentCountMismatch(t *testing.T) {
 	for _, n := range []int{1, 3} {
 		in := line(3)
@@ -140,8 +135,6 @@ func TestValidateRejectsOutOfRangePhysics(t *testing.T) {
 	}
 }
 
-// Radius 0 is the sentinel for tangent (straight) track, so it must pass even
-// though it sits below MinCurveRadiusM.
 func TestValidateAcceptsTangentTrackSentinel(t *testing.T) {
 	in := line(2)
 	in.Properties.Segments = []Segment{{CurveRadiusM: 0}}
@@ -209,8 +202,6 @@ func TestSlugify(t *testing.T) {
 	}
 }
 
-// Every slug Slugify produces must itself be accepted as an explicit slug,
-// otherwise a name the caller can post would derive a slug the API rejects.
 func TestSlugifyOutputIsAValidSlug(t *testing.T) {
 	for _, name := range []string{"CA HSR Phase 1", "San Francisco — Anaheim", "already-a-slug"} {
 		s := Slugify(name)

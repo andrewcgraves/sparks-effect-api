@@ -77,9 +77,6 @@ func TestGraphStale_stillPresentMemberEditedAfterCompile(t *testing.T) {
 	}
 }
 
-// A job's own creation time, not a later completion time, is the correct
-// comparison point (see the reasoning on GraphStale). This test pins the
-// asymmetry so it isn't "corrected" into comparing UpdatedAt instead.
 func TestGraphStale_comparesAgainstCreatedAtNotUpdatedAt(t *testing.T) {
 	created := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 	job := transit.Job{
@@ -213,16 +210,6 @@ func TestGraphStale_preSPA236GraphMissingWaitPolicyIsStale(t *testing.T) {
 	}
 }
 
-// SPA-264 gives every compiled edge the route it runs over. A graph compiled
-// before that carries none, which is the same shape an authored graph can never
-// legitimately have — the physics compiler always knows its service's one
-// alignment — so an edge with no route means the graph predates the feature.
-//
-// This is the sibling of TestGraphStale_preSPA236GraphMissingWaitPolicyIsStale:
-// both make an invariant a fresh graph carries actually true, rather than hoped
-// for, by declaring an old graph out of date. The author pays one recompile,
-// which the authored-graph composable already performs on its own when a stale
-// graph is refused.
 func TestGraphStale_preSPA264GraphMissingEdgeRoutesIsStale(t *testing.T) {
 	created := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 	current := []string{"svc-1"}

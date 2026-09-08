@@ -11,8 +11,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/joho/godotenv"
-
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
 	"github.com/andrewcgraves/sparks-effect-api/internal/ids"
@@ -21,6 +19,7 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/routing"
 	"github.com/andrewcgraves/sparks-effect-api/internal/server"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
+	"github.com/joho/godotenv"
 )
 
 func main() {
@@ -44,8 +43,6 @@ func main() {
 	}
 	defer cleanup()
 
-	// deps stays nil (not a typed nil) when there is no database, so the server
-	// can detect the database-less case and register the auth routes as 503s.
 	var deps server.AuthDeps
 	if repo != nil {
 		deps = repo
@@ -66,9 +63,6 @@ func main() {
 		}
 	}
 
-	// publisher stays nil (not a typed nil) with no broker configured, so the
-	// server can register the isochrone routes as 503s. It connects lazily, so
-	// constructing one here does not require the broker to be up yet.
 	var publisher routing.Publisher
 	if cfg.AMQPURL != "" {
 		amqpPublisher := routing.NewAMQPPublisher(cfg.AMQPURL, cfg.RoutingQueue, lg)
@@ -105,13 +99,6 @@ func main() {
 	}
 }
 
-// loadStore builds the compiled transit Store. When DATABASE_URL is set it runs
-// migrations, seeds the embedded scenario data on first boot, compiles what it
-// seeded, and loads rows from Postgres. Otherwise it falls back to the
-// read-only embedded YAML store so local dev works without a database, and the
-// returned repo is nil — in which case there are no compile jobs and the
-// isochrone routes answer 503 (see server.registerCompileRoutes).
-// The returned cleanup closes any DB pool.
 func loadStore(ctx context.Context, cfg config.Config, lg *slog.Logger) (*transit.Store, *postgres.Repo, func(), error) {
 	noop := func() {}
 
@@ -175,13 +162,6 @@ func loadStore(ctx context.Context, cfg config.Config, lg *slog.Logger) (*transi
 	return store, repo, repo.Close, nil
 }
 
-// bootstrapAdmin provisions the first admin account from the environment.
-//
-// The API is invite-only: accounts exist only because an admin created them,
-// which leaves no way to create the first admin. This closes that loop. It is a
-// no-op unless both variables are set, and never overwrites an existing
-// account — so leaving the variables in place across deploys cannot silently
-// reset a password, and rotating one means deleting the account first.
 func bootstrapAdmin(ctx context.Context, cfg config.Config, repo *postgres.Repo, lg *slog.Logger) error {
 	email := strings.ToLower(strings.TrimSpace(cfg.BootstrapAdminEmail))
 	if email == "" || cfg.BootstrapAdminPassword == "" {

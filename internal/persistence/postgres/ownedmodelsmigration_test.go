@@ -7,22 +7,6 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/persistence/postgres"
 )
 
-// rewindOwnedDomainModelsMigration unwinds 00022, unwinding the migration above
-// it first the way every link in this chain does. 00023 and 00024 sit above it,
-// so the tail of the rewind chain that starts in snapmigration_test.go is now
-// rewindIsochroneCacheDepartsOnMigration. Goose refuses to re-apply a migration
-// older than the highest version recorded, so anything rewinding a migration
-// below this one must unrecord those — rewindTravelModeTransitMigration does
-// that by calling this.
-//
-// It genuinely undoes the migration rather than merely unrecording it, for
-// 00020's reason: every statement in 00022 is idempotent (IF NOT EXISTS on the
-// columns and indexes, DROP CONSTRAINT IF EXISTS before each FK), so a bare
-// DELETE from goose_db_version would leave the schema in place and the next
-// Migrate would sail through as a no-op — hiding a rewind that did not actually
-// rewind. The FK swap is undone too, since restoring the columns without
-// restoring ON DELETE SET NULL would leave the database in a state neither
-// migration produces.
 func rewindOwnedDomainModelsMigration(t *testing.T, url string) {
 	t.Helper()
 	rewindCAHSRRoutingAnchorsMigration(t, url)
@@ -43,8 +27,6 @@ func rewindOwnedDomainModelsMigration(t *testing.T, url string) {
 		`DELETE FROM goose_db_version WHERE version_id = 22`)
 }
 
-// The ownership columns are what every curated-vs-owned read filters on, so
-// their absence would not fail loudly — it would quietly publish user content.
 func TestOwnedDomainModelsMigrationAddsOwnershipColumns(t *testing.T) {
 	_, url := freshRepo(t)
 
@@ -64,9 +46,6 @@ func TestOwnedDomainModelsMigrationAddsOwnershipColumns(t *testing.T) {
 	}
 }
 
-// Both access patterns run against these indexes: owner_id = $1 for the
-// owner-scoped lists, and owner_id IS NULL for the curated reads every boot
-// performs. A partial index would serve only the first.
 func TestOwnedDomainModelsMigrationIndexesOwnership(t *testing.T) {
 	_, url := freshRepo(t)
 
@@ -83,10 +62,6 @@ func TestOwnedDomainModelsMigrationIndexesOwnership(t *testing.T) {
 	}
 }
 
-// The owner FKs must cascade, not null out. Under this design an unowned row is
-// curated and public, so ON DELETE SET NULL would promote a deleted user's
-// private scenario into the public compiled store — the exact leak the
-// ownership filter exists to prevent.
 func TestOwnedDomainModelsMigrationCascadesOwnerDeletes(t *testing.T) {
 	_, url := freshRepo(t)
 
@@ -105,9 +80,6 @@ func TestOwnedDomainModelsMigrationCascadesOwnerDeletes(t *testing.T) {
 	}
 }
 
-// Every existing row predates ownership, so it must read back as curated.
-// A backfill that assigned an owner would hide the ca-hsr baseline from the
-// public reads that serve it.
 func TestOwnedDomainModelsMigrationLeavesExistingRowsCurated(t *testing.T) {
 	_, url := freshRepo(t)
 
@@ -119,15 +91,6 @@ func TestOwnedDomainModelsMigrationLeavesExistingRowsCurated(t *testing.T) {
 	}
 }
 
-// A schema change re-applied over a database that already holds it must not
-// fail — the property every migration in this package is held to, and the
-// reason 00022 is written with IF NOT EXISTS throughout.
-//
-// The unrecord here is deliberately bare rather than a call to the rewind
-// helper above: that helper undoes the schema, which would make this a test
-// that the migration applies from scratch. What is under test is the other
-// case — Migrate meeting its own columns, indexes, and constraints already in
-// place, as it does on any redeployed database.
 func TestOwnedDomainModelsMigrationIsSafeToReRun(t *testing.T) {
 	_, url := freshRepo(t)
 
@@ -154,9 +117,6 @@ func TestOwnedDomainModelsMigrationIsSafeToReRun(t *testing.T) {
 	}
 }
 
-// The rewind helper is a chain link every other rewinding test depends on, so
-// its correctness is load-bearing: if it leaves the schema behind, the tests
-// below it silently stop testing a rewind at all.
 func TestOwnedDomainModelsRewindActuallyUndoesTheMigration(t *testing.T) {
 	_, url := freshRepo(t)
 

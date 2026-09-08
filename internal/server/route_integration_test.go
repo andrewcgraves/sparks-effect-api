@@ -8,13 +8,6 @@ import (
 	"testing"
 )
 
-// This file exercises SPA-104 end-to-end against a real database and the real
-// mux: an admin ingests alignments, and an anonymous client — the route picker,
-// which runs before anyone has signed in — discovers them without knowing a
-// slug in advance.
-
-// The headline acceptance criterion: what an admin ingests is what the list
-// offers, addressed by slug and stripped to what a picker renders.
 func TestIntegration_IngestedRoutesAreDiscoverableFromTheRouteList(t *testing.T) {
 	h, repo := integrationServer(t)
 	adminToken := provisionAdminAndLogin(t, h, repo)
@@ -71,8 +64,6 @@ func TestIntegration_IngestedRoutesAreDiscoverableFromTheRouteList(t *testing.T)
 	}
 }
 
-// getRouteList fetches the list anonymously — the posture the picker relies on —
-// decoding loosely so fields that must be absent are proven absent.
 func getRouteList(t *testing.T, h http.Handler) []map[string]any {
 	t.Helper()
 	rec := request(t, h, http.MethodGet, "/api/routes", "")

@@ -12,7 +12,6 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// AuthStore is the slice of the repository the auth endpoints need.
 type AuthStore interface {
 	GetUserCredentialsByEmail(ctx context.Context, email string) (transit.User, string, bool, error)
 	CreateSession(ctx context.Context, s transit.Session) error
@@ -30,16 +29,8 @@ type loginResponse struct {
 	User      transit.User `json:"user"`
 }
 
-// invalidCredentials is the single response for every authentication failure —
-// unknown email, wrong password, or an account with no password set. Varying
-// the message would turn the endpoint into an account-enumeration oracle.
 const invalidCredentials = "invalid email or password"
 
-// Login authenticates an admin-provisioned account and mints a session token
-// valid for ttl. The token is returned once, here; only its hash is stored.
-//
-// There is deliberately no counterpart registration handler: accounts exist
-// only via the admin-gated CreateUser endpoint.
 func Login(store AuthStore, ttl time.Duration, hasher auth.Hasher) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req loginRequest
@@ -91,8 +82,6 @@ func Login(store AuthStore, ttl time.Duration, hasher auth.Hasher) http.HandlerF
 	}
 }
 
-// Logout revokes the session behind the presented bearer token. It sits behind
-// RequireAuth, so an unauthenticated caller never reaches it.
 func Logout(store AuthStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token, ok := auth.BearerToken(r)
@@ -111,8 +100,6 @@ func Logout(store AuthStore) http.HandlerFunc {
 	}
 }
 
-// Me returns the authenticated identity, letting a client confirm a stored
-// token is still valid and learn whether it carries admin rights.
 func Me() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := auth.UserFrom(r.Context())
@@ -124,8 +111,6 @@ func Me() http.HandlerFunc {
 	}
 }
 
-// normalizeEmail is the single spelling of an address used as a lookup key, so
-// provisioning and login can never disagree about which row an email names.
 func normalizeEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
 }

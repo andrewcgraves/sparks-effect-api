@@ -2,9 +2,6 @@ package transit
 
 import "testing"
 
-// Removing boarding wait can only expand reach: every station reachable under
-// half_headway from sf within a budget remains reachable under none, and the
-// none set is a (possibly strict) superset.
 func TestBoardingWaitNone_reachableIsSupersetOfHalfHeadway(t *testing.T) {
 	store := mustNewStore(t)
 	sc, ok := store.GetScenarioBySlug("ca-hsr")
@@ -34,7 +31,7 @@ func TestBoardingWaitNone_reachableIsSupersetOfHalfHeadway(t *testing.T) {
 
 	const (
 		origin = "sf"
-		budget = 4 * 3600 // 4 hours of in-vehicle + boarding budget
+		budget = 4 * 3600
 	)
 	reachable := func(g *TransitGraph) map[string]bool {
 		out := map[string]bool{origin: true}
@@ -62,9 +59,6 @@ func TestBoardingWaitNone_reachableIsSupersetOfHalfHeadway(t *testing.T) {
 	}
 }
 
-// A Palmdale interchange between HSR Local and Brightline West must charge
-// boarding wait only at the origin — never again at the transfer, under every
-// policy value (SPA-236: no transfer cost).
 func TestGraphDijkstra_palmdaleInterchangeChargesNoTransferWait(t *testing.T) {
 	store := mustNewStore(t)
 	sc, ok := store.GetScenarioBySlug("ca-hsr")

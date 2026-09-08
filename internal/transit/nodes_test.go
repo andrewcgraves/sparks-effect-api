@@ -7,9 +7,6 @@ import (
 	"testing"
 )
 
-// The node set is where a compiled graph's geometry lives, so a merged cluster
-// must surface as one node carrying the key member's position and every
-// member's name — the two facts SPA-83's chainer and the UI read off it.
 func TestMergeColocatedStops_nodeCarriesKeyMemberCoordAndAllNames(t *testing.T) {
 	svcs := []CompilableService{
 		svcOf("svc-a", stop("a--transbay", "Transbay", 0)),
@@ -34,8 +31,6 @@ func TestMergeColocatedStops_nodeCarriesKeyMemberCoordAndAllNames(t *testing.T) 
 	}
 }
 
-// A stop that merged with nothing is still a graph node — its own service's
-// edges name it — even though the merge report drops it as a non-interchange.
 func TestMergeColocatedStops_nodesIncludeSingletons(t *testing.T) {
 	svcs := []CompilableService{
 		svcOf("svc-a", stop("a--transbay", "Transbay", 0)),
@@ -61,12 +56,6 @@ func TestMergeColocatedStops_nodesIncludeSingletons(t *testing.T) {
 	}
 }
 
-// crossingScenario is two services on crossing alignments that share one
-// interchange: rt-h runs east along lat 0, rt-v runs north along lng 0.5, and
-// each has a stop at their crossing — cross-a and cross-b, two stations metres
-// apart that the merge folds onto one node. It is the smallest scenario whose
-// graph has an edge key contributed by a *merged* cluster, which is the closure
-// case this ticket exists to guarantee.
 func crossingScenario() ([]Route, []Station, []Service, []VehicleType) {
 	routes := []Route{
 		{ID: "rt-h", Slug: "rt-h", Geometry: GeoLineString{Type: "LineString", Coordinates: [][]float64{{0, 0}, {1, 0}}}},
@@ -92,10 +81,6 @@ func crossingScenario() ([]Route, []Station, []Service, []VehicleType) {
 	return routes, stations, services, []VehicleType{physicsTestVehicle()}
 }
 
-// The closure this ticket exists to guarantee: every slug an edge names has
-// exactly one node, and every node is named by some edge. A dangling edge key
-// is precisely the failure SPA-83's chainer would hit — a node key with no
-// location — so it is asserted directly on a compiled graph.
 func TestCompileScenario_nodesCloseOverEveryEdgeKey(t *testing.T) {
 	routes, stations, services, vehicleTypes := crossingScenario()
 	graph, err := CompileScenario(routes, stations, services, vehicleTypes, DefaultBoardingWaitPolicy())
@@ -131,8 +116,6 @@ func TestCompileScenario_nodesCloseOverEveryEdgeKey(t *testing.T) {
 	}
 }
 
-// The merged interchange node carries the cluster-key member's coordinate, not
-// a centroid, all the way through the physics compile.
 func TestCompileScenario_mergedNodeUsesKeyMemberCoordinate(t *testing.T) {
 	routes, stations, services, vehicleTypes := crossingScenario()
 	graph, err := CompileScenario(routes, stations, services, vehicleTypes, DefaultBoardingWaitPolicy())
@@ -153,12 +136,6 @@ func TestCompileScenario_mergedNodeUsesKeyMemberCoordinate(t *testing.T) {
 	}
 }
 
-// AC3 end-to-end on the user-authored path: a user service's stops carry the
-// coordinates SPA-108 snapped and persisted on write (ServiceStopPoint.Lat/Lng),
-// and the compiled node must be that exact persisted position — not re-snapped
-// and not re-derived. This is the path a real user scenario takes; the seeded
-// adapter reads a station location instead, so only compiling a UserService
-// proves the persisted snapped coordinate rides all the way through to the node.
 func TestCompileServices_userServiceNodeCarriesPersistedSnappedCoord(t *testing.T) {
 	svc := UserService{
 		ID:      "us-1",
@@ -199,9 +176,6 @@ func TestCompileServices_userServiceNodeCarriesPersistedSnappedCoord(t *testing.
 	}
 }
 
-// The field is additive and optional on decode: a jobs.result row written
-// before this change — no "nodes" key — still unmarshals, with Nodes nil. No
-// backfill; a legacy row is simply a graph without geometry.
 func TestTransitGraph_decodesLegacyResultWithoutNodes(t *testing.T) {
 	legacy := `{"services":[{"service_id":"svc-1","edges":[{"from_slug":"a","to_slug":"b","seconds":60}],"wait_secs":0}]}`
 
@@ -217,8 +191,6 @@ func TestTransitGraph_decodesLegacyResultWithoutNodes(t *testing.T) {
 	}
 }
 
-// omitempty holds up the other direction too: a graph with no nodes marshals
-// without a "nodes" key, so the hand-authored path's result is byte-unchanged.
 func TestTransitGraph_omitsNodesWhenEmpty(t *testing.T) {
 	b, err := json.Marshal(TransitGraph{Services: []ServiceGraph{{ServiceID: "svc-1"}}})
 	if err != nil {

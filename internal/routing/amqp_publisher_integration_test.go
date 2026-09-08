@@ -8,15 +8,11 @@ import (
 	"testing"
 	"time"
 
-	amqp "github.com/rabbitmq/amqp091-go"
-
 	"github.com/andrewcgraves/sparks-effect-api/internal/logger"
 	"github.com/andrewcgraves/sparks-effect-api/internal/routing"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-// These run against a real broker, the way the Postgres suites run against a
-// real database: publisher confirms are a property of the broker conversation,
-// and a fake that returns nil proves nothing about them.
 func brokerURL(t *testing.T) string {
 	t.Helper()
 	url := os.Getenv("TEST_AMQP_URL")
@@ -32,8 +28,6 @@ func brokerURL(t *testing.T) string {
 	return url
 }
 
-// testQueue names a queue unique to this test and deletes it afterwards, so
-// runs cannot see each other's messages.
 func testQueue(t *testing.T, url string) string {
 	t.Helper()
 	name := "test-routing-" + t.Name()
@@ -54,7 +48,6 @@ func testQueue(t *testing.T, url string) string {
 	return name
 }
 
-// consumeOne reads a single message off the queue, failing if none arrives.
 func consumeOne(t *testing.T, url, queue string) []byte {
 	t.Helper()
 	conn, err := amqp.Dial(url)
@@ -81,9 +74,6 @@ func consumeOne(t *testing.T, url, queue string) []byte {
 	}
 }
 
-// The message the worker will receive is the message this repository's golden
-// fixture describes. Everything else here tests the transport; this tests that
-// the transport does not alter the contract in flight.
 func TestIntegration_PublishedMessageMatchesTheFixture(t *testing.T) {
 	url := brokerURL(t)
 	queue := testQueue(t, url)
@@ -113,9 +103,6 @@ func TestIntegration_PublishedMessageMatchesTheFixture(t *testing.T) {
 	}
 }
 
-// A broker that is not there must fail the publish, not swallow it. This is the
-// case that would otherwise strand a routing job in `queued`: the API is
-// running, the queue is not, and every isochrone request is silently lost.
 func TestIntegration_PublishFailsWhenTheBrokerIsUnreachable(t *testing.T) {
 	// A port nothing is listening on, so the dial itself fails.
 	pub := routing.NewAMQPPublisher("amqp://guest:guest@127.0.0.1:1/", "unused", logger.Discard())
@@ -127,10 +114,6 @@ func TestIntegration_PublishFailsWhenTheBrokerIsUnreachable(t *testing.T) {
 	}
 }
 
-// A publisher whose connection dies must recover on its own. Dialling once at
-// startup would leave the API answering 502 to every isochrone request until
-// someone redeployed it, for a broker blip it could simply have reconnected
-// through.
 func TestIntegration_PublisherReconnectsAfterItsConnectionDrops(t *testing.T) {
 	url := brokerURL(t)
 	queue := testQueue(t, url)
@@ -154,10 +137,6 @@ func TestIntegration_PublisherReconnectsAfterItsConnectionDrops(t *testing.T) {
 	}
 }
 
-// A message the broker cannot route anywhere must not pass as published. The
-// broker acks it — it accepted the frame — so only the return tells the
-// difference, and without checking for one the API would answer 202 for an
-// isochrone that went nowhere.
 func TestIntegration_UnroutableMessageIsNotTreatedAsConfirmed(t *testing.T) {
 	url := brokerURL(t)
 
@@ -220,8 +199,6 @@ func TestIntegration_UnroutableMessageIsNotTreatedAsConfirmed(t *testing.T) {
 	}
 }
 
-// ErrNotConfirmed is what the handler branches on to mark a routing job failed,
-// so it has to survive the wrapping Publish does around it.
 func TestErrNotConfirmed_isMatchableThroughWrapping(t *testing.T) {
 	wrapped := errors.New("outer: " + routing.ErrNotConfirmed.Error())
 	if errors.Is(wrapped, routing.ErrNotConfirmed) {

@@ -5,25 +5,10 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/andrewcgraves/sparks-effect-api/internal/persistence/postgres"
+	"github.com/jackc/pgx/v5"
 )
 
-// rewindIsochroneCacheDepartsOnMigration unwinds 00024 and is the current tail
-// of the rewind chain that starts in snapmigration_test.go — 00024 is the
-// highest migration today, so nothing needs unwinding above it the way every
-// other link in the chain unwinds the one above. Any migration added after this
-// one must extend the chain here, or every rewinding test in this package
-// starts failing with goose's "missing migrations before current version".
-//
-// 00024 replaces the four-column primary key with a five-column UNIQUE NULLS
-// NOT DISTINCT constraint, so unwinding it restores the original key as well
-// as dropping the column. The cache is emptied first: two transit dates that
-// 00024 allowed would collide under the restored four-column key, and a cache
-// is disposable. The table-exists guard is a DO block because this runs part-way
-// down a chain that drops the table — 00014's rewind does — and a rewind helper
-// must not depend on the order it is reached in.
 func rewindIsochroneCacheDepartsOnMigration(t *testing.T, url string) {
 	t.Helper()
 	exec(t, url, `
@@ -69,9 +54,6 @@ func isochroneCacheUniqueDef(t *testing.T, url string) string {
 	return def
 }
 
-// The column and the uniqueness that lets two service dates coexist are the
-// whole of 00024, so both must be present after migrate and both must be gone
-// after a rewind.
 func TestIsochroneCacheDepartsOnMigrationAddsColumnAndUniqueKey(t *testing.T) {
 	_, url := freshRepo(t)
 
@@ -106,9 +88,6 @@ func TestIsochroneCacheDepartsOnMigrationAddsColumnAndUniqueKey(t *testing.T) {
 	}
 }
 
-// A schema change re-applied over a database that already holds it must not
-// fail — the property every migration in this package is held to, and the
-// reason 00024 drops the unique before adding it.
 func TestIsochroneCacheDepartsOnMigrationIsSafeToReRun(t *testing.T) {
 	_, url := freshRepo(t)
 
@@ -125,10 +104,6 @@ func TestIsochroneCacheDepartsOnMigrationIsSafeToReRun(t *testing.T) {
 	}
 }
 
-// Two transit service dates on one graph and station are two rows: the Get
-// predicate the worker will add is a miss on the other date, and Put has to
-// have somewhere to write the new one. Walk/bike/drive stay one row, including
-// when departs_on is NULL on both.
 func TestIsochroneCacheAllowsTwoTransitDatesAndStillCollidesWalk(t *testing.T) {
 	repo, url := freshRepo(t)
 	seedCompileJob(t, repo, routingCompileJobID)

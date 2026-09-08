@@ -6,10 +6,6 @@ import (
 	"io/fs"
 )
 
-// SeedIfEmpty loads the embedded scenario seed data through the repository, but
-// only when the store has no scenarios yet. It is safe to call on every boot:
-// the first run against an empty database populates it; subsequent runs are
-// no-ops. This is the "seed lands on first migration" path.
 func SeedIfEmpty(ctx context.Context, repo Repository) (bool, error) {
 	existing, err := repo.ListCuratedScenarios(ctx)
 	if err != nil {
@@ -24,10 +20,6 @@ func SeedIfEmpty(ctx context.Context, repo Repository) (bool, error) {
 	return true, nil
 }
 
-// SeedFromEmbedded parses every embedded scenario's YAML and writes it through
-// the repository, in dependency order (scenario → vehicle types → routes →
-// stations → services → travel times → curated membership). It does not check
-// for existing rows; callers wanting idempotency should use SeedIfEmpty.
 func SeedFromEmbedded(ctx context.Context, repo Repository) error {
 	entries, err := fs.ReadDir(dataFS, "data/scenarios")
 	if err != nil {
@@ -117,11 +109,6 @@ func seedScenario(ctx context.Context, repo Repository, slug string) error {
 	return nil
 }
 
-// validateSegmentRoutes asserts every segment names a route the scenario
-// actually has. The database enforces the same thing with a foreign key, but
-// only on the seeding path — the store also builds itself straight from the
-// embedded YAML, where a mistyped route id would otherwise surface much later
-// as a segment no client can group.
 func validateSegmentRoutes(routes []Route, tt TravelTimes) error {
 	known := make(map[string]bool, len(routes))
 	for _, rt := range routes {

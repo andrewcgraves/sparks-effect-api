@@ -12,13 +12,6 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// The two authored targets — a service and a scenario — share one
-// orchestration for compile, graph, and isochrone, so the only thing that may
-// differ between their responses is which target they name. These tests pin
-// that wording per adapter: a shared body that reached for the wrong noun, or
-// a status policy that drifted on one target only, shows up here rather than
-// in a frontend that branches on the message.
-
 func errorBody(t *testing.T, rec *httptest.ResponseRecorder) map[string]string {
 	t.Helper()
 	var body map[string]string
@@ -28,8 +21,6 @@ func errorBody(t *testing.T, rec *httptest.ResponseRecorder) map[string]string {
 	return body
 }
 
-// A non-owner sees the same 404 as an unknown slug on both compile triggers,
-// named after the target they addressed.
 func TestCompileAuthoredTargetNonOwnerIsNotFound(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -61,9 +52,6 @@ func TestCompileAuthoredTargetNonOwnerIsNotFound(t *testing.T) {
 	}
 }
 
-// Both graph reads answer 404 before any compile, naming the target the caller
-// asked about — the signal the frontend acts on by firing that target's
-// compile, so it must not name the other one.
 func TestAuthoredTargetGraphNotYetCompiledNamesItsTarget(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -92,8 +80,6 @@ func TestAuthoredTargetGraphNotYetCompiledNamesItsTarget(t *testing.T) {
 	}
 }
 
-// Both graph reads bundle the routes their services run on, under the same
-// key, so one client-side graph-to-map path serves either response.
 func TestAuthoredTargetGraphBundlesRoutesForBothTargets(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -154,8 +140,6 @@ func TestAuthoredTargetGraphBundlesRoutesForBothTargets(t *testing.T) {
 	}
 }
 
-// A stale graph is a 409 on both isochrones, carrying the same machine-readable
-// code and a message telling the caller which target to recompile.
 func TestAuthoredTargetIsochroneStaleNamesItsTarget(t *testing.T) {
 	created := time.Now().Add(-time.Hour)
 
@@ -199,8 +183,6 @@ func assertStale(t *testing.T, rec *httptest.ResponseRecorder, wantMsg string) {
 	}
 }
 
-// Neither isochrone renders a graph that has never been compiled, and each
-// says so about its own target.
 func TestAuthoredTargetIsochroneNotYetCompiledNamesItsTarget(t *testing.T) {
 	t.Run("service", func(t *testing.T) {
 		store := newFakeServiceStore()

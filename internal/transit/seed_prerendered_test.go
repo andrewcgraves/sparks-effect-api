@@ -12,20 +12,11 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// fakePrerenderedSeedStore is an in-memory transit.PrerenderedSeedStore.
-//
-// It counts creates rather than only recording them, because the property that
-// matters most here is not what ends up stored but how many times the seeder
-// tried to store it: idempotency is a statement about writes, and a store that
-// merely overwrote by id would look identical from the outside.
 type fakePrerenderedSeedStore struct {
 	scenarios []transit.Scenario
-	members   map[string][]transit.ServiceMembership // by scenario id
+	members   map[string][]transit.ServiceMembership
 	entries   map[string]transit.PrerenderedIsochrone
-
-	creates int
-	// listedFor records which scenario slugs were listed, so a test can assert
-	// a scenario with no prerendered/ directory was skipped before any query.
+	creates   int
 	listedFor []string
 }
 
@@ -72,7 +63,6 @@ func (f *fakePrerenderedSeedStore) CreatePrerenderedIsochrone(_ context.Context,
 	return nil
 }
 
-// seedFile writes one prerendered seed file into a MapFS.
 func seedFile(id, label, mode string, budget int, payload string) *fstest.MapFile {
 	return &fstest.MapFile{Data: []byte(`{
 		"id": "` + id + `",
@@ -126,8 +116,6 @@ func TestSeedPrerenderedIsochrones_seedsFromFiles(t *testing.T) {
 		t.Errorf("origin = %v,%v", got.Lat, got.Lng)
 	}
 
-	// The payload reaches storage as authored — the seeder parses the envelope
-	// around it and nothing inside it.
 	var payload map[string]any
 	if err := json.Unmarshal(got.Result, &payload); err != nil {
 		t.Fatalf("stored payload is not the JSON from the file: %v", err)
@@ -137,9 +125,6 @@ func TestSeedPrerenderedIsochrones_seedsFromFiles(t *testing.T) {
 	}
 }
 
-// The snapshot must be the scenario's real membership. Leaving it empty would
-// make every seeded entry report itself outdated on its very first read, since
-// an empty set does not match a scenario that has services.
 func TestSeedPrerenderedIsochrones_snapshotsServiceIDs(t *testing.T) {
 	store := newFakePrerenderedSeedStore()
 	if err := transit.SeedPrerenderedIsochrones(context.Background(), twoEntryFS(), store); err != nil {
@@ -157,8 +142,6 @@ func TestSeedPrerenderedIsochrones_snapshotsServiceIDs(t *testing.T) {
 	}
 }
 
-// This runs on every boot, so the second run — and every run after it — must
-// write nothing at all.
 func TestSeedPrerenderedIsochrones_secondRunIsANoOp(t *testing.T) {
 	store := newFakePrerenderedSeedStore()
 	fsys := twoEntryFS()
@@ -183,8 +166,6 @@ func TestSeedPrerenderedIsochrones_secondRunIsANoOp(t *testing.T) {
 	}
 }
 
-// A file added later is picked up on the next boot without disturbing what is
-// already stored — the point of being idempotent per id rather than per run.
 func TestSeedPrerenderedIsochrones_seedsOnlyWhatIsNew(t *testing.T) {
 	store := newFakePrerenderedSeedStore()
 	ctx := context.Background()
@@ -204,8 +185,6 @@ func TestSeedPrerenderedIsochrones_seedsOnlyWhatIsNew(t *testing.T) {
 	}
 }
 
-// Most scenarios ship no curated isochrones. An absent prerendered/ directory
-// is that statement, not a fault — and it must not even reach the store.
 func TestSeedPrerenderedIsochrones_skipsScenarioWithNoPrerenderedDir(t *testing.T) {
 	store := newFakePrerenderedSeedStore()
 	store.scenarios = append(store.scenarios,
@@ -224,7 +203,6 @@ func TestSeedPrerenderedIsochrones_skipsScenarioWithNoPrerenderedDir(t *testing.
 	}
 }
 
-// An empty prerendered/ directory is the same no-op, and must not query either.
 func TestSeedPrerenderedIsochrones_emptyDirIsANoOp(t *testing.T) {
 	store := newFakePrerenderedSeedStore()
 	fsys := fstest.MapFS{
@@ -242,8 +220,6 @@ func TestSeedPrerenderedIsochrones_emptyDirIsANoOp(t *testing.T) {
 	}
 }
 
-// This is repo-authored data, so a malformed file is a mistake to surface
-// loudly at boot rather than a row to skip quietly.
 func TestSeedPrerenderedIsochrones_rejectsMalformedFiles(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -278,8 +254,6 @@ func TestSeedPrerenderedIsochrones_rejectsMalformedFiles(t *testing.T) {
 	}
 }
 
-// The embedded seed tree must stay parseable by the seeder that reads it, so a
-// payload committed with a typo fails here rather than at a deployment's boot.
 func TestSeedPrerenderedIsochrones_embeddedSeedDataIsValid(t *testing.T) {
 	store := newFakePrerenderedSeedStore()
 	if err := transit.SeedPrerenderedIsochronesFromEmbedded(context.Background(), store); err != nil {

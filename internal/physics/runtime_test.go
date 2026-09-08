@@ -5,8 +5,6 @@ import (
 	"testing"
 )
 
-// timeTol is the absolute tolerance (seconds) used when comparing computed
-// run times against a hand-worked reference value.
 const timeTol = 1e-4
 
 func testVehicle() VehicleLimits {
@@ -15,16 +13,6 @@ func testVehicle() VehicleLimits {
 	return VehicleLimits{MaxSpeedKMH: 36, AccelerationMS2: 1, DecelerationMS2: 1}
 }
 
-// TestSpanRunSeconds_reachesCruise pins the trapezoidal (accelerate, cruise,
-// decelerate) case against an independently hand-worked example.
-//
-// Worked example: vmax = 10 m/s, accel = decel = 1 m/s^2, single tangent
-// segment of 300 m (cap = vehicle max, no lateral or grade limit).
-//
-//	accel distance to reach vmax: v^2/(2*accel) = 100/2 = 50 m, in 10 m/s / 1 = 10 s
-//	decel distance from vmax:     same by symmetry              = 50 m, 10 s
-//	cruise distance: 300 - 50 - 50 = 200 m, at 10 m/s            = 20 s
-//	total: 10 + 10 + 20 = 40 s
 func TestSpanRunSeconds_reachesCruise(t *testing.T) {
 	span := InterStopSpan{
 		FromStopID: "a",
@@ -42,22 +30,6 @@ func TestSpanRunSeconds_reachesCruise(t *testing.T) {
 	}
 }
 
-// TestSpanRunSeconds_neverReachesCruise pins the triangular (accelerate then
-// immediately decelerate, no cruise plateau) case against an independently
-// hand-worked example.
-//
-// Worked example: vmax = 10 m/s, accel = decel = 1 m/s^2, single tangent
-// segment of 60 m — too short to reach vmax (that needs 50+50=100 m, see
-// TestSpanRunSeconds_reachesCruise).
-//
-//	peak^2 = (2*accel*decel*d + decel*entry^2 + accel*exit^2) / (accel+decel)
-//	       = (2*1*1*60 + 0 + 0) / 2 = 60
-//	peak   = sqrt(60) = 7.745966...  m/s (< vmax, confirms cruise is never reached)
-//	time   = (peak-0)/accel + (peak-0)/decel = 2*sqrt(60) = 15.491933... s
-//
-// Independent check: distance accelerating 0->peak at 1 m/s^2 is
-// peak^2/2 = 30 m; decelerating peak->0 is symmetric, another 30 m;
-// 30+30 = 60 m, matching the segment length.
 func TestSpanRunSeconds_neverReachesCruise(t *testing.T) {
 	span := InterStopSpan{
 		FromStopID: "a",
@@ -70,26 +42,12 @@ func TestSpanRunSeconds_neverReachesCruise(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SpanRunSeconds() error = %v, want nil", err)
 	}
-	const want = 15.491933384829668 // 2 * sqrt(60)
+	const want = 15.491933384829668
 	if !almostEqualTol(got, want, timeTol) {
 		t.Errorf("SpanRunSeconds() = %v, want %v (±%v)", got, want, timeTol)
 	}
 }
 
-// TestSpanRunSeconds_midSpanCurveSlowsAndRecovers covers a multi-segment span
-// whose middle segment has a materially lower pointwise cap than its
-// neighbors (a curve dropping into the gap between two tangent stretches),
-// checking two independent properties:
-//
-//  1. It takes longer than the same total distance run entirely at the
-//     tangent cap — the curve must actually constrain the profile.
-//  2. Its exact duration agrees with numericalRunSeconds, a brute-force
-//     Euler/trapezoidal simulation that integrates the same physical model
-//     (forward/backward reachability against a pointwise cap) by walking the
-//     span in many small steps rather than the analytic closed-form
-//     cruise/triangular formulas SpanRunSeconds uses — an independent method
-//     that should converge to the same answer if the analytic integration is
-//     correct.
 func TestSpanRunSeconds_midSpanCurveSlowsAndRecovers(t *testing.T) {
 	vehicle := testVehicle()
 	tangent := Segment{}
@@ -140,26 +98,6 @@ func TestSpanRunSeconds_midSpanCurveSlowsAndRecovers(t *testing.T) {
 	}
 }
 
-// TestSpanRunSeconds_descendingGradeIncreasesTime exercises the
-// GradePct -> ratio conversion SpanRunSeconds does before calling SpeedLimit
-// (Segment.GradePct is a percent; SpeedLimitInputs.Grade is a ratio) — a
-// spot with no other coverage, since every other SpanRunSeconds test uses
-// level track. A wrong or missing /100 would silently change the derate
-// factor below and this golden value would no longer match.
-//
-// Worked example: vmax = 10 m/s, accel = decel = 1 m/s^2, a single 200 m
-// segment with GradePct = -10 (a 10% descent, ratio 0.10).
-//
-//	speedlimit.go's descending-grade derate: d = 0.10, threshold = 0.02,
-//	coeff = 5.0, so factor = 1 - 5*(0.10-0.02) = 1 - 0.4 = 0.6
-//	cap = 10 * 0.6 = 6 m/s
-//	accel/decel distance to cap: 6^2/2 = 18 m each (36 m total)
-//	cruise: 200 - 36 = 164 m at 6 m/s = 27.333... s
-//	total: 6 + 6 + 27.333... = 39.333... s
-//
-// A level (grade 0) span of the same 200 m instead cruises at the full
-// 10 m/s cap (50+50 m accel/decel, 100 m cruise at 10 m/s = 10 s): 10+10+10 =
-// 30 s — strictly less, since the descent must derate the cap.
 func TestSpanRunSeconds_descendingGradeIncreasesTime(t *testing.T) {
 	vehicle := testVehicle()
 	graded := InterStopSpan{
@@ -175,7 +113,7 @@ func TestSpanRunSeconds_descendingGradeIncreasesTime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SpanRunSeconds(graded) error = %v, want nil", err)
 	}
-	const want = 39.33333333333333 // 6 + 6 + 164.0/6.0
+	const want = 39.33333333333333
 	if !almostEqualTol(got, want, timeTol) {
 		t.Errorf("SpanRunSeconds(graded) = %v, want %v (±%v)", got, want, timeTol)
 	}
@@ -236,12 +174,6 @@ func TestSpanRunSeconds_zeroDistanceSpanIsInstantaneous(t *testing.T) {
 	}
 }
 
-// numericalRunSeconds is an independent brute-force reference for
-// SpanRunSeconds: it subdivides each macro segment into many fine steps of
-// at most stepM, runs the same forward/backward reachability passes at that
-// fine resolution, and integrates time as distance / average-of-endpoint-speeds
-// per fine step, rather than using the analytic cruise/triangular formulas
-// under test.
 func numericalRunSeconds(distsM, capsMS []float64, accel, decel, stepM float64) float64 {
 	var fineDists, fineCaps []float64
 	for i, d := range distsM {

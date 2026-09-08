@@ -6,9 +6,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
+	"github.com/jackc/pgx/v5"
 )
 
 // --- User services (embedded stops, inline vehicle params) ---
@@ -45,9 +44,6 @@ func (r *Repo) CreateUserService(ctx context.Context, svc transit.UserService) e
 	return wrap("CreateUserService commit", tx.Commit(ctx))
 }
 
-// UpdateUserService rewrites the whole aggregate — scalar fields, the embedded
-// stop pattern, and the frequency windows — in one transaction. Windows are
-// replaced rather than diffed: they have no identity a client can address.
 func (r *Repo) UpdateUserService(ctx context.Context, svc transit.UserService) error {
 	vehicle, stops, err := marshalUserServiceDocs(svc)
 	if err != nil {
@@ -160,12 +156,6 @@ func (r *Repo) ListUserServicesByOwner(ctx context.Context, ownerID string) ([]t
 	return out, nil
 }
 
-// ListUserServicesByIDs reads the services with the given ids, whole aggregate
-// (embedded stops, inline vehicle, frequency windows) — the batch a user
-// scenario compile loads its members with, so N members cost a constant number
-// of round trips rather than N. Ownership is not filtered here: the caller (a
-// compile of an owner's own scenario) has already established that the members
-// are theirs, and ids not found are simply absent.
 func (r *Repo) ListUserServicesByIDs(ctx context.Context, ids []string) ([]transit.UserService, error) {
 	if len(ids) == 0 {
 		return nil, nil
@@ -206,8 +196,6 @@ func (r *Repo) ListUserServicesByIDs(ctx context.Context, ids []string) ([]trans
 	return out, nil
 }
 
-// frequencyWindowsByService reads the windows for many services in one query,
-// so listing N services costs two round trips rather than N+1.
 func (r *Repo) frequencyWindowsByService(ctx context.Context, serviceIDs []string) (map[string][]transit.FrequencyWindow, error) {
 	out := map[string][]transit.FrequencyWindow{}
 	if len(serviceIDs) == 0 {
@@ -236,9 +224,6 @@ func (r *Repo) frequencyWindowsByService(ctx context.Context, serviceIDs []strin
 	return out, wrap("frequencyWindowsByService rows", rows.Err())
 }
 
-// scanUserService reads one user_services row in userServiceColumns order.
-// pgx.Row is satisfied by both QueryRow results and pgx.Rows, so the single
-// and list read paths share it.
 func scanUserService(row pgx.Row) (transit.UserService, error) {
 	var (
 		svc            transit.UserService
@@ -277,8 +262,6 @@ func (r *Repo) listUserFrequencyWindows(ctx context.Context, serviceID string) (
 	return out, wrap("listUserFrequencyWindows rows", rows.Err())
 }
 
-// insertFrequencyWindows writes windows in slice order, persisting that order
-// as seq so reads return them as the author arranged them.
 func insertFrequencyWindows(ctx context.Context, tx pgx.Tx, serviceID string, windows []transit.FrequencyWindow) error {
 	for i, fw := range windows {
 		if _, err := tx.Exec(ctx,

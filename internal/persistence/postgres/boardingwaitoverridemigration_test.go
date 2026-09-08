@@ -8,18 +8,6 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// rewindBoardingWaitOverrideMigration unwinds 00020, unwinding the migrations
-// above it first the way every link in the rewind chain that starts in
-// snapmigration_test.go does. 00021–00024 sit above it, so the tail is now
-// rewindIsochroneCacheDepartsOnMigration. Goose refuses to re-apply an earlier
-// migration while a later version is still recorded, so anything rewinding a
-// migration below this one must unrecord all five, which it gets by calling
-// this.
-//
-// 00020 adds nullable columns, so unwinding it drops them as well as
-// unrecording the version. A bare DELETE from goose_db_version would leave the
-// columns behind; ADD COLUMN IF NOT EXISTS would then succeed as a no-op, which
-// hides a rewind that did not actually rewind.
 func rewindBoardingWaitOverrideMigration(t *testing.T, url string) {
 	t.Helper()
 	rewindTravelModeTransitMigration(t, url)

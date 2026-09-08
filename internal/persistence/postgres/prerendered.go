@@ -4,21 +4,12 @@ import (
 	"context"
 	"errors"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
+	"github.com/jackc/pgx/v5"
 )
 
 // --- Scenario service membership ---
 
-// ListServiceMembershipByScenario returns the scenario's curated members and
-// when each last changed, the two inputs transit.MembershipStale compares.
-//
-// It reads the same scenario_service join ListServiceIDsByScenario does — the
-// curated membership, not services.scenario_id — so "what this scenario
-// exposes" means one thing across the codebase. updated_at comes from the
-// services rows themselves, which is where the only timestamp a member has
-// lives.
 func (r *Repo) ListServiceMembershipByScenario(ctx context.Context, scenarioID string) ([]transit.ServiceMembership, error) {
 	rows, err := r.pool.Query(ctx,
 		`SELECT s.id, s.updated_at
@@ -44,24 +35,9 @@ func (r *Repo) ListServiceMembershipByScenario(ctx context.Context, scenarioID s
 
 // --- Prerendered isochrones ---
 
-// prerenderedMetaColumns is every column of a prerendered isochrone except
-// result. It is the whole of the list read, and the reason the list read
-// exists as its own query: a payload is 300-500KB, so selecting it to build a
-// list of labels would move megabytes the response then discards.
 const prerenderedMetaColumns = `id, scenario_slug, label, lat, lng, budget_mins, mode,
 	compiled_service_ids, created_at, updated_at`
 
-// ListPrerenderedIsochronesByScenario returns a scenario's curated isochrones
-// in creation order, without their payloads.
-//
-// The ordering breaks ties on id. Seeded entries are written in one boot and
-// can share a created_at to the microsecond, and a list whose order changed
-// between two identical requests would be a page that reshuffles itself for no
-// reason.
-//
-// It returns an empty slice rather than nil so the handler encodes [] — a
-// client distinguishing "no entries" from "null" is a distinction with no
-// meaning here.
 func (r *Repo) ListPrerenderedIsochronesByScenario(ctx context.Context, scenarioSlug string) ([]transit.PrerenderedIsochrone, error) {
 	rows, err := r.pool.Query(ctx,
 		`SELECT `+prerenderedMetaColumns+` FROM prerendered_isochrones
@@ -83,8 +59,6 @@ func (r *Repo) ListPrerenderedIsochronesByScenario(ctx context.Context, scenario
 	return out, wrap("ListPrerenderedIsochronesByScenario rows", rows.Err())
 }
 
-// GetPrerenderedIsochrone loads one entry whole, payload included — the one
-// read that is meant to move a payload, since serving it is the point.
 func (r *Repo) GetPrerenderedIsochrone(ctx context.Context, id string) (transit.PrerenderedIsochrone, bool, error) {
 	var p transit.PrerenderedIsochrone
 	err := r.pool.QueryRow(ctx,
@@ -100,13 +74,6 @@ func (r *Repo) GetPrerenderedIsochrone(ctx context.Context, id string) (transit.
 	return p, true, nil
 }
 
-// CreatePrerenderedIsochrone inserts an entry, filling in the timestamps the
-// database assigned so the caller can answer 201 with a complete row rather
-// than one carrying zero times.
-//
-// result is written through untouched. Nothing here parses it: the column is
-// jsonb, so Postgres is the only thing that ever looks at its shape, and it
-// looks only for "is this JSON at all".
 func (r *Repo) CreatePrerenderedIsochrone(ctx context.Context, p *transit.PrerenderedIsochrone) error {
 	compiled := p.CompiledServiceIDs
 	if compiled == nil {

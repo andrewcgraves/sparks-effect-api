@@ -11,8 +11,6 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// stubLookup resolves exactly one token hash, standing in for the sessions
-// table so the middleware can be tested without a database.
 func stubLookup(wantHash string, u transit.User) auth.SessionLookup {
 	return func(_ context.Context, hash string) (transit.User, bool, error) {
 		if hash == wantHash {
@@ -22,8 +20,6 @@ func stubLookup(wantHash string, u transit.User) auth.SessionLookup {
 	}
 }
 
-// echoUser reports the identity the middleware placed on the request context,
-// so tests can assert the handler sees the right user — not merely a 200.
 func echoUser(t *testing.T) http.HandlerFunc {
 	t.Helper()
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -93,8 +89,6 @@ func TestRequireAuthRejectsBadCredentials(t *testing.T) {
 	}
 }
 
-// A failing session lookup must not be mistaken for "not authenticated" —
-// a database outage should surface as 500, never silently as 401.
 func TestRequireAuthSurfacesLookupErrors(t *testing.T) {
 	lookup := func(context.Context, string) (transit.User, bool, error) {
 		return transit.User{}, false, errors.New("db is down")
@@ -131,8 +125,6 @@ func TestRequireAdminAllowsAdmins(t *testing.T) {
 	}
 }
 
-// The gate SPA-75's route-write endpoints hang off: an authenticated
-// non-admin must get 403, not 200.
 func TestRequireAdminForbidsNonAdmins(t *testing.T) {
 	user := transit.User{ID: "user-1", IsAdmin: false}
 	var reached bool
@@ -152,8 +144,6 @@ func TestRequireAdminForbidsNonAdmins(t *testing.T) {
 	}
 }
 
-// An unauthenticated caller on an admin route is 401 (who are you?), not 403
-// (I know you and you may not) — the distinction matters to clients.
 func TestRequireAdminRejectsAnonymous(t *testing.T) {
 	h := auth.RequireAdmin(stubLookup(auth.HashToken("x"), transit.User{}))(
 		http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))

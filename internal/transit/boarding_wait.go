@@ -4,61 +4,31 @@ import (
 	"fmt"
 )
 
-// BoardingWaitKind is how a compile turns frequency windows into the boarding
-// wait charged once, at the origin, by graphDijkstra.
-//
-// The min-across-windows rule (half_headway / full_headway) always selects the
-// peak window — the smallest HeadwayS — regardless of time of day. There is no
-// departure-time concept on an isochrone request, so a window-aware wait would
-// be a larger feature; the optimistic peak reading is deliberate.
 type BoardingWaitKind string
 
 const (
-	// BoardingWaitNone charges no boarding wait. This is the system default.
-	BoardingWaitNone BoardingWaitKind = "none"
-	// BoardingWaitHalfHeadway charges min(headway across windows) / 2 — the
-	// historical unconditional behaviour.
+	BoardingWaitNone        BoardingWaitKind = "none"
 	BoardingWaitHalfHeadway BoardingWaitKind = "half_headway"
-	// BoardingWaitFullHeadway charges min(headway across windows) unhalved.
 	BoardingWaitFullHeadway BoardingWaitKind = "full_headway"
-	// BoardingWaitFixed charges an explicit non-negative seconds value.
-	BoardingWaitFixed BoardingWaitKind = "fixed"
+	BoardingWaitFixed       BoardingWaitKind = "fixed"
 )
 
-// BoardingWaitPolicy is the compile-time input that produces ServiceGraph.WaitSecs.
-// Resolution is compile-time so a policy change mints a new compile job and
-// invalidates isochrone_cache entries keyed on the old job id for free.
 type BoardingWaitPolicy struct {
-	Kind BoardingWaitKind
-	// FixedSecs is the wait charged when Kind is BoardingWaitFixed. Ignored
-	// otherwise. Must be non-negative; validated by ParseBoardingWaitPolicy.
+	Kind      BoardingWaitKind
 	FixedSecs int
 }
 
-// BoardingWaitOverride is a stored per-entity policy. A nil pointer means
-// inherit from the next level of ResolveBoardingWait rather than a resolved
-// copy, so changing the global default still moves everything that has not
-// deliberately opted out.
-//
-// On the wire and in services.yaml this is an object: {"policy":"fixed","secs":120}.
-// secs is required only for fixed; omitted or null secs with any other policy
-// is ignored.
 type BoardingWaitOverride struct {
 	Policy BoardingWaitKind `json:"policy" yaml:"policy"`
 	Secs   *int             `json:"secs,omitempty" yaml:"secs,omitempty"`
 }
 
-// Where a resolved boarding wait came from, most specific first. These are
-// the values of boarding_wait_source on service and scenario reads.
 const (
 	BoardingWaitSourceService  = "service"
 	BoardingWaitSourceScenario = "scenario"
 	BoardingWaitSourceGlobal   = "global"
 )
 
-// Parse converts a stored override into the compile-time policy. Empty policy
-// is rejected — inherit is represented by a nil override, never by an empty
-// object — and fixed still requires a non-negative secs companion.
 func (o BoardingWaitOverride) Parse() (BoardingWaitPolicy, error) {
 	if o.Policy == "" {
 		return BoardingWaitPolicy{}, fmt.Errorf("boarding wait: policy is required")
@@ -66,16 +36,6 @@ func (o BoardingWaitOverride) Parse() (BoardingWaitPolicy, error) {
 	return ParseBoardingWaitPolicy(string(o.Policy), o.Secs)
 }
 
-// ResolveBoardingWait picks the boarding-wait policy a compile will bake in.
-//
-// Precedence, most specific wins:
-//
-//	service override  >  scenario override  >  global default  >  none
-//
-// A nil override inherits from the next level. The global is the last
-// configured value (SPA-236); if even that is unset it is none
-// (DefaultBoardingWaitPolicy). This is the only copy of that rule: both
-// compilers and the API read surface call it rather than reimplementing it.
 func ResolveBoardingWait(service, scenario *BoardingWaitOverride, global BoardingWaitPolicy) (BoardingWaitPolicy, string, error) {
 	if service != nil {
 		p, err := service.Parse()
@@ -88,15 +48,10 @@ func ResolveBoardingWait(service, scenario *BoardingWaitOverride, global Boardin
 	return global, BoardingWaitSourceGlobal, nil
 }
 
-// DefaultBoardingWaitPolicy is the unset configuration: no boarding wait.
 func DefaultBoardingWaitPolicy() BoardingWaitPolicy {
 	return BoardingWaitPolicy{Kind: BoardingWaitNone}
 }
 
-// ParseBoardingWaitPolicy validates a kind string and optional fixed-seconds
-// companion. An empty kind resolves to none. Unrecognised kinds, a negative
-// fixed value, and fixed without companion seconds are rejected — never
-// silently remapped onto a non-zero wait.
 func ParseBoardingWaitPolicy(kind string, fixedSecs *int) (BoardingWaitPolicy, error) {
 	if kind == "" {
 		kind = string(BoardingWaitNone)
@@ -117,11 +72,6 @@ func ParseBoardingWaitPolicy(kind string, fixedSecs *int) (BoardingWaitPolicy, e
 	}
 }
 
-// WaitSecs resolves this policy against a service's frequency windows into the
-// boarding-wait seconds baked onto ServiceGraph.WaitSecs.
-//
-// half_headway and full_headway take the minimum HeadwayS across windows (the
-// peak window) — documented here deliberately, not as an oversight.
 func (p BoardingWaitPolicy) WaitSecs(windows []FrequencyWindow) (int, error) {
 	switch p.Kind {
 	case BoardingWaitNone, "":
@@ -147,11 +97,6 @@ func (p BoardingWaitPolicy) kindOrNone() BoardingWaitKind {
 	return p.Kind
 }
 
-// resolveInto writes the wait seconds for windows and the kind that produced
-// them through the given pointers. It is the single place a resolved policy is
-// recorded: the compile path writes it onto a ServiceGraph, the read models
-// write it onto their response-only fields. On error both targets are left
-// untouched rather than silently remapped onto a non-zero wait.
 func (p BoardingWaitPolicy) resolveInto(windows []FrequencyWindow, kind *string, secs *int) error {
 	wait, err := p.WaitSecs(windows)
 	if err != nil {
@@ -161,13 +106,10 @@ func (p BoardingWaitPolicy) resolveInto(windows []FrequencyWindow, kind *string,
 	return nil
 }
 
-// applyBoardingWait resolves policy against windows onto this service graph.
 func (sg *ServiceGraph) applyBoardingWait(policy BoardingWaitPolicy, windows []FrequencyWindow) error {
 	return policy.resolveInto(windows, &sg.WaitPolicy, &sg.WaitSecs)
 }
 
-// minHeadway returns the smallest HeadwayS across windows (the peak window).
-// Empty windows yield 0.
 func minHeadway(windows []FrequencyWindow) int {
 	if len(windows) == 0 {
 		return 0

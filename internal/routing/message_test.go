@@ -11,20 +11,6 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// goldenMessage is the message the fixture describes, built the way production
-// builds one — through routing.MessageFor, from a routing job and its graph.
-// That matters: a hand-written literal would pin the fixture to itself and
-// still pass if MessageFor stopped populating a field. The handler package
-// asserts the same fixture against a message that went all the way through an
-// isochrone request (see TestIsochrone_publishesTheGoldenFixtureMessage).
-//
-// The inputs are small and hand-written rather than a real compiled scenario:
-// the fixture's job is to pin the *shape* of the contract, and a 3,000-byte CA
-// HSR graph pasted into testdata would obscure that behind data no reader can
-// check by eye.
-// goldenTraceID is the fixture's trace id: a fixed value so the fixture is
-// reproducible, standing in for whatever internal/traceid attaches to a real
-// request.
 const goldenTraceID = "3fa85f64-5717-4562-b3fc-2c963f66afa6"
 
 func goldenMessage() routing.Message {
@@ -71,11 +57,6 @@ func goldenGraph() *transit.TransitGraph {
 
 func goldenPath() string { return filepath.Join("testdata", "message.golden.json") }
 
-// The wire format is a contract with a repository this compiler cannot see. The
-// fixture is the only thing holding the two ends together: this test asserts
-// the API produces it byte for byte, and the worker repo asserts it consumes
-// the same file. A change here that is not deliberate fails loudly on this side
-// before it can silently break the other.
 func TestMessage_matchesGoldenFixture(t *testing.T) {
 	got, err := json.MarshalIndent(goldenMessage(), "", "  ")
 	if err != nil {
@@ -94,10 +75,6 @@ func TestMessage_matchesGoldenFixture(t *testing.T) {
 	}
 }
 
-// Reading the fixture back must reproduce the message exactly. Marshalling
-// alone would not catch a field the worker can serialize but not parse — an
-// unexported field, say, or a type whose UnmarshalJSON disagrees with its
-// Marshal.
 func TestMessage_roundTripsThroughTheFixture(t *testing.T) {
 	raw, err := os.ReadFile(goldenPath())
 	if err != nil {
@@ -122,10 +99,6 @@ func TestMessage_roundTripsThroughTheFixture(t *testing.T) {
 	}
 }
 
-// The worker branches on schema_version before it reads anything else, so the
-// field must be present and correct even if a caller builds a Message without
-// setting it deliberately. This pins the constant itself: bumping it is a
-// contract change that should require editing a test, not just a const.
 func TestMessage_schemaVersionIsOne(t *testing.T) {
 	if routing.SchemaVersion != 1 {
 		t.Errorf("SchemaVersion = %d, want 1", routing.SchemaVersion)

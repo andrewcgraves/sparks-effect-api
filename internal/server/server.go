@@ -16,64 +16,26 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// AuthDeps is the persistence the authenticated routes need: credential
-// lookup, session storage, account provisioning, and owner-scoped reads.
-// *postgres.Repo satisfies it.
-//
-// It is nil when the server runs without a database (the read-only embedded
-// store used for local dev), in which case the authenticated routes are
-// registered as 503s — see registerAuthRoutes.
 type AuthDeps interface {
 	handler.AuthStore
 	handler.UserStore
 	handler.OwnerStore
-	// RouteStore backs admin route ingestion and the public route-read endpoint.
 	handler.RouteStore
-	// CompileStore backs the async compile job surface: triggering a scenario
-	// compile, polling its job, and reading the compiled graph back by slug.
 	handler.CompileStore
-	// ServiceStore backs the user-authored service CRUD endpoints.
 	handler.ServiceStore
-	// ScenarioStore backs the user-owned scenario CRUD endpoints.
 	handler.ScenarioStore
-	// OwnedScenarioStore backs the owner-scoped CRUD over the seeded scenario
-	// model, whose table the curated ca-hsr baseline also lives in.
 	handler.OwnedScenarioStore
-	// OwnedStationStore and OwnedTravelTimesStore back the two surfaces that
-	// make an owned scenario compilable rather than an empty shell: its
-	// stations, and the segment run times between them.
 	handler.OwnedStationStore
 	handler.OwnedTravelTimesStore
-	// OwnedServiceStore backs the owner-scoped CRUD over the seeded service
-	// model — the operating patterns that run over an owned scenario's routes.
 	handler.OwnedServiceStore
-	// OwnedRouteStore backs the owner-scoped CRUD over the seeded route model,
-	// which shares its table with the curated alignments RouteStore reads.
 	handler.OwnedRouteStore
-	// RoutingStore backs the isochrone enqueue surface and the routing job poll.
 	handler.RoutingStore
-	// WorkerStore backs the authenticated write surface the routing worker
-	// uses instead of a database connection (SPA-273).
 	handler.WorkerStore
-	// RoutingBacklogStore backs the enqueue cap that refuses isochrones once
-	// too much routing work is already outstanding (SPA-219).
 	handler.RoutingBacklogStore
-	// PrerenderedStore backs the curated isochrone surface: two public reads
-	// and the admin write that curates one.
 	handler.PrerenderedStore
-	// GetSessionUser backs the middleware's auth.SessionLookup.
 	GetSessionUser(ctx context.Context, tokenHash string) (transit.User, bool, error)
 }
 
-// New builds an *http.Server with all routes registered, ready to be
-// started by the caller.
-//
-// deps may be nil when no database is configured, and publisher may be nil when
-// no broker is. Each missing dependency turns the routes that need it into
-// 503s rather than 404s, so a client can tell "not deployed with that piece"
-// from "no such endpoint". The isochrone routes need both: since SPA-182 they
-// resolve a compiled graph out of Postgres and hand it to the routing worker
-// over the queue, computing nothing themselves.
 func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routing.Publisher, lg *slog.Logger) *http.Server {
 	mux := http.NewServeMux()
 
@@ -120,15 +82,6 @@ func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routi
 	}
 }
 
-// registerRouteRoutes wires the public route surface: the collection a picker
-// lists from, one route by slug, and the stop-snapping preview built on that
-// same geometry. Ingested routes live in Postgres, not the embedded scenario
-// store, so with no database configured they answer 503 rather than 404.
-//
-// The preview is public for the same reason the reads are: it projects onto an
-// alignment anyone may already fetch, and tells a caller nothing that geometry
-// does not. It is a POST only because it carries a body — hence the name here
-// is not "read routes", though nothing registered below writes anything.
 func registerRouteRoutes(mux *http.ServeMux, deps AuthDeps) {
 	if deps == nil {
 		// The collection needs its own entry alongside the subtree: /api/routes/
@@ -155,23 +108,6 @@ func registerRouteRoutes(mux *http.ServeMux, deps AuthDeps) {
 	mux.Handle("POST /api/routes/{slug}/snap-stops", optional(handler.SnapStops(deps)))
 }
 
-// registerCompileRoutes wires the public half of the async job model: the
-// compiled graph fetched by scenario slug, the seeded isochrone enqueued over
-// that same graph, and the poll that answers for it. Triggering a compile and
-// polling a *compile* job both require authentication and are registered in
-// registerAuthRoutes instead, alongside the other identity-gated routes.
-//
-// The seeded isochrone belongs here rather than beside the embedded-store reads
-// above because since SPA-181 it resolves its transit data through the compile
-// job that produced the scenario's graph, exactly as the authored isochrones
-// do. That also makes it Postgres-backed: with no database configured there are
-// no compile jobs to resolve, so it answers 503 like every other route whose
-// storage is missing, rather than silently falling back to a graph with no
-// identity to offer.
-//
-// The routing job poll is public in the same sense the seeded isochrone is:
-// registered without a gate, but wrapped in auth.OptionalAuth so an owned job
-// can still recognise its owner. See handler.RoutingJobStatus for the rule.
 func registerCompileRoutes(mux *http.ServeMux, deps AuthDeps, publisher routing.Publisher,
 	capBacklog func(http.Handler) http.Handler, lg *slog.Logger) {
 	if deps == nil {
@@ -192,15 +128,6 @@ func registerCompileRoutes(mux *http.ServeMux, deps AuthDeps, publisher routing.
 	mux.Handle("GET /api/routing-jobs/{id}", optional(handler.RoutingJobStatus(deps)))
 }
 
-// registerPrerenderedRoutes wires the public half of the curated isochrone
-// surface: a scenario's entries, and one of them in full. The admin write that
-// creates one is registered in registerAuthRoutes instead, beside the other
-// adminOnly routes.
-//
-// The entries live in Postgres, so with no database configured these answer
-// 503 rather than 404. Both database-less patterns are registered without a
-// method, which is what also covers the admin POST at the collection path —
-// registerAuthRoutes' own 503 list therefore needs no entry for it.
 func registerPrerenderedRoutes(mux *http.ServeMux, deps AuthDeps) {
 	const unavailable = "prerendered isochrone storage is unavailable"
 	if deps == nil {
@@ -212,18 +139,8 @@ func registerPrerenderedRoutes(mux *http.ServeMux, deps AuthDeps) {
 	mux.HandleFunc("GET /api/prerendered-isochrones/{id}", handler.PrerenderedIsochrone(deps))
 }
 
-// passThrough is the identity middleware, used for the enqueue cap in a build
-// with no database: there is nothing to count in-flight jobs in, and the
-// isochrone routes are registered as 503s in that build anyway.
 func passThrough(next http.Handler) http.Handler { return next }
 
-// requirePublisher guards an isochrone endpoint with the broker it depends on.
-//
-// An isochrone is now entirely someone else's work: with no queue to publish
-// to there is no way to do it and no partial answer worth inventing. Answering
-// 503 up front is more honest than accepting the request, recording a routing
-// job, and immediately marking it failed — which is what the handler would do
-// with a publisher that cannot reach anything.
 func requirePublisher(publisher routing.Publisher, h http.Handler) http.Handler {
 	if publisher == nil {
 		return serviceUnavailable("the routing queue is unavailable: no broker configured")
@@ -231,22 +148,6 @@ func requirePublisher(publisher routing.Publisher, h http.Handler) http.Handler 
 	return h
 }
 
-// registerAuthRoutes wires the invite-only auth surface.
-//
-// Routes are grouped by the gate they sit behind, so the protection of an
-// endpoint is visible at its registration rather than buried in the handler:
-//
-//   - public:        login only — the way in.
-//   - authenticated: identity and the caller's own scenarios/services.
-//   - admin:         account provisioning and route ingestion. Further
-//     admin-only writes register here too, by wrapping them in adminOnly. Note
-//     the database-less 503 list below is matched by path, so a new path must
-//     be added there as well or it will 404 in that build — anything under
-//     /api/admin/ is already covered by the prefix entry.
-//
-// With no database configured there is nothing to authenticate against, so
-// every route answers 503 rather than 404 — a client can tell "not deployed
-// with auth" from "no such endpoint".
 func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, publisher routing.Publisher,
 	capBacklog func(http.Handler) http.Handler, lg *slog.Logger) {
 	if deps == nil {
@@ -404,17 +305,6 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 		adminOnly(handler.CreatePrerenderedIsochrone(deps)))
 }
 
-// registerWorkerRoutes wires the authenticated write surface the routing
-// worker uses to record job results and reuse egress polygons (SPA-273).
-//
-// These used to be SQL the worker ran against a DATABASE_URL. Exposing that
-// database past the API's private network is what this gate exists to stop:
-// the worker presents a shared bearer token, not a user session, and the
-// SQL stays in this process.
-//
-// A missing database or a missing WORKER_TOKEN both 503 rather than 404, and
-// rather than leaving the writes unauthenticated. An empty token matching an
-// empty Authorization header would be worse than not registering the routes.
 func registerWorkerRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps) {
 	const unavailable = "worker API is unavailable"
 	if deps == nil {
@@ -434,20 +324,10 @@ func registerWorkerRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps) 
 	mux.Handle("POST /api/internal/isochrone-cache", gate(handler.WorkerCachePut(deps)))
 }
 
-// noDatabase answers 503 for a route whose backing store is Postgres when no
-// database is configured — the great majority of them, hence its own wrapper
-// over serviceUnavailable rather than the suffix repeated at each call site.
 func noDatabase(what string) http.HandlerFunc {
 	return serviceUnavailable(what + ": no database configured")
 }
 
-// serviceUnavailable answers 503 for a route one of whose dependencies is not
-// configured — Postgres for most, the queue broker for the isochrones — so a
-// client can tell "not deployed with that piece" from "no such endpoint".
-//
-// msg is the whole message, including which dependency is missing: it used to
-// name the database itself, which stopped being true once a second dependency
-// could be the one missing. Most callers go through noDatabase above.
 func serviceUnavailable(msg string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -459,10 +339,6 @@ func serviceUnavailable(msg string) http.HandlerFunc {
 	}
 }
 
-// statusRecorder captures the status code a handler answers with, so
-// logRequests can log it: http.ResponseWriter has no getter of its own, and
-// an access log that cannot say whether a request succeeded is not worth
-// having.
 type statusRecorder struct {
 	http.ResponseWriter
 	status int
@@ -473,10 +349,6 @@ func (s *statusRecorder) WriteHeader(status int) {
 	s.ResponseWriter.WriteHeader(status)
 }
 
-// logRequests logs one structured line per request — method, path, status,
-// duration, and the request's trace id — after it completes. It must sit
-// inside traceid.Middleware so the trace id is already on the context by the
-// time it reads it.
 func logRequests(lg *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
@@ -494,30 +366,12 @@ func logRequests(lg *slog.Logger, next http.Handler) http.Handler {
 	})
 }
 
-// allowedOrigins are exact Origins always permitted for CORS, regardless of
-// the ALLOW_LOCALHOST_CORS testing flag. Production SPA hosts live here.
 var allowedOrigins = map[string]bool{
 	"https://sparks-effect-website.vercel.app": true,
 }
 
-// vercelPreviewHost is the Vercel team that hosts preview deployments
-// (SPA-252). Those previews talk to the staging API, so they must be allowed
-// the same way production is. The matcher is the team suffix, not a branch
-// name: Vercel assigns a new hostname per deployment (a 9-character hash, or
-// a truncated git alias plus a short slug) and the DNS label is capped at 63
-// characters, so the branch rarely appears in full. What is stable is
-// -<team>.vercel.app. Not a wildcard *.vercel.app, and not the production
-// alias already in allowedOrigins.
 const vercelPreviewHost = "andrewcgraves-projects.vercel.app"
 
-// sparksEffectHost is the project's own domain. Every host under it — the
-// apex, dev., and whatever subdomain comes next — serves this project's own
-// frontend against this API, so the domain is allowed as a whole rather than
-// re-listed in allowedOrigins each time one appears.
-//
-// Unlike the Vercel team slug above, the match here requires a real subdomain
-// boundary: the dot is part of the suffix, so a lookalike registration such as
-// notsparks-effect.app cannot slip in on a bare string suffix.
 const sparksEffectHost = "sparks-effect.app"
 
 func cors(next http.Handler, allowLocalhost bool) http.Handler {
@@ -552,11 +406,6 @@ func originAllowed(origin string, allowLocalhost bool) bool {
 	return allowLocalhost && isLocalhostOrigin(origin)
 }
 
-// isSparksEffectOrigin reports whether origin is an HTTPS host on the project's
-// own domain — the apex sparks-effect.app or any subdomain of it, such as
-// dev.sparks-effect.app. HTTPS only, matching the rest of the allowlist: the
-// domain is served over TLS, so a plaintext Origin claiming it is not one of
-// ours.
 func isSparksEffectOrigin(origin string) bool {
 	u, err := url.Parse(origin)
 	if err != nil {
@@ -569,12 +418,6 @@ func isSparksEffectOrigin(origin string) bool {
 	return host == sparksEffectHost || strings.HasSuffix(host, "."+sparksEffectHost)
 }
 
-// isVercelPreviewOrigin reports whether origin is an HTTPS deployment on the
-// Vercel team that hosts this project's previews. Real hosts from this
-// project look like sparks-effect-website-git-claude-2643c5-andrewcgraves-projects.vercel.app
-// (truncated git alias) or sparks-effect-website-<9-char-hash>-andrewcgraves-projects.vercel.app
-// (per-commit URL). The team slug is a suffix of the DNS label, not a
-// subdomain — there is no extra dot before it.
 func isVercelPreviewOrigin(origin string) bool {
 	u, err := url.Parse(origin)
 	if err != nil {

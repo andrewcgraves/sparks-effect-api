@@ -10,8 +10,6 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// Admin provisioning is the *only* way an account comes into existence — this
-// is what stands in for a signup route in an invite-only system.
 func TestCreateUserProvisionsALoggableAccount(t *testing.T) {
 	store := newFakeAuthStore(t)
 	rec := postJSON(t, handler.CreateUser(store, testHasher), "/api/admin/users",
@@ -44,8 +42,6 @@ func TestCreateUserProvisionsALoggableAccount(t *testing.T) {
 	}
 }
 
-// Email is the login key, so provisioning and login must agree on its
-// normalized form — otherwise an account created with capitals is unreachable.
 func TestProvisionedEmailIsCaseInsensitiveAtLogin(t *testing.T) {
 	store := newFakeAuthStore(t)
 	rec := postJSON(t, handler.CreateUser(store, testHasher), "/api/admin/users",

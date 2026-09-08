@@ -14,12 +14,6 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// OwnedServiceStore is the slice of the repository the owner-scoped CRUD over
-// the seeded service model needs.
-//
-// A seeded service is addressed by id, not slug: the services table has no slug
-// column and transit.Service has no Slug field, which removes slug minting from
-// this model entirely.
 type OwnedServiceStore interface {
 	CreateService(ctx context.Context, svc transit.Service) error
 	GetServiceByID(ctx context.Context, id string) (transit.Service, bool, error)
@@ -31,44 +25,26 @@ type OwnedServiceStore interface {
 	ListStationsByScenario(ctx context.Context, scenarioID string) ([]transit.Station, error)
 }
 
-const maxOwnedServiceBodyBytes = 1 << 20 // 1 MiB
+const maxOwnedServiceBodyBytes = 1 << 20
 
-// ownedServiceRequest is the client-writable surface of a seeded service.
-//
-// Identity fields (id, owner_id) are absent, as everywhere else. So is
-// provenance: computed / calibrated / frozen are editorial claims about where a
-// service's numbers came from ("physics-compiled", "imported timetable",
-// "locked by policy"), and a user cannot make such a claim about their own
-// work. It stays empty on anything authored through this endpoint.
 type ownedServiceRequest struct {
-	ScenarioSlug  string `json:"scenario_slug"`
-	RouteSlug     string `json:"route_slug"`
-	VehicleTypeID string `json:"vehicle_type_id"`
-	Name          string `json:"name"`
-	Direction     string `json:"direction"`
-	Active        *bool  `json:"active"`
-	// BoardingWait is the exception to full-replace, matching the convention
-	// SPA-237 established on the user-service write path: omitted leaves the
-	// stored override alone, an explicit null clears it back to inherit, and an
-	// object sets it. optionalBoardingWait is what tells those three apart, and
-	// its parse() is where an invalid policy becomes a 422.
+	ScenarioSlug     string                    `json:"scenario_slug"`
+	RouteSlug        string                    `json:"route_slug"`
+	VehicleTypeID    string                    `json:"vehicle_type_id"`
+	Name             string                    `json:"name"`
+	Direction        string                    `json:"direction"`
+	Active           *bool                     `json:"active"`
 	BoardingWait     optionalBoardingWait      `json:"boarding_wait"`
 	Stops            []ownedServiceStopIn      `json:"stops"`
 	FrequencyWindows []transit.FrequencyWindow `json:"frequency_windows"`
 }
 
-// ownedServiceStopIn names a station by slug rather than id, so a client can
-// never supply an arbitrary station_id — and in particular not one belonging to
-// somebody else's scenario.
 type ownedServiceStopIn struct {
 	StationSlug string `json:"station_slug"`
 	Sequence    int    `json:"sequence"`
-	// DwellS overrides the dwell the compiler would otherwise resolve from
-	// vehicle floor height against platform height. Omitted means "resolve it".
-	DwellS *int `json:"dwell_s"`
+	DwellS      *int   `json:"dwell_s"`
 }
 
-// CreateOwnedService persists a service inside a scenario the caller owns.
 func CreateOwnedService(store OwnedServiceStore, boardingWait transit.BoardingWaitPolicy) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := auth.UserFrom(r.Context())
@@ -110,7 +86,6 @@ func CreateOwnedService(store OwnedServiceStore, boardingWait transit.BoardingWa
 	}
 }
 
-// GetOwnedService returns one of the caller's own services, whole.
 func GetOwnedService(store OwnedServiceStore, boardingWait transit.BoardingWaitPolicy) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		svc, ok := loadOwnedService(w, r, store)
@@ -129,8 +104,6 @@ func GetOwnedService(store OwnedServiceStore, boardingWait transit.BoardingWaitP
 	}
 }
 
-// UpdateOwnedService rewrites a service the caller owns — its scalars, its
-// stopping pattern, and its frequency windows.
 func UpdateOwnedService(store OwnedServiceStore, boardingWait transit.BoardingWaitPolicy) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		svc, ok := loadOwnedService(w, r, store)
@@ -159,9 +132,6 @@ func UpdateOwnedService(store OwnedServiceStore, boardingWait transit.BoardingWa
 	}
 }
 
-// DeleteOwnedService removes a service the caller owns. Its stops and frequency
-// windows cascade, and jobs.compiled_service_ids is a bare uuid[] snapshot
-// rather than an FK, so a graph compiled earlier correctly keeps listing it.
 func DeleteOwnedService(store OwnedServiceStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		svc, ok := loadOwnedService(w, r, store)
@@ -176,13 +146,6 @@ func DeleteOwnedService(store OwnedServiceStore) http.HandlerFunc {
 	}
 }
 
-// resolveOwnedService validates every reference the payload names and writes
-// the resolved result onto svc.
-//
-// services has three NOT NULL foreign keys, so an unchecked reference is a 500
-// where a 422 naming the offending slug belongs. Each of the four checks below
-// is one of those, plus the ownership rules that keep the uniformity invariant
-// intact.
 func resolveOwnedService(
 	w http.ResponseWriter, r *http.Request, store OwnedServiceStore,
 	user transit.User, req ownedServiceRequest, svc *transit.Service,
@@ -258,7 +221,6 @@ func resolveOwnedService(
 	return true
 }
 
-// resolveServiceStops turns station slugs into ids and normalises the pattern.
 func resolveServiceStops(
 	w http.ResponseWriter, r *http.Request, store OwnedServiceStore,
 	sc transit.Scenario, in []ownedServiceStopIn,
@@ -317,9 +279,6 @@ func resolveServiceStops(
 	return out, true
 }
 
-// loadOwnedService resolves the {id} path value and applies the ownership rule,
-// answering 404 rather than 403 for loadOwnedRoute's reason. A curated service
-// lands here too — its owner is nil, so CanAccess admits only admins.
 func loadOwnedService(w http.ResponseWriter, r *http.Request, store OwnedServiceStore) (transit.Service, bool) {
 	user, ok := auth.UserFrom(r.Context())
 	if !ok {

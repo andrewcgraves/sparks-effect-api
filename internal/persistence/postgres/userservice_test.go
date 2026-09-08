@@ -5,10 +5,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/andrewcgraves/sparks-effect-api/internal/persistence/postgres"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
+	"github.com/jackc/pgx/v5"
 )
 
 const (
@@ -20,8 +19,6 @@ const (
 	usServiceID  = "00000000-0000-4008-8003-000000000001"
 )
 
-// userServiceFixture returns a repo pre-loaded with the rows a user service
-// needs to exist: an owner, a scenario, and two routes.
 func userServiceFixture(t *testing.T) (*postgres.Repo, context.Context, string) {
 	t.Helper()
 	ctx := context.Background()
@@ -55,10 +52,6 @@ func userServiceFixture(t *testing.T) (*postgres.Repo, context.Context, string) 
 	return repo, ctx, url
 }
 
-// sampleUserService is a service in the shape the write path produces, stop
-// identities included — it mints them through MintStopSlugs rather than
-// spelling them out, so a change to the scheme reaches these tests instead of
-// leaving them asserting against a stale hand-written copy.
 func sampleUserService() transit.UserService {
 	svc := transit.UserService{
 		ID: usServiceID, Slug: "bay-area-express", RouteID: usRouteID, OwnerID: usOwnerID,

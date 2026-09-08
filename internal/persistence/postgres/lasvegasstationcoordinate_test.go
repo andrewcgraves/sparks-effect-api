@@ -16,19 +16,6 @@ const lasVegasCoordinateMigrationPath = "migrations/00015_las_vegas_station_coor
 
 var errNoLineStringIn00015 = errors.New("no LineString literal in " + lasVegasCoordinateMigrationPath)
 
-// The corrected Las Vegas station coordinate and Brightline West spur
-// geometry are written down twice — once in
-// internal/transit/data/scenarios/ca-hsr/{stations,routes}.yaml for databases
-// the seed reaches, once as UPDATE literals in 00015 for the deployed ones it
-// does not (see lasvegasstationcoordinatemigration_test.go). Two copies of
-// the same data drift, and the drift is invisible: both databases still
-// compile, they just disagree about where the station and the trains are.
-// This is the same pin TestBrightlineWestMigrationGeometryMatchesTheSeed puts
-// on 00012 and TestCaHsrPhase1MigrationGeometryMatchesTheSeed puts on 00013 —
-// 00012 itself is deliberately left alone (see 00015's header), so the pin
-// for the spur's geometry and the las-vegas station now lives here instead.
-//
-// This needs no database — it compares the files themselves.
 func TestLasVegasStationCoordinateMigrationGeometryMatchesTheSeed(t *testing.T) {
 	seeded := seededBrightlineWestGeometry(t)
 
@@ -86,8 +73,6 @@ func TestLasVegasStationCoordinateMigrationStationMatchesTheSeed(t *testing.T) {
 	}
 }
 
-// seededBrightlineWestGeometry is the Brightline West spur alignment as
-// routes.yaml authors it.
 func seededBrightlineWestGeometry(t *testing.T) transit.GeoLineString {
 	t.Helper()
 	store, err := transit.NewStore(transit.DefaultBoardingWaitPolicy())
@@ -107,9 +92,6 @@ func seededBrightlineWestGeometry(t *testing.T) transit.GeoLineString {
 	return transit.GeoLineString{}
 }
 
-// lasVegasCoordinateMigrationGeometry is the alignment 00015 carries. The
-// literal is the only LineString in the file, wrapped over several lines for
-// readability, so the SQL line breaks and indentation are stripped back out.
 func lasVegasCoordinateMigrationGeometry() (transit.GeoLineString, error) {
 	var out transit.GeoLineString
 	sql, err := os.ReadFile(lasVegasCoordinateMigrationPath)

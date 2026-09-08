@@ -10,16 +10,6 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-// Exercises owned routes end to end against a real database and the real mux:
-// a member authors an alignment of their own, edits its name and description,
-// and finds it everywhere it should be and nowhere it should not — while a
-// stranger can do none of that.
-//
-// The containment half is the point. A route with an owner must never reach the
-// public picker or the by-slug read, because those are the surfaces an
-// anonymous caller sees.
-
-// authedRequest drives the real mux with a bearer token.
 func authedRequest(t *testing.T, h http.Handler, token, method, target, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(method, target, strings.NewReader(body))
@@ -34,8 +24,6 @@ func authedRequest(t *testing.T, h http.Handler, token, method, target, body str
 	return rec
 }
 
-// ownedAlignment is a two-point line at lat 37 running west to east, the same
-// geometry the user-service helpers snap their stops onto.
 func ownedAlignment(name, description string) string {
 	return `{"type":"LineString","coordinates":[[-121.9,37.0],[-121.3,37.0]],
 		"properties":{"name":"` + name + `","description":"` + description + `","mode":"rail"}}`
@@ -54,8 +42,6 @@ func createOwnedRoute(t *testing.T, h http.Handler, token, name, description str
 	return rt
 }
 
-// AC: a member authors a route, owns it, and can change its name and
-// description afterwards — the whole point of the feature.
 func TestIntegration_OwnedRouteIsAuthoredAndEditableByItsOwner(t *testing.T) {
 	h, repo := integrationServer(t)
 	adminToken := provisionAdminAndLogin(t, h, repo)
@@ -96,8 +82,6 @@ func TestIntegration_OwnedRouteIsAuthoredAndEditableByItsOwner(t *testing.T) {
 	}
 }
 
-// The containment criterion: an owned route is absent from every public
-// surface, and a stranger cannot reach it by guessing its slug.
 func TestIntegration_OwnedRouteIsInvisibleToThePublicAndToStrangers(t *testing.T) {
 	h, repo := integrationServer(t)
 	adminToken := provisionAdminAndLogin(t, h, repo)
@@ -154,9 +138,6 @@ func TestIntegration_OwnedRouteIsInvisibleToThePublicAndToStrangers(t *testing.T
 	}
 }
 
-// An admin-ingested alignment stays curated: unowned, and therefore still in
-// the public picker. Stamping the admin as its owner would quietly empty
-// GET /api/routes, which is what the website derives its scenario list from.
 func TestIntegration_AdminIngestedRoutesStayCurated(t *testing.T) {
 	h, repo := integrationServer(t)
 	adminToken := provisionAdminAndLogin(t, h, repo)
@@ -183,9 +164,6 @@ func TestIntegration_AdminIngestedRoutesStayCurated(t *testing.T) {
 	}
 }
 
-// Deleting a route that a saved service is built on must be refused, not
-// cascaded: user_services.route_id is ON DELETE CASCADE, so the alternative is
-// silently destroying the service.
 func TestIntegration_OwnedRouteDeleteIsRefusedWhileAServiceUsesIt(t *testing.T) {
 	h, repo := integrationServer(t)
 	adminToken := provisionAdminAndLogin(t, h, repo)
@@ -219,9 +197,6 @@ func TestIntegration_OwnedRouteDeleteIsRefusedWhileAServiceUsesIt(t *testing.T) 
 	}
 }
 
-// A user must not be able to build a service on someone else's private
-// alignment — reachable before ownership existed only because no route had an
-// owner to check.
 func TestIntegration_AServiceCannotBeBuiltOnSomeoneElsesPrivateRoute(t *testing.T) {
 	h, repo := integrationServer(t)
 	adminToken := provisionAdminAndLogin(t, h, repo)

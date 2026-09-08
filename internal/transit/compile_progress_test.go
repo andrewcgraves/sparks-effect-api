@@ -5,17 +5,6 @@ import (
 	"testing"
 )
 
-// SPA-264 gives every edge the corridor its hop runs over and the chainage of
-// its two endpoint stations along that corridor's alignment, so a consumer can
-// draw a partial leg without reconstructing the geometry itself.
-//
-// The three fields travel together: an edge either names a route and carries
-// both chainages, or names no route and carries neither. That is the same shape
-// a graph compiled before this change has, which is why nothing downstream
-// needs a second code path to recognise a hop it cannot draw.
-
-// edgeByHop indexes a service graph's directed edges by their endpoints, which
-// is how every assertion below reads one back.
 func edgeByHop(t *testing.T, sg ServiceGraph, from, to string) Edge {
 	t.Helper()
 	for _, e := range sg.Edges {
@@ -36,13 +25,6 @@ func assertChainage(t *testing.T, label string, got, want float64) {
 	}
 }
 
-// The physics path knows the route outright — a CompilableService carries the
-// one alignment its stops were authored against — so every edge it emits names
-// it, and the chainages are the projection it already performs.
-//
-// The line is the equatorial (0,0)→(1,0) alignment the rest of this package's
-// physics tests use, whose length in this projection is
-// R * pi/180 = 111194.926644... m, so station b's chainage is the whole line.
 func TestCompileServicePhysics_edgesCarryRouteAndEndpointChainage(t *testing.T) {
 	route := Route{
 		ID:       "rt-1",
@@ -83,10 +65,6 @@ func TestCompileServicePhysics_edgesCarryRouteAndEndpointChainage(t *testing.T) 
 	assertChainage(t, "b→a ToChainageM", rev.ToChainageM, 0)
 }
 
-// The seeded path compiles from a calibrated run-time table rather than from
-// geometry, and used to discard the routes it was handed entirely. It now snaps
-// its stations onto them with the same projection the physics path uses, which
-// is what lets a seeded scenario draw progress at all.
 func TestCompile_seededEdgesCarryRouteAndEndpointChainage(t *testing.T) {
 	sc := Scenario{ID: "sc-1", Slug: "test"}
 	route := Route{
@@ -125,11 +103,6 @@ func TestCompile_seededEdgesCarryRouteAndEndpointChainage(t *testing.T) {
 	assertChainage(t, "b→a ToChainageM", rev.ToChainageM, 0)
 }
 
-// Compilation is route-blind: a seeded service may path across two corridors
-// that meet at a shared station, and the segment rows say which corridor each
-// hop runs over. A single route per service would be wrong for exactly those
-// services, and silently, so the route is settled per edge from the segments
-// the hop actually traverses.
 func TestCompile_seededServiceSpanningTwoCorridorsGetsRoutePerEdge(t *testing.T) {
 	sc := Scenario{ID: "sc-1", Slug: "test"}
 	north := Route{
@@ -176,11 +149,6 @@ func TestCompile_seededServiceSpanningTwoCorridorsGetsRoutePerEdge(t *testing.T)
 	assertChainage(t, "b→c FromChainageM", edgeByHop(t, g.Services[0], "b", "c").FromChainageM, 0)
 }
 
-// A station too far from the alignment its hop runs over cannot be placed on
-// it, and a stub drawn from a guessed position would be worse than no stub. The
-// edge is emitted with no route and no chainage — the shape a pre-SPA-264 graph
-// has — rather than the compile failing, because progress is decoration and a
-// seed correction must never be able to take the isochrone down with it.
 func TestCompile_seededStationOffItsRouteYieldsEdgeWithoutRouteOrChainage(t *testing.T) {
 	sc := Scenario{ID: "sc-1", Slug: "test"}
 	// The alignment runs due east along the equator; b sits a degree north of
@@ -223,10 +191,6 @@ func TestCompile_seededStationOffItsRouteYieldsEdgeWithoutRouteOrChainage(t *tes
 	}
 }
 
-// A hop whose segments disagree about the corridor has no single alignment to
-// measure against. It degrades the same way an unplaceable station does rather
-// than picking one of them, which would draw a stub down a corridor the leg
-// only half runs over.
 func TestCompile_seededMultiSegmentHopAcrossCorridorsHasNoRoute(t *testing.T) {
 	sc := Scenario{ID: "sc-1", Slug: "test"}
 	north := Route{ID: "rt-north", Slug: "rt-north",
@@ -257,9 +221,6 @@ func TestCompile_seededMultiSegmentHopAcrossCorridorsHasNoRoute(t *testing.T) {
 	}
 }
 
-// A seeded scenario compiled with no routes in hand — every existing caller
-// passed nil before SPA-264 — still compiles, and simply carries no progress
-// data. The degradation rule covers it with no second code path.
 func TestCompile_seededWithoutRoutesStillCompiles(t *testing.T) {
 	sc := Scenario{ID: "sc-1", Slug: "test"}
 	services := []Service{{
@@ -281,11 +242,6 @@ func TestCompile_seededWithoutRoutesStillCompiles(t *testing.T) {
 	}
 }
 
-// The flagship seeded scenario is where this feature is actually seen, on the
-// public scenario page's curated illustrations, so its edges being placeable is
-// the fact stages 2-4 rest on. Nothing else in this package would notice the
-// seed drifting off its alignments: the tolerate-and-omit rule above means the
-// compile would keep succeeding and every stub would silently stop being drawn.
 func TestCompile_seededFlagshipScenarioEdgesAreAllPlaced(t *testing.T) {
 	store := mustNewStore(t)
 	sc, ok := store.GetScenarioBySlug("ca-hsr")

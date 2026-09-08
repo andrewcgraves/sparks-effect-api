@@ -15,16 +15,6 @@ const phase1MigrationPath = "migrations/00013_ca_hsr_phase1_geometry.sql"
 
 var errNoLineString = errors.New("no LineString literal in " + phase1MigrationPath)
 
-// The corrected CA HSR Phase 1 alignment is written down twice — once in
-// internal/transit/data/scenarios/ca-hsr/routes.yaml for databases the seed
-// reaches, once as a jsonb literal in 00013 for the deployed ones it does not.
-// Two copies of the same geometry drift, and the drift is invisible: both
-// databases still compile, they just disagree about where the trains go. This
-// is the same pin TestBrightlineWestMigrationGeometryMatchesTheSeed puts on
-// 00012, and it matters more here, because the whole point of 00013 is that a
-// wrong alignment produces no error — only wrong chainage.
-//
-// This needs no database — it compares the files themselves.
 func TestCaHsrPhase1MigrationGeometryMatchesTheSeed(t *testing.T) {
 	seeded := seededPhase1Geometry(t)
 
@@ -45,7 +35,6 @@ func TestCaHsrPhase1MigrationGeometryMatchesTheSeed(t *testing.T) {
 	}
 }
 
-// seededPhase1Geometry is the Phase 1 alignment as routes.yaml authors it.
 func seededPhase1Geometry(t *testing.T) transit.GeoLineString {
 	t.Helper()
 	store, err := transit.NewStore(transit.DefaultBoardingWaitPolicy())
@@ -65,9 +54,6 @@ func seededPhase1Geometry(t *testing.T) transit.GeoLineString {
 	return transit.GeoLineString{}
 }
 
-// phase1MigrationGeometry is the alignment 00013 carries. The literal is the
-// only LineString in the file, wrapped over several lines for readability, so
-// the SQL line breaks and indentation are stripped back out.
 func phase1MigrationGeometry() (transit.GeoLineString, error) {
 	var out transit.GeoLineString
 	sql, err := os.ReadFile(phase1MigrationPath)

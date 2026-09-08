@@ -7,27 +7,6 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/physics"
 )
 
-// CompileServicePhysics compiles one service's stops on its route directly
-// from track geometry and vehicle kinematics — accelerate/cruise/decelerate
-// speed-profile integration per inter-stop span, via internal/physics —
-// rather than a hand-authored named-segment run-time table. This is the path
-// user-generated routes and services use; Compile's segmentRunTimes table
-// remains how seeded scenarios (with no per-service route geometry to
-// project stops onto) are compiled.
-//
-// It takes a CompilableService rather than any one domain model, so the seeded
-// Service and the user-authored UserService compile through the same code —
-// see the adapters in compilable.go. svc.Route must have at least 2 geometry
-// coordinates, and svc.Stops must have at least 2 entries, already ordered and
-// with distinct slugs.
-//
-// An inactive seeded service is not special-cased here: whether a service
-// belongs in a graph at all is scenario-assembly semantics, and CompileScenario
-// already skips it before reaching this.
-//
-// Edges reuse the same forward motion time in both directions (the existing
-// hand-authored-table compiler's convention — see TravelTimes), varying only by
-// which end's dwell they carry, matching pathDwellSecs in compile.go.
 func CompileServicePhysics(svc CompilableService, boardingWait BoardingWaitPolicy) (ServiceGraph, error) {
 	line, err := ToPhysicsLine(svc.Route.Geometry)
 	if err != nil {
@@ -112,13 +91,6 @@ func CompileServicePhysics(svc CompilableService, boardingWait BoardingWaitPolic
 	return sg, nil
 }
 
-// ToPhysicsLine converts a route's GeoJSON LineString to physics.Point
-// coordinates, erroring the way physics.ProjectStops itself would (fewer
-// than 2 points) so the caller gets one consistent error path.
-//
-// It is exported for the snap-stops preview endpoint, which projects onto the
-// same geometry this compiler does and must not carry a second, drifting copy
-// of the conversion.
 func ToPhysicsLine(g GeoLineString) ([]physics.Point, error) {
 	if len(g.Coordinates) < 2 {
 		return nil, fmt.Errorf("route geometry must have at least 2 points, got %d", len(g.Coordinates))
@@ -130,10 +102,6 @@ func ToPhysicsLine(g GeoLineString) ([]physics.Point, error) {
 	return line, nil
 }
 
-// toPhysicsSegments converts a route's per-span track physics to
-// physics.Segment. An empty input is passed through as-is: both RouteSegment
-// and physics.ProjectStops treat that as tangent, level, uncanted track for
-// every span.
 func toPhysicsSegments(segs []RouteSegment, lineLen int) ([]physics.Segment, error) {
 	if len(segs) == 0 {
 		return nil, nil
