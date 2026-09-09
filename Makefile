@@ -3,8 +3,11 @@ BUILD_DIR := ./bin
 CMD_DIR := ./cmd/api
 
 GOLANGCI_LINT_VERSION := v2.12.2
-GOBIN := $(shell go env GOPATH)/bin
-GOLANGCI_LINT := $(GOBIN)/golangci-lint
+# Recursive so `make check-contract` does not invoke `go` (and, on a
+# runner without the module's toolchain, download it) just to expand
+# a path the target never uses.
+GOBIN = $(shell go env GOPATH)/bin
+GOLANGCI_LINT = $(GOBIN)/golangci-lint
 
 # --- Throwaway Postgres for integration tests (single source of truth) ---
 # These same values drive `make db-up` locally AND the CI job, so the local and

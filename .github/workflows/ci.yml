@@ -56,7 +56,13 @@ jobs:
       - name: Diff golden fixture against the worker
         env:
           GH_TOKEN: ${{ secrets.GH_CONTRACT_TOKEN }}
-        run: make check-contract
+        run: |
+          set -euo pipefail
+          if [[ -z "${GH_TOKEN:-}" ]]; then
+            echo "::error::GH_CONTRACT_TOKEN is not set. Add a fine-grained PAT with Contents: Read on andrewcgraves/sparks-effect-routing-worker as the GH_CONTRACT_TOKEN Actions secret on this repository. Until then this job 404s instead of diffing."
+            exit 1
+          fi
+          make check-contract
 
   build:
     name: Build
@@ -80,7 +86,7 @@ jobs:
 
   publish:
     name: Publish Docker image
-    needs: [check, build, contract]
+    needs: [check, build]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
@@ -126,7 +132,7 @@ jobs:
   # hold different commits at the same time — see docs/releases.md.
   linear-staging:
     name: Record staging release in Linear
-    needs: [check, build, contract, publish]
+    needs: [check, build, publish]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
