@@ -43,9 +43,10 @@
 -- has no Phase 1 row yet and this UPDATE touches zero rows; the seed then
 -- inserts the corrected geometry from YAML a moment later. On a deployed
 -- database the row exists and the UPDATE does the work instead. Either way the
--- alignment ends up identical, which is why the id below is the one authored in
--- YAML rather than a fresh one, and why routes.yaml and this literal are pinned
--- to each other by TestCaHsrPhase1MigrationGeometryMatchesTheSeed.
+-- alignment ended up identical at the time this landed. SPA-285 retired the
+-- YAML-vs-SQL pin: later seed corrections reach deployed databases through
+-- ReconcileSeed, and this migration stays as a record of what already-applied
+-- databases were told to do.
 --
 -- Re-running is safe: assigning a value that is already there is a no-op.
 

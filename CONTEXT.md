@@ -268,3 +268,4 @@ explains what a thing is called; an ADR explains why it works the way it does,
 and is not to be re-litigated on the strength of a name.
 
 - [ADR-0001 — The API and worker share no Go code](docs/adr/0001-api-and-worker-share-no-go-code.md)
+- [ADR-0002 — Seeded rows reconcile from YAML at boot](docs/adr/0002-seed-reconciliation.md)

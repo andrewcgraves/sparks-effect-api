@@ -12,7 +12,7 @@ const hsrExpressID = "00000000-0000-4004-8001-000000000001"
 func rewindHSRExpressParkedMigration(t *testing.T, url string) {
 	t.Helper()
 	rewindSegmentReverseRunSecondsMigration(t, url)
-	exec(t, url, `DELETE FROM goose_db_version WHERE version_id = 17`)
+	rewindTo(t, url, 17)
 }
 
 func insertPreFixHSRExpress(t *testing.T, url string) {
@@ -63,15 +63,11 @@ func TestHSRExpressParkedMigrationIsSafeToReRun(t *testing.T) {
 	}
 
 	// Forget that it ran while keeping the data it wrote, so the second pass
-	// meets exactly the state a YAML-seeded database would present. 00018 and
-	// 00019 sit above 17 now, so they must be forgotten too — goose refuses to
-	// re-apply 17 while a later version is still recorded. 00019 goes through
-	// its rewind rather than a bare DELETE: it creates a table, and leaving the
-	// table behind would fail the re-migrate on CREATE TABLE.
+	// meets exactly the state a YAML-seeded database would present. 00019
+	// goes through its rewind rather than rewindTo alone: it creates a table,
+	// and leaving the table behind would fail the re-migrate on CREATE TABLE.
 	rewindPrerenderedIsochronesMigration(t, url)
-	exec(t, url,
-		`DELETE FROM goose_db_version WHERE version_id = 18`,
-		`DELETE FROM goose_db_version WHERE version_id = 17`)
+	rewindTo(t, url, 17)
 	if err := postgres.Migrate(context.Background(), url); err != nil {
 		t.Fatalf("migration re-run over the data it already wrote: %v", err)
 	}

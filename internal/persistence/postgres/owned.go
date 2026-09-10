@@ -62,10 +62,10 @@ func (r *Repo) UpdateRoute(ctx context.Context, rt transit.Route) error {
 	}
 	tag, err := r.pool.Exec(ctx,
 		`UPDATE routes
-		    SET scenario_id = $2, name = $3, description = $4, mode = $5,
-		        geometry = $6, bidirectional = $7, segments = $8, updated_at = now()
+		    SET scenario_id = $2, slug = $3, name = $4, description = $5, mode = $6,
+		        geometry = $7, bidirectional = $8, segments = $9, updated_at = now()
 		  WHERE id = $1`,
-		rt.ID, rt.ScenarioID, rt.Name, rt.Description, rt.Mode,
+		rt.ID, rt.ScenarioID, rt.Slug, rt.Name, rt.Description, rt.Mode,
 		rt.Geometry, rt.Bidirectional, segments)
 	if err != nil {
 		return wrap("UpdateRoute", err)
@@ -120,10 +120,10 @@ func (r *Repo) GetStationBySlug(ctx context.Context, scenarioID, slug string) (t
 func (r *Repo) UpdateStation(ctx context.Context, st transit.Station) error {
 	tag, err := r.pool.Exec(ctx,
 		`UPDATE stations
-		    SET name = $2, location = $3, routing_location = $4,
-		        platform_height = $5, updated_at = now()
+		    SET slug = $2, name = $3, location = $4, routing_location = $5,
+		        platform_height = $6, updated_at = now()
 		  WHERE id = $1`,
-		st.ID, st.Name, st.Location, st.RoutingLocation, st.PlatformHeight)
+		st.ID, st.Slug, st.Name, st.Location, st.RoutingLocation, st.PlatformHeight)
 	if err != nil {
 		return wrap("UpdateStation", err)
 	}
@@ -170,6 +170,24 @@ func (r *Repo) GetVehicleTypeByID(ctx context.Context, id string) (transit.Vehic
 		return transit.VehicleType{}, false, wrap("GetVehicleTypeByID", err)
 	}
 	return vt, true, nil
+}
+
+func (r *Repo) UpdateVehicleType(ctx context.Context, vt transit.VehicleType) error {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE vehicle_types
+		    SET name = $2, propulsion = $3, max_speed_kmh = $4,
+		        acceleration_ms2 = $5, deceleration_ms2 = $6,
+		        floor_height = $7, dwell_level_s = $8, dwell_step_s = $9
+		  WHERE id = $1`,
+		vt.ID, vt.Name, vt.Propulsion, vt.MaxSpeedKMH, vt.AccelerationMS2,
+		vt.DecelerationMS2, vt.FloorHeight, vt.DwellLevelS, vt.DwellStepS)
+	if err != nil {
+		return wrap("UpdateVehicleType", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("postgres: UpdateVehicleType: no vehicle type with id %q", vt.ID)
+	}
+	return nil
 }
 
 // --- Services ---

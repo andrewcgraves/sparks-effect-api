@@ -3,9 +3,12 @@ package transit
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
+
+var _ SeedReconciler = (*fakeSeedSink)(nil)
 
 type fakeSeedSink struct {
 	scenarios    []Scenario
@@ -17,6 +20,8 @@ type fakeSeedSink struct {
 	travelTimes  []TravelTimes
 	listErr      error
 	createErr    error
+	updateErr    error
+	updates      int
 }
 
 func (f *fakeSeedSink) ListCuratedScenarios(context.Context) ([]Scenario, error) {
@@ -78,8 +83,140 @@ func (f *fakeSeedSink) UpsertTravelTimes(_ context.Context, tt TravelTimes) erro
 	if f.createErr != nil {
 		return f.createErr
 	}
+	for i, existing := range f.travelTimes {
+		if existing.ScenarioSlug == tt.ScenarioSlug {
+			f.travelTimes[i] = tt
+			f.updates++
+			return nil
+		}
+	}
 	f.travelTimes = append(f.travelTimes, tt)
 	return nil
+}
+
+func (f *fakeSeedSink) GetScenarioBySlug(_ context.Context, slug string) (Scenario, bool, error) {
+	if f.listErr != nil {
+		return Scenario{}, false, f.listErr
+	}
+	for _, sc := range f.scenarios {
+		if sc.Slug == slug {
+			return sc, true, nil
+		}
+	}
+	return Scenario{}, false, nil
+}
+
+func (f *fakeSeedSink) ListVehicleTypes(context.Context) ([]VehicleType, error) {
+	return f.vehicleTypes, nil
+}
+
+func (f *fakeSeedSink) ListRoutesByScenario(_ context.Context, scenarioID string) ([]Route, error) {
+	var out []Route
+	for _, r := range f.routes {
+		if r.ScenarioID != nil && *r.ScenarioID == scenarioID {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeSeedSink) ListStationsByScenario(_ context.Context, scenarioID string) ([]Station, error) {
+	var out []Station
+	for _, st := range f.stations {
+		if st.ScenarioID == scenarioID {
+			out = append(out, st)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeSeedSink) ListServicesByScenario(_ context.Context, scenarioID string) ([]Service, error) {
+	var out []Service
+	for _, svc := range f.services {
+		if svc.ScenarioID == scenarioID {
+			out = append(out, svc)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeSeedSink) GetTravelTimes(_ context.Context, scenarioSlug string) (TravelTimes, bool, error) {
+	for _, tt := range f.travelTimes {
+		if tt.ScenarioSlug == scenarioSlug {
+			return tt, true, nil
+		}
+	}
+	return TravelTimes{}, false, nil
+}
+
+func (f *fakeSeedSink) UpdateScenario(_ context.Context, sc Scenario) error {
+	if f.updateErr != nil {
+		return f.updateErr
+	}
+	for i, existing := range f.scenarios {
+		if existing.ID == sc.ID {
+			f.scenarios[i] = sc
+			f.updates++
+			return nil
+		}
+	}
+	return fmt.Errorf("no scenario %s", sc.ID)
+}
+
+func (f *fakeSeedSink) UpdateVehicleType(_ context.Context, vt VehicleType) error {
+	if f.updateErr != nil {
+		return f.updateErr
+	}
+	for i, existing := range f.vehicleTypes {
+		if existing.ID == vt.ID {
+			f.vehicleTypes[i] = vt
+			f.updates++
+			return nil
+		}
+	}
+	return fmt.Errorf("no vehicle type %s", vt.ID)
+}
+
+func (f *fakeSeedSink) UpdateRoute(_ context.Context, r Route) error {
+	if f.updateErr != nil {
+		return f.updateErr
+	}
+	for i, existing := range f.routes {
+		if existing.ID == r.ID {
+			f.routes[i] = r
+			f.updates++
+			return nil
+		}
+	}
+	return fmt.Errorf("no route %s", r.ID)
+}
+
+func (f *fakeSeedSink) UpdateStation(_ context.Context, st Station) error {
+	if f.updateErr != nil {
+		return f.updateErr
+	}
+	for i, existing := range f.stations {
+		if existing.ID == st.ID {
+			f.stations[i] = st
+			f.updates++
+			return nil
+		}
+	}
+	return fmt.Errorf("no station %s", st.ID)
+}
+
+func (f *fakeSeedSink) UpdateService(_ context.Context, svc Service) error {
+	if f.updateErr != nil {
+		return f.updateErr
+	}
+	for i, existing := range f.services {
+		if existing.ID == svc.ID {
+			f.services[i] = svc
+			f.updates++
+			return nil
+		}
+	}
+	return fmt.Errorf("no service %s", svc.ID)
 }
 
 func TestSeedFromEmbedded_writesThroughSink(t *testing.T) {

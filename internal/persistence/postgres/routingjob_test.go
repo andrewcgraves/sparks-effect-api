@@ -24,8 +24,8 @@ func rewindRoutingJobsMigration(t *testing.T, url string) {
 	rewindLasVegasCoordinateMigration(t, url)
 	exec(t, url,
 		`DROP TABLE IF EXISTS isochrone_cache`,
-		`DROP TABLE IF EXISTS routing_jobs`,
-		`DELETE FROM goose_db_version WHERE version_id = 14`)
+		`DROP TABLE IF EXISTS routing_jobs`)
+	rewindTo(t, url, 14)
 }
 
 func seedCompileJob(t *testing.T, repo interface {

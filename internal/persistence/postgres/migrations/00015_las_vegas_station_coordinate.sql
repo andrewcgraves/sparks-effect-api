@@ -38,11 +38,11 @@
 -- las-vegas station nor the Brightline West route exists yet and both
 -- UPDATEs below touch zero rows; the seed then inserts the corrected station
 -- and geometry from YAML a moment later. On a deployed database the rows
--- exist and the UPDATEs do the work instead. Either way the result ends up
--- identical, which is why routes.yaml and this literal are pinned to each
--- other by TestLasVegasStationCoordinateMigrationGeometryMatchesTheSeed, and
--- the station coordinate by
--- TestLasVegasStationCoordinateMigrationStationMatchesTheSeed.
+-- exist and the UPDATEs do the work instead. Either way the result ended up
+-- identical at the time this landed. SPA-285 retired the YAML-vs-SQL pin:
+-- later seed corrections reach deployed databases through ReconcileSeed, and
+-- this migration stays as a record of what already-applied databases were
+-- told to do.
 --
 -- Re-running is safe: assigning a value that is already there is a no-op.
 

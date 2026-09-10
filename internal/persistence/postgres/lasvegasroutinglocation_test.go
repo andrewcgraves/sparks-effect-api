@@ -1,62 +1,18 @@
 package postgres_test
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"os"
 	"testing"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/persistence/postgres"
-	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
-
-const lasVegasRoutingLocationMigrationPath = "migrations/00016_las_vegas_routing_location.sql"
-
-func TestLasVegasRoutingLocationMigrationMatchesTheSeed(t *testing.T) {
-	store, err := transit.NewStore(transit.DefaultBoardingWaitPolicy())
-	if err != nil {
-		t.Fatalf("NewStore: %v", err)
-	}
-	sc, ok := store.GetScenarioBySlug("ca-hsr")
-	if !ok {
-		t.Fatal("ca-hsr scenario not found")
-	}
-
-	var seeded *transit.GeoPoint
-	found := false
-	for _, st := range store.GetStationsByScenario(sc.ID) {
-		if st.Slug == "las-vegas" {
-			seeded = st.RoutingLocation
-			found = true
-		}
-	}
-	if !found {
-		t.Fatal("seeded las-vegas station not found")
-	}
-	if seeded == nil {
-		t.Fatal("seeded las-vegas station carries no routing_location")
-	}
-
-	sql, err := os.ReadFile(lasVegasRoutingLocationMigrationPath)
-	if err != nil {
-		t.Fatalf("read migration: %v", err)
-	}
-	want, err := json.Marshal(seeded)
-	if err != nil {
-		t.Fatalf("marshal las-vegas routing_location: %v", err)
-	}
-	if !bytes.Contains(sql, want) {
-		t.Errorf("00016 does not carry las-vegas routing_location at %s", want)
-	}
-}
 
 func rewindLasVegasRoutingLocationMigration(t *testing.T, url string) {
 	t.Helper()
 	rewindHSRExpressParkedMigration(t, url)
 	exec(t, url,
-		`ALTER TABLE stations DROP COLUMN IF EXISTS routing_location`,
-		`DELETE FROM goose_db_version WHERE version_id = 16`)
+		`ALTER TABLE stations DROP COLUMN IF EXISTS routing_location`)
+	rewindTo(t, url, 16)
 }
 
 func insertPreFixLasVegasStation(t *testing.T, url string) {
@@ -111,16 +67,11 @@ func TestLasVegasRoutingLocationMigrationIsSafeToReRun(t *testing.T) {
 	}
 
 	// Forget that it ran while keeping the data it wrote, so the second pass
-	// meets exactly the state a YAML-seeded database would present. 00017,
-	// 00018 and 00019 sit above 16 now, so they must be forgotten too — goose
-	// refuses to re-apply 16 while a later version is still recorded. 00019
-	// goes through its rewind rather than a bare DELETE: it creates a table,
+	// meets exactly the state a YAML-seeded database would present. 00019
+	// goes through its rewind rather than rewindTo alone: it creates a table,
 	// and leaving the table behind would fail the re-migrate on CREATE TABLE.
 	rewindPrerenderedIsochronesMigration(t, url)
-	exec(t, url,
-		`DELETE FROM goose_db_version WHERE version_id = 18`,
-		`DELETE FROM goose_db_version WHERE version_id = 17`,
-		`DELETE FROM goose_db_version WHERE version_id = 16`)
+	rewindTo(t, url, 16)
 	if err := postgres.Migrate(context.Background(), url); err != nil {
 		t.Fatalf("migration re-run over the data it already wrote: %v", err)
 	}

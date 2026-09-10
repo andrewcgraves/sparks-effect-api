@@ -12,8 +12,8 @@ import (
 func rewindSegmentReverseRunSecondsMigration(t *testing.T, url string) {
 	t.Helper()
 	exec(t, url,
-		`ALTER TABLE segments DROP COLUMN IF EXISTS reverse_run_seconds`,
-		`DELETE FROM goose_db_version WHERE version_id = 18`)
+		`ALTER TABLE segments DROP COLUMN IF EXISTS reverse_run_seconds`)
+	rewindTo(t, url, 18)
 	rewindPrerenderedIsochronesMigration(t, url)
 }
 
@@ -159,12 +159,11 @@ func TestSegmentReverseRunSecondsMigrationIsSafeToReRun(t *testing.T) {
 	}
 
 	// Forget that it ran while keeping the data it wrote, so the second pass
-	// meets exactly the state a YAML-seeded database would present. 00019 sits
-	// above 18 now, so it must be unwound too — goose refuses to re-apply 18
-	// while a later version is still recorded, and 00019 creates a table, so
-	// leaving it behind would fail the re-migrate on CREATE TABLE.
+	// meets exactly the state a YAML-seeded database would present. 00019
+	// goes through its rewind rather than rewindTo alone: it creates a table,
+	// and leaving the table behind would fail the re-migrate on CREATE TABLE.
 	rewindPrerenderedIsochronesMigration(t, url)
-	exec(t, url, `DELETE FROM goose_db_version WHERE version_id = 18`)
+	rewindTo(t, url, 18)
 	if err := postgres.Migrate(context.Background(), url); err != nil {
 		t.Fatalf("migration re-run over the data it already wrote: %v", err)
 	}
