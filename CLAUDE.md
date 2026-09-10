@@ -14,6 +14,21 @@ Use the Makefile for all build/test tasks (Go project).
 - `make tidy` — `go mod tidy`
 - `make clean` — remove build artifacts
 
+## Domain vocabulary
+
+[`CONTEXT.md`](CONTEXT.md) is the canonical glossary for the whole project —
+scenario, service, station, stop, node, edge, chainage, offset, dwell, boarding
+wait, interchange, staleness, reach, routing anchor, mode vs costing, the five
+error codes and the four job statuses. Read it before naming a new type,
+endpoint, column or seam, and use its words rather than minting synonyms. The
+other three repositories keep a `CONTEXT.md` of their own for terms only they
+use, and link back here for the rest.
+
+Declaration-level doc comments were deliberately removed from this source in
+SPA-307 because they restated their declarations. Domain meaning belongs in
+`CONTEXT.md`; rationale belongs in in-function comments, migration headers, and
+the README. Do not reintroduce godoc that only repeats a name.
+
 ## Branching
 
 One trunk: `main`. Branch from it, PR into it. There is no `prd` branch —
