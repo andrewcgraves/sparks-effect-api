@@ -58,20 +58,10 @@ re-derives `min(headway)/2` itself.
 
 The message is a contract between two repositories with no compiler checking
 it ([ADR-0001](docs/adr/0001-api-and-worker-share-no-go-code.md)), so it is
-pinned by a golden fixture — `internal/routing/testdata/message.golden.json`,
+pinned by a golden fixture — `internal/routing/testdata/message.golden.json` —
 which this repo asserts it produces and the worker repo asserts it consumes.
-
-```json
-{
-  "schema_version": 1,
-  "routing_job_id": "<uuid>",
-  "compile_job_id": "<uuid>",
-  "graph": { "...compiled TransitGraph..." },
-  "lat": 0.0, "lng": 0.0,
-  "budget_mins": 0,
-  "mode": "walk | bike | drive | transit"
-}
-```
+That file is the on-the-wire shape; a prose copy of it is a third copy and
+goes stale.
 
 The graph travels inline — 2,894 bytes for CA HSR, roughly 30 KB for a large
 authored scenario — so the worker needs no database of its own. Publisher
