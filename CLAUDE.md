@@ -30,6 +30,16 @@ SPA-307 because they restated their declarations. Domain meaning belongs in
 in-function comments, migration headers, and the README. Do not reintroduce
 godoc that only repeats a name.
 
+## Tickets
+
+Issues live in Linear, team `Sparks Effect` (`SPA-` prefix).
+[`docs/agents/ticket-template.md`](docs/agents/ticket-template.md) is the canonical
+ticket shape for the whole project: the front block that says which repos a change
+lands in and in what order, the definition of ready behind `ready-for-agent`, six
+paste-ready bodies, and the table of cross-repo seams. Read it before filing a
+ticket or picking one up. The other three repositories link here rather than
+restating it.
+
 ## Branching
 
 One trunk: `main`. Branch from it, PR into it. There is no `prd` branch —
