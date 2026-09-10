@@ -34,8 +34,8 @@ func rewindPrerenderedIsochronesMigration(t *testing.T, url string) {
 	t.Helper()
 	rewindBoardingWaitOverrideMigration(t, url)
 	exec(t, url,
-		`DROP TABLE IF EXISTS prerendered_isochrones`,
-		`DELETE FROM goose_db_version WHERE version_id = 19`)
+		`DROP TABLE IF EXISTS prerendered_isochrones`)
+	rewindTo(t, url, 19)
 }
 
 func TestPrerenderedIsochronesMigrationIsSafeToReRun(t *testing.T) {
@@ -55,7 +55,7 @@ func TestPrerenderedIsochronesMigrationIsSafeToReRun(t *testing.T) {
 	// re-runs 00019 over the schema it already created. 00020 must be forgotten
 	// first — goose refuses to re-apply 19 while a later version is recorded.
 	rewindBoardingWaitOverrideMigration(t, url)
-	exec(t, url, `DELETE FROM goose_db_version WHERE version_id = 19`)
+	rewindTo(t, url, 19)
 	if err := postgres.Migrate(context.Background(), url); err == nil {
 		t.Error("re-running 00019 over its own table succeeded; CREATE TABLE should have refused it")
 	}

@@ -284,8 +284,9 @@ Domain data (scenarios, routes, stations, vehicle types, services, jobs, users)
 is stored in Postgres via `pgx/v5` (pure Go — the `CGO_ENABLED=0` static
 build is preserved), with geometry stored as GeoJSON in `jsonb` columns and
 native `uuid`/`timestamptz`/`boolean` types throughout. Handlers depend on
-narrow store interfaces; boot-time load and seed talk to `transit.StoreSource`
-and `transit.SeedSink`. `postgres.Repo` satisfies all of them.
+narrow store interfaces; boot-time load and seed talk to `transit.StoreSource`,
+`transit.SeedSink`, and `transit.SeedReconciler`. `postgres.Repo` satisfies all
+of them.
 
 - **Connection:** set `DATABASE_URL` (Railway injects this via its private
   network). Cap the pool with `DATABASE_MAX_CONNS`. When `DATABASE_URL` is unset,
@@ -300,8 +301,11 @@ and `transit.SeedSink`. `postgres.Repo` satisfies all of them.
 - **Seed:** on first boot against an empty database, the embedded `ca-hsr` seed
   data is written through `SeedSink` and then compiled, leaving a succeeded
   compile job whose result is the scenario's graph — no manual step, no admin
-  credentials. A boot that finds a graph already there leaves it alone, so
-  restarting is not a recompile.
+  credentials. On every boot `ReconcileSeed` upserts embedded YAML rows whose
+  content no longer matches what is stored, scoped to seeded scenarios, so a
+  YAML correction reaches a deployed database without a migration. A boot that
+  finds a graph already matching its source rows leaves it alone, so restarting
+  is not a recompile.
 
 ## Authentication
 

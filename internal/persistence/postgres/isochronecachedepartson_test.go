@@ -23,8 +23,8 @@ func rewindIsochroneCacheDepartsOnMigration(t *testing.T, url string) {
 					ADD PRIMARY KEY (compile_job_id, station_slug, mode, contour_mins);
 			END IF;
 		END
-		$rewind$`,
-		`DELETE FROM goose_db_version WHERE version_id = 24`)
+		$rewind$`)
+	rewindTo(t, url, 24)
 }
 
 func isochroneCacheHasColumn(t *testing.T, url, column string) bool {
@@ -91,7 +91,7 @@ func TestIsochroneCacheDepartsOnMigrationAddsColumnAndUniqueKey(t *testing.T) {
 func TestIsochroneCacheDepartsOnMigrationIsSafeToReRun(t *testing.T) {
 	_, url := freshRepo(t)
 
-	exec(t, url, `DELETE FROM goose_db_version WHERE version_id = 24`)
+	rewindTo(t, url, 24)
 	if err := postgres.Migrate(context.Background(), url); err != nil {
 		t.Fatalf("re-running 00024 over the schema it already created: %v", err)
 	}

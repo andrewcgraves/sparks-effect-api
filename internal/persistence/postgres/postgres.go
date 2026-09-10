@@ -23,8 +23,9 @@ type Repo struct {
 }
 
 var (
-	_ transit.StoreSource = (*Repo)(nil)
-	_ transit.SeedSink    = (*Repo)(nil)
+	_ transit.StoreSource    = (*Repo)(nil)
+	_ transit.SeedSink       = (*Repo)(nil)
+	_ transit.SeedReconciler = (*Repo)(nil)
 )
 
 func Connect(ctx context.Context, databaseURL string, maxConns int) (*Repo, error) {

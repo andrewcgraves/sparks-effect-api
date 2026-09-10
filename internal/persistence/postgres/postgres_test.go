@@ -80,6 +80,13 @@ func TestSeedAndCompiledReadPathAcrossRestart(t *testing.T) {
 	if again {
 		t.Fatal("expected second SeedIfEmpty to be a no-op")
 	}
+	reconciled, err := transit.ReconcileSeed(ctx, repo)
+	if err != nil {
+		t.Fatalf("ReconcileSeed: %v", err)
+	}
+	if reconciled != 0 {
+		t.Fatalf("ReconcileSeed wrote %d rows on a just-seeded database, want 0", reconciled)
+	}
 
 	// Simulate a process restart: an independent pool, no re-migrate/re-seed.
 	repo2, err := postgres.Connect(ctx, url, 0)
