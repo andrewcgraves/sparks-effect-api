@@ -63,7 +63,7 @@ test: deps
 	go test ./... -cover
 
 # test-race is `test` with the race detector, for when a change touches
-# concurrency (internal/worker and internal/routing above all) and for CI. Run
+# concurrency (internal/compile and internal/routing above all) and for CI. Run
 # it before pushing anything that adds a goroutine, a channel, or shared state.
 test-race: deps
 	go test ./... -race -cover

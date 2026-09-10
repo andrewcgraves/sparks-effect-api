@@ -6,8 +6,8 @@ import (
 	"net/http"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
+	"github.com/andrewcgraves/sparks-effect-api/internal/compile"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
-	"github.com/andrewcgraves/sparks-effect-api/internal/worker"
 )
 
 type CompileStore interface {
@@ -19,7 +19,7 @@ type CompileStore interface {
 	GetLatestSucceededJob(ctx context.Context, scenarioSlug, kind string) (transit.Job, bool, error)
 	GetLatestSucceededUserScenarioJob(ctx context.Context, userScenarioSlug string) (transit.Job, bool, error)
 	GetLatestSucceededUserServiceJob(ctx context.Context, userServiceSlug string) (transit.Job, bool, error)
-	worker.Store
+	compile.Store
 }
 
 func CompileScenario(store CompileStore, boardingWait transit.BoardingWaitPolicy) http.HandlerFunc {
@@ -59,8 +59,8 @@ func CompileScenario(store CompileStore, boardingWait transit.BoardingWaitPolicy
 
 func enqueueCompile(store CompileStore, job transit.Job, boardingWait transit.BoardingWaitPolicy) {
 	go func() {
-		if err := worker.Compile(context.Background(), store, job, boardingWait); err != nil {
-			slog.Error("worker: compile job failed", "job_id", job.ID, "error", err)
+		if err := compile.Compile(context.Background(), store, job, boardingWait); err != nil {
+			slog.Error("compile: job failed", "job_id", job.ID, "error", err)
 		}
 	}()
 }

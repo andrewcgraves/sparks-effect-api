@@ -535,7 +535,7 @@ func TestSeededServiceStopsLieOnTheirRouteAlignment(t *testing.T) {
 			t.Errorf("service %q references unknown route %q", svc.Name, svc.RouteID)
 			continue
 		}
-		cs, err := CompilableFromService(rt, stations, svc, VehicleType{})
+		cs, err := compilableFromService(rt, stations, svc, VehicleType{})
 		if err != nil {
 			t.Errorf("service %q: %v", svc.Name, err)
 			continue

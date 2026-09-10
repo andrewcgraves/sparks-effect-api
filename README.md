@@ -40,8 +40,8 @@ routing worker (separate repo, inside the cluster)
 GET /api/routing-jobs/{id}  →  status, then the result
 ```
 
-Runtime unit of truth is **seconds** (`Edge.Seconds`, `WaitSecs`,
-`TravelTimeBetween`). HTTP fields that are already minute-labeled
+Runtime unit of truth is **seconds** (`Edge.Seconds`, `WaitSecs`).
+HTTP fields that are already minute-labeled
 (`budget_mins`, `access_mins`, `remaining_mins`) stay as-is on the wire.
 
 `BOARDING_WAIT_POLICY` is one of `none` (the default), `half_headway`,
@@ -360,7 +360,7 @@ That invariant is why containment is cheap. Only two reads filter on ownership �
 return so the contract is visible at the call site. Everything scenario-scoped
 stays unfiltered, because scoping to a scenario has already scoped to its owner.
 `LoadStore` and `CompileSeededIfNeeded` read the curated list and nothing else,
-so no owned row is ever compiled into the public store or served by
+so no owned row is ever loaded into the public store or served by
 `GET /api/scenarios`.
 
 By-slug reads cannot filter — slugs are globally unique across curated and owned
@@ -475,6 +475,7 @@ internal/server/             HTTP server and route registration
 internal/handler/            HTTP handlers
 internal/auth/               password hashing, session tokens, middleware, ownership rule
 internal/ids/                UUID generation for runtime-created rows
+internal/compile/            in-process compile-job runner (not the routing worker)
 internal/transit/            domain types, Repository seam, TransitGraph compile, seed
 internal/persistence/postgres/  Postgres repository + goose migrations
 internal/routing/            queue message contract + confirm-mode AMQP publisher

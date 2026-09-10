@@ -4,7 +4,7 @@ import "testing"
 
 func compileSeeded(t *testing.T, route Route, stations []Station, svc Service, vt VehicleType) (ServiceGraph, error) {
 	t.Helper()
-	cs, err := CompilableFromService(route, stations, svc, vt)
+	cs, err := compilableFromService(route, stations, svc, vt)
 	if err != nil {
 		return ServiceGraph{}, err
 	}

@@ -154,7 +154,7 @@ func loadStore(ctx context.Context, cfg config.Config, lg *slog.Logger) (*transi
 		return nil, nil, noop, err
 	}
 
-	store, err := transit.LoadStore(ctx, repo, cfg.BoardingWait)
+	store, err := transit.LoadStore(ctx, repo)
 	if err != nil {
 		repo.Close()
 		return nil, nil, noop, err
