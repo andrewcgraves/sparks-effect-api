@@ -26,8 +26,9 @@ use, and link back here for the rest.
 
 Declaration-level doc comments were deliberately removed from this source in
 SPA-307 because they restated their declarations. Domain meaning belongs in
-`CONTEXT.md`; rationale belongs in in-function comments, migration headers, and
-the README. Do not reintroduce godoc that only repeats a name.
+`CONTEXT.md`; rationale belongs in [ADRs](docs/adr/0001-api-and-worker-share-no-go-code.md),
+in-function comments, migration headers, and the README. Do not reintroduce
+godoc that only repeats a name.
 
 ## Branching
 

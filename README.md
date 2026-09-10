@@ -57,7 +57,8 @@ re-derives `min(headway)/2` itself.
 ### The queue contract
 
 The message is a contract between two repositories with no compiler checking
-it, so it is pinned by a golden fixture — `internal/routing/testdata/message.golden.json`,
+it ([ADR-0001](docs/adr/0001-api-and-worker-share-no-go-code.md)), so it is
+pinned by a golden fixture — `internal/routing/testdata/message.golden.json`,
 which this repo asserts it produces and the worker repo asserts it consumes.
 
 ```json
