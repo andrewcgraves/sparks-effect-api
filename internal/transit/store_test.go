@@ -1,6 +1,9 @@
 package transit
 
 import (
+	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/physics"
@@ -22,6 +25,49 @@ func TestNewStore(t *testing.T) {
 	}
 	if store == nil {
 		t.Fatal("NewStore returned nil")
+	}
+}
+
+type errStoreSource struct{ err error }
+
+func (f errStoreSource) ListVehicleTypes(context.Context) ([]VehicleType, error) {
+	return nil, f.err
+}
+func (f errStoreSource) ListCuratedScenarios(context.Context) ([]Scenario, error) {
+	return nil, f.err
+}
+func (f errStoreSource) ListRoutesByScenario(context.Context, string) ([]Route, error) {
+	return nil, f.err
+}
+func (f errStoreSource) ListStationsByScenario(context.Context, string) ([]Station, error) {
+	return nil, f.err
+}
+func (f errStoreSource) ListServicesByScenario(context.Context, string) ([]Service, error) {
+	return nil, f.err
+}
+func (f errStoreSource) GetTravelTimes(context.Context, string) (TravelTimes, bool, error) {
+	return TravelTimes{}, false, f.err
+}
+
+func TestLoadStore_fromSource(t *testing.T) {
+	src := newSeededCompileFake(t)
+	got, err := LoadStore(context.Background(), src, DefaultBoardingWaitPolicy())
+	if err != nil {
+		t.Fatalf("LoadStore: %v", err)
+	}
+	want := src.store.GetScenarios()
+	if len(got.GetScenarios()) != len(want) {
+		t.Fatalf("scenarios: got %d, want %d", len(got.GetScenarios()), len(want))
+	}
+	if _, ok := got.Graph("ca-hsr"); !ok {
+		t.Fatal("ca-hsr graph missing")
+	}
+}
+
+func TestLoadStore_sourceError(t *testing.T) {
+	_, err := LoadStore(context.Background(), errStoreSource{err: errors.New("db down")}, DefaultBoardingWaitPolicy())
+	if err == nil || !strings.Contains(err.Error(), "vehicle types") {
+		t.Fatalf("got %v, want a vehicle-types load error", err)
 	}
 }
 

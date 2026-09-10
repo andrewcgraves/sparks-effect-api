@@ -281,10 +281,11 @@ curl -s "http://localhost:8080/api/routing-jobs/$JOB" | jq '{status, error}'
 ## Persistence
 
 Domain data (scenarios, routes, stations, vehicle types, services, jobs, users)
-is read and written through a storage-agnostic `transit.Repository`. The concrete
-implementation is Postgres via `pgx/v5` (pure Go — the `CGO_ENABLED=0` static
+is stored in Postgres via `pgx/v5` (pure Go — the `CGO_ENABLED=0` static
 build is preserved), with geometry stored as GeoJSON in `jsonb` columns and
-native `uuid`/`timestamptz`/`boolean` types throughout.
+native `uuid`/`timestamptz`/`boolean` types throughout. Handlers depend on
+narrow store interfaces; boot-time load and seed talk to `transit.StoreSource`
+and `transit.SeedSink`. `postgres.Repo` satisfies all of them.
 
 - **Connection:** set `DATABASE_URL` (Railway injects this via its private
   network). Cap the pool with `DATABASE_MAX_CONNS`. When `DATABASE_URL` is unset,
@@ -297,7 +298,7 @@ native `uuid`/`timestamptz`/`boolean` types throughout.
   migrations in `internal/persistence/postgres/migrations/`, embedded into the
   binary and run automatically on boot.
 - **Seed:** on first boot against an empty database, the embedded `ca-hsr` seed
-  data is written through the repository and then compiled, leaving a succeeded
+  data is written through `SeedSink` and then compiled, leaving a succeeded
   compile job whose result is the scenario's graph — no manual step, no admin
   credentials. A boot that finds a graph already there leaves it alone, so
   restarting is not a recompile.
@@ -476,7 +477,7 @@ internal/server/             HTTP server and route registration
 internal/handler/            HTTP handlers
 internal/auth/               password hashing, session tokens, middleware, ownership rule
 internal/ids/                UUID generation for runtime-created rows
-internal/transit/            domain types, Repository seam, TransitGraph compile, seed
+internal/transit/            domain types, TransitGraph compile, seed
 internal/persistence/postgres/  Postgres repository + goose migrations
 internal/routing/            queue message contract + confirm-mode AMQP publisher
 ```
