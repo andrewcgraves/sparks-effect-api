@@ -11,6 +11,7 @@
             "from_slug": "north",
             "to_slug": "south",
             "seconds": 1800,
+            "dwell_s": 45,
             "route_id": "rt-spine",
             "from_chainage_m": 27798.4,
             "to_chainage_m": 8123.9
@@ -20,7 +21,44 @@
         "wait_policy": "fixed"
       }
     ],
-    "merge": {},
+    "merge": {
+      "clusters": [
+        {
+          "key": "north",
+          "names": [
+            "North",
+            "North Terminal"
+          ],
+          "members": [
+            {
+              "service_id": "svc-express",
+              "slug": "north",
+              "name": "North"
+            },
+            {
+              "service_id": "svc-local",
+              "slug": "north-term",
+              "name": "North Terminal"
+            }
+          ]
+        }
+      ],
+      "near_misses": [
+        {
+          "a": {
+            "service_id": "svc-express",
+            "slug": "south",
+            "name": "South"
+          },
+          "b": {
+            "service_id": "svc-local",
+            "slug": "south-park",
+            "name": "South Park"
+          },
+          "distance_m": 78.4
+        }
+      ]
+    },
     "nodes": [
       {
         "slug": "north",
@@ -34,6 +72,8 @@
         "slug": "south",
         "lat": 34.0522,
         "lng": -118.2437,
+        "routing_lat": 34.0601,
+        "routing_lng": -118.238,
         "names": [
           "South"
         ]
