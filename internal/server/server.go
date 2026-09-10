@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
@@ -34,7 +35,7 @@ type AuthDeps interface {
 	handler.WorkerStore
 	handler.RoutingBacklogStore
 	handler.PrerenderedStore
-	GetSessionUser(ctx context.Context, tokenHash string) (transit.User, bool, error)
+	GetSessionUser(ctx context.Context, tokenHash string) (account.User, bool, error)
 }
 
 var _ AuthDeps = (*postgres.Repo)(nil)

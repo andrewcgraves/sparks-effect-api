@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
@@ -124,7 +125,7 @@ func (f *fakeOwnedStationStore) GetTravelTimes(_ context.Context, slug string) (
 	return tt, ok, nil
 }
 
-func asStationUser(t *testing.T, h http.HandlerFunc, user transit.User,
+func asStationUser(t *testing.T, h http.HandlerFunc, user account.User,
 	method, scenarioSlug, stationSlug, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	target := "/api/me/scenarios/" + scenarioSlug + "/stations"
@@ -174,7 +175,7 @@ func TestCreateOwnedStationInheritsTheScenariosOwner(t *testing.T) {
 func TestCreateOwnedStationRefusesAScenarioTheCallerDoesNotOwn(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		user transit.User
+		user account.User
 		slug string
 		want int
 	}{
@@ -354,7 +355,7 @@ func TestOwnedTravelTimesAreScopedToTheirScenariosOwner(t *testing.T) {
 	}
 }
 
-func asTravelTimesUser(t *testing.T, h http.HandlerFunc, user transit.User,
+func asTravelTimesUser(t *testing.T, h http.HandlerFunc, user account.User,
 	method, scenarioSlug, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(method,

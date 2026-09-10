@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/persistence/postgres"
 	"github.com/andrewcgraves/sparks-effect-api/internal/testdb"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
@@ -162,7 +163,7 @@ func TestUsersRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	repo, _ := freshRepo(t)
 
-	u := transit.User{
+	u := account.User{
 		ID:      "00000000-0000-4009-8001-000000000001",
 		Email:   "andrew@example.com",
 		Name:    "Andrew",

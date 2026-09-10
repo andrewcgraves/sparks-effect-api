@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
@@ -16,12 +17,12 @@ import (
 var fixedNow = time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
 
 var (
-	pollOwner    = transit.User{ID: "owner-1", Email: "owner@example.com"}
-	pollStranger = transit.User{ID: "stranger-1", Email: "stranger@example.com"}
-	pollAdmin    = transit.User{ID: "admin-1", Email: "admin@example.com", IsAdmin: true}
+	pollOwner    = account.User{ID: "owner-1", Email: "owner@example.com"}
+	pollStranger = account.User{ID: "stranger-1", Email: "stranger@example.com"}
+	pollAdmin    = account.User{ID: "admin-1", Email: "admin@example.com", IsAdmin: true}
 )
 
-func pollAs(t *testing.T, store handler.RoutingStore, id string, user transit.User) *httptest.ResponseRecorder {
+func pollAs(t *testing.T, store handler.RoutingStore, id string, user account.User) *httptest.ResponseRecorder {
 	t.Helper()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/routing-jobs/{id}", handler.RoutingJobStatus(store))
@@ -52,9 +53,9 @@ func TestRoutingJobStatus_ownerlessJobIsReadableByAnyone(t *testing.T) {
 
 	for _, tc := range []struct {
 		name string
-		user transit.User
+		user account.User
 	}{
-		{"anonymous", transit.User{}},
+		{"anonymous", account.User{}},
 		{"some other user", pollStranger},
 		{"an admin", pollAdmin},
 	} {
@@ -99,9 +100,9 @@ func TestRoutingJobStatus_ownedJobIsNotFoundForAnyoneElse(t *testing.T) {
 
 	for _, tc := range []struct {
 		name string
-		user transit.User
+		user account.User
 	}{
-		{"anonymous", transit.User{}},
+		{"anonymous", account.User{}},
 		{"a different user", pollStranger},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -142,7 +143,7 @@ func TestRoutingJobStatus_succeededJobCarriesItsResult(t *testing.T) {
 		ID: "job-done", Status: transit.JobStatusSucceeded, Result: result,
 	})
 
-	rec := pollAs(t, store, "job-done", transit.User{})
+	rec := pollAs(t, store, "job-done", account.User{})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body.String())
 	}
@@ -165,7 +166,7 @@ func TestRoutingJobStatus_failedJobCarriesItsError(t *testing.T) {
 		ID: "job-failed", Status: transit.JobStatusFailed, Error: "the isochrone was never enqueued",
 	})
 
-	rec := pollAs(t, store, "job-failed", transit.User{})
+	rec := pollAs(t, store, "job-failed", account.User{})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
@@ -181,7 +182,7 @@ func TestRoutingJobStatus_staleQueuedJobIsFailed(t *testing.T) {
 		CreatedAt: time.Now().Add(-2 * handler.RoutingJobStaleAfter),
 	})
 
-	rec := pollAs(t, store, "job-stale", transit.User{})
+	rec := pollAs(t, store, "job-stale", account.User{})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body.String())
 	}
@@ -212,7 +213,7 @@ func TestRoutingJobStatus_staleRunningJobIsFailed(t *testing.T) {
 		CreatedAt: time.Now().Add(-2 * handler.RoutingJobStaleAfter),
 	})
 
-	rec := pollAs(t, store, "job-stale-running", transit.User{})
+	rec := pollAs(t, store, "job-stale-running", account.User{})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body.String())
 	}
@@ -227,7 +228,7 @@ func TestRoutingJobStatus_freshQueuedJobIsUntouched(t *testing.T) {
 		ID: "job-fresh", Status: transit.JobStatusQueued, CreatedAt: time.Now(),
 	})
 
-	rec := pollAs(t, store, "job-fresh", transit.User{})
+	rec := pollAs(t, store, "job-fresh", account.User{})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body.String())
 	}
@@ -255,7 +256,7 @@ func TestRoutingJobStatus_terminalJobsAreNeverRewrittenForStaleness(t *testing.T
 			store := &fakeRoutingStore{}
 			store.put(tc.job)
 
-			rec := pollAs(t, store, tc.job.ID, transit.User{})
+			rec := pollAs(t, store, tc.job.ID, account.User{})
 			if rec.Code != http.StatusOK {
 				t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body.String())
 			}
@@ -277,7 +278,7 @@ func TestRoutingJobStatus_staleJobLeftUnchangedWhenTheFailWriteFails(t *testing.
 		CreatedAt: time.Now().Add(-2 * handler.RoutingJobStaleAfter),
 	})
 
-	rec := pollAs(t, store, "job-stale", transit.User{})
+	rec := pollAs(t, store, "job-stale", account.User{})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body.String())
 	}

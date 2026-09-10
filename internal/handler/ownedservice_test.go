@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
@@ -119,7 +120,7 @@ func serviceBody(scenarioSlug, routeSlug, vehicleID string, stopSlugs ...string)
 		"frequency_windows":[{"start_time":"06:00","end_time":"22:00","headway_s":1800}]}`
 }
 
-func asServiceUser(t *testing.T, h http.HandlerFunc, user transit.User, method, target, body string) *httptest.ResponseRecorder {
+func asServiceUser(t *testing.T, h http.HandlerFunc, user account.User, method, target, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	id := strings.Trim(strings.TrimPrefix(target, "/api/me/services"), "/")
 	req := httptest.NewRequest(method, target, strings.NewReader(body))
@@ -299,7 +300,7 @@ func TestOwnedServiceAnswers404ToStrangers(t *testing.T) {
 
 	for _, tc := range []struct {
 		name string
-		user transit.User
+		user account.User
 		want int
 	}{
 		{"its owner", memberA, http.StatusOK},

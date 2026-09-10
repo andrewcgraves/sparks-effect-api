@@ -59,6 +59,9 @@ scenario, which carries its own owner. That invariant is why only
 `ListCuratedScenarios` and `ListCuratedRouteSummaries` filter on ownership —
 scoping to a scenario has already scoped to its owner.
 
+The person those `owner_id` columns point at is an `account.User`, not a transit
+type. `User` and `Session` live in `internal/account`.
+
 ## Core nouns
 
 | Term | Definition |
@@ -74,6 +77,8 @@ scoping to a scenario has already scoped to its owner.
 | **Compile job** | A row in `jobs`. Kinds: `compile_scenario`, `compile_user_scenario`, `compile_user_service`. Its `result` is a `TransitGraph`. Compilation runs **in-process in this API**, in `internal/compile`. That package is not the routing worker — the routing worker is a separate repository |
 | **Routing job** | A row in `routing_jobs`. Its `result` is the worker's isochrone GeoJSON. Created by the isochrone endpoints, executed **in the routing worker**, written back over `/api/internal/...`. Different table, different owning process — a "job" with no qualifier is ambiguous, so always say which |
 | **Prerendered isochrone** | An admin-curated, ready-to-display isochrone stored against a scenario, so a public page can show a result without enqueueing one. Also called a *curated* isochrone |
+| **User** | `account.User` — an authenticated person. Authored rows point at them through `owner_id`. `is_admin` is the only privilege bit: it gates curated writes and `/api/admin/users` |
+| **Session** | `account.Session` — a hashed bearer token bound to a User, with an expiry. The raw token is returned once at login and never stored |
 
 ## Terms of art
 

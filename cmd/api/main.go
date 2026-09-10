@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
 	"github.com/andrewcgraves/sparks-effect-api/internal/ids"
@@ -184,7 +185,7 @@ func bootstrapAdmin(ctx context.Context, cfg config.Config, repo *postgres.Repo,
 		return err
 	}
 
-	if err := repo.CreateUser(ctx, transit.User{
+	if err := repo.CreateUser(ctx, account.User{
 		ID: id, Email: email, Name: "Bootstrap Admin", IsAdmin: true,
 	}, hash); err != nil {
 		return err
