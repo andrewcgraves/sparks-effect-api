@@ -51,7 +51,7 @@ func (f errStoreSource) GetTravelTimes(context.Context, string) (TravelTimes, bo
 
 func TestLoadStore_fromSource(t *testing.T) {
 	src := newSeededCompileFake(t)
-	got, err := LoadStore(context.Background(), src, DefaultBoardingWaitPolicy())
+	got, err := LoadStore(context.Background(), src)
 	if err != nil {
 		t.Fatalf("LoadStore: %v", err)
 	}
@@ -59,13 +59,13 @@ func TestLoadStore_fromSource(t *testing.T) {
 	if len(got.GetScenarios()) != len(want) {
 		t.Fatalf("scenarios: got %d, want %d", len(got.GetScenarios()), len(want))
 	}
-	if _, ok := got.Graph("ca-hsr"); !ok {
-		t.Fatal("ca-hsr graph missing")
+	if _, ok := got.Graph("ca-hsr"); ok {
+		t.Fatal("LoadStore must not compile graphs; that work is only for NewStore / the equivalence test")
 	}
 }
 
 func TestLoadStore_sourceError(t *testing.T) {
-	_, err := LoadStore(context.Background(), errStoreSource{err: errors.New("db down")}, DefaultBoardingWaitPolicy())
+	_, err := LoadStore(context.Background(), errStoreSource{err: errors.New("db down")})
 	if err == nil || !strings.Contains(err.Error(), "vehicle types") {
 		t.Fatalf("got %v, want a vehicle-types load error", err)
 	}
@@ -581,7 +581,7 @@ func TestSeededServiceStopsLieOnTheirRouteAlignment(t *testing.T) {
 			t.Errorf("service %q references unknown route %q", svc.Name, svc.RouteID)
 			continue
 		}
-		cs, err := CompilableFromService(rt, stations, svc, VehicleType{})
+		cs, err := compilableFromService(rt, stations, svc, VehicleType{})
 		if err != nil {
 			t.Errorf("service %q: %v", svc.Name, err)
 			continue

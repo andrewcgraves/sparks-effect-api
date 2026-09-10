@@ -11,6 +11,19 @@ import (
 
 func ptr[T any](v T) *T { return &v }
 
+func hopSeconds(t *testing.T, g transit.TransitGraph, from, to string) (seconds int, serviceID string) {
+	t.Helper()
+	for _, sg := range g.Services {
+		for _, e := range sg.Edges {
+			if e.FromSlug == from && e.ToSlug == to {
+				return e.Seconds, sg.ServiceID
+			}
+		}
+	}
+	t.Fatalf("no edge %s→%s", from, to)
+	return 0, ""
+}
+
 func TestMain(m *testing.M) { testdb.Main(m) }
 
 func freshRepo(t *testing.T) (*postgres.Repo, string) {
@@ -74,7 +87,7 @@ func TestSeedAndCompiledReadPathAcrossRestart(t *testing.T) {
 	}
 	defer repo2.Close()
 
-	store, err := transit.LoadStore(ctx, repo2, transit.DefaultBoardingWaitPolicy())
+	store, err := transit.LoadStore(ctx, repo2)
 	if err != nil {
 		t.Fatalf("LoadStore: %v", err)
 	}
@@ -121,12 +134,13 @@ func TestSeedAndCompiledReadPathAcrossRestart(t *testing.T) {
 		}
 	}
 
-	// The compiled-graph read path must still produce isochrone travel times
-	// from the stored rows: sf→millbrae = 760 run + 90 dwell = 850.
-	secs, _, svcID, ok := store.TravelTimeBetween("ca-hsr", "sf", "millbrae")
-	if !ok {
-		t.Fatal("TravelTimeBetween sf→millbrae not found")
+	// Seeded rows must still compile to the calibrated hop times: sf→millbrae
+	// = 760 run + 90 dwell = 850.
+	graph, err := transit.CompileSeededScenario(ctx, repo2, sc, transit.DefaultBoardingWaitPolicy())
+	if err != nil {
+		t.Fatalf("CompileSeededScenario: %v", err)
 	}
+	secs, svcID := hopSeconds(t, graph, "sf", "millbrae")
 	if secs != 850 {
 		t.Errorf("sf→millbrae: want 850s, got %d", secs)
 	}

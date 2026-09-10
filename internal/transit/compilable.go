@@ -30,7 +30,7 @@ type CompilableStop struct {
 	OffsetM float64
 }
 
-func CompilableFromService(route Route, stations []Station, svc Service, vt VehicleType) (CompilableService, error) {
+func compilableFromService(route Route, stations []Station, svc Service, vt VehicleType) (CompilableService, error) {
 	stationsByID := make(map[string]Station, len(stations))
 	for _, st := range stations {
 		stationsByID[st.ID] = st

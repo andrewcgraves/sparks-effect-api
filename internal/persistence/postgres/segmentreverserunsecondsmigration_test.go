@@ -135,15 +135,8 @@ func TestSegmentReverseRunSecondsMigrationIsANoOpOnAnEmptyDatabase(t *testing.T)
 			t.Fatalf("CompileSeededScenario: %v", err)
 		}
 
-		data := transit.CompiledGraphData{Graph: &graph}
-		gotGilroy, _, _, ok := data.TravelTimeBetween("ca-hsr", "gilroy", "merced")
-		if !ok {
-			t.Fatal("gilroy→merced not found in compiled graph")
-		}
-		gotMerced, _, _, ok := data.TravelTimeBetween("ca-hsr", "merced", "gilroy")
-		if !ok {
-			t.Fatal("merced→gilroy not found in compiled graph")
-		}
+		gotGilroy, _ := hopSeconds(t, graph, "gilroy", "merced")
+		gotMerced, _ := hopSeconds(t, graph, "merced", "gilroy")
 		if gotGilroy == gotMerced {
 			t.Errorf("gilroy↔merced: want different durations, both %d", gotGilroy)
 		}

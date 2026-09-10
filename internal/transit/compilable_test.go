@@ -36,9 +36,9 @@ func TestCompilableFromService_projectsStationsAndResolvesDwell(t *testing.T) {
 		FrequencyWindows: []FrequencyWindow{{StartTime: "06:00", EndTime: "09:00", HeadwayS: 600}},
 	}
 
-	got, err := CompilableFromService(adapterRoute(), adapterStations(), svc, physicsTestVehicle())
+	got, err := compilableFromService(adapterRoute(), adapterStations(), svc, physicsTestVehicle())
 	if err != nil {
-		t.Fatalf("CompilableFromService() error = %v, want nil", err)
+		t.Fatalf("compilableFromService() error = %v, want nil", err)
 	}
 
 	if got.ID != "svc-1" {
@@ -79,9 +79,9 @@ func TestCompilableFromService_ordersStopsBySequence(t *testing.T) {
 		},
 	}
 
-	got, err := CompilableFromService(adapterRoute(), adapterStations(), svc, physicsTestVehicle())
+	got, err := compilableFromService(adapterRoute(), adapterStations(), svc, physicsTestVehicle())
 	if err != nil {
-		t.Fatalf("CompilableFromService() error = %v, want nil", err)
+		t.Fatalf("compilableFromService() error = %v, want nil", err)
 	}
 	if got.Stops[0].Slug != "a" || got.Stops[1].Slug != "b" {
 		t.Errorf("stop slugs = %q, %q, want a, b in Sequence order", got.Stops[0].Slug, got.Stops[1].Slug)
@@ -98,9 +98,9 @@ func TestCompilableFromService_perStopDwellOverrideWins(t *testing.T) {
 		},
 	}
 
-	got, err := CompilableFromService(adapterRoute(), adapterStations(), svc, physicsTestVehicle())
+	got, err := compilableFromService(adapterRoute(), adapterStations(), svc, physicsTestVehicle())
 	if err != nil {
-		t.Fatalf("CompilableFromService() error = %v, want nil", err)
+		t.Fatalf("compilableFromService() error = %v, want nil", err)
 	}
 	if got.Stops[1].DwellS != 5 {
 		t.Errorf("Stops[1].DwellS = %d, want the 5s override", got.Stops[1].DwellS)
@@ -113,8 +113,8 @@ func TestCompilableFromService_errorsOnUnknownStation(t *testing.T) {
 		Stops: []ServiceStop{{StationID: "st-a", Sequence: 1}, {StationID: "st-nope", Sequence: 2}},
 	}
 
-	if _, err := CompilableFromService(adapterRoute(), adapterStations(), svc, physicsTestVehicle()); err == nil {
-		t.Error("CompilableFromService() error = nil, want an error for an unknown station id")
+	if _, err := compilableFromService(adapterRoute(), adapterStations(), svc, physicsTestVehicle()); err == nil {
+		t.Error("compilableFromService() error = nil, want an error for an unknown station id")
 	}
 }
 
@@ -128,8 +128,8 @@ func TestCompilableFromService_errorsOnStationWithoutLocation(t *testing.T) {
 		Stops: []ServiceStop{{StationID: "st-a", Sequence: 1}, {StationID: "st-b", Sequence: 2}},
 	}
 
-	if _, err := CompilableFromService(adapterRoute(), stations, svc, physicsTestVehicle()); err == nil {
-		t.Error("CompilableFromService() error = nil, want an error for a station with no location")
+	if _, err := compilableFromService(adapterRoute(), stations, svc, physicsTestVehicle()); err == nil {
+		t.Error("compilableFromService() error = nil, want an error for a station with no location")
 	}
 }
 
@@ -309,9 +309,9 @@ func TestCompileServicePhysics_bothAdaptersAgreeOnRunTime(t *testing.T) {
 			{StationID: "st-b", Sequence: 2, DwellS: &dwell},
 		},
 	}
-	seeded, err := CompilableFromService(adapterRoute(), adapterStations(), seededSvc, physicsTestVehicle())
+	seeded, err := compilableFromService(adapterRoute(), adapterStations(), seededSvc, physicsTestVehicle())
 	if err != nil {
-		t.Fatalf("CompilableFromService() error = %v, want nil", err)
+		t.Fatalf("compilableFromService() error = %v, want nil", err)
 	}
 
 	vt := physicsTestVehicle()

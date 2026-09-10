@@ -66,12 +66,12 @@ scoping to a scenario has already scoped to its owner.
 | **Route** / **alignment** | The geometry, as a GeoJSON LineString, plus a mode and optional per-segment engineering parameters. Several services can run over one alignment. "Route" is the type name (`transit.Route`); "alignment" is the word used in prose, and is preferred when the geometry rather than the row is meant. A curated alignment is a public building block anyone may point a service at, but admin-only to mutate |
 | **Station** | A seeded-model place a service can call at: slug, name, `location`, platform height, optional [routing anchor](#routing-anchor). Belongs to a scenario |
 | **Stop** | A *service calling at a place*, not a place. `ServiceStop` on the seeded model (a station id, a sequence number, an optional dwell override); `ServiceStopPoint` on the authored model (its own name, slug, coordinate, seq, chainage and offset). A station is a noun; a stop is a relationship |
-| **Node** / **GraphNode** | A vertex of the compiled graph. Stops **merge into** nodes at compile time — see [interchange](#interchange). `GraphNode` is the compiled form (slug, coordinate, optional routing anchor, and every merged-in `Names` entry); `transit.Node` is the reduced slug-plus-coordinate triple the isochrone path passes around |
-| **TransitGraph** | The compile output, and the only thing an isochrone is ever plotted over: per-service edge lists, the merged nodes, and a merge report. Persisted as a succeeded compile job's `result`, and travels inline on the queue message so the worker needs no database |
+| **Node** / **GraphNode** | A vertex of the compiled graph. Stops **merge into** nodes at compile time — see [interchange](#interchange). `GraphNode` is the compiled form (slug, coordinate, optional routing anchor, and every merged-in `Names` entry). The reduced slug-plus-coordinate `Node` is a test-only projection for comparing the embedded store against a compiled graph; it is not a production type |
+| **TransitGraph** | The compile output, and the only thing an isochrone is ever plotted over: per-service edge lists, the merged nodes, and a merge report. Persisted as a succeeded compile job's `result`, and travels inline on the queue message so the worker needs no database. This API compiles the graph; it does not compute isochrones |
 | **ServiceGraph** | One service's slice of a `TransitGraph`: its edges, plus the boarding wait resolved for it at compile time |
 | **Edge** | A directed hop between two node slugs on one service. `Seconds` is **run time plus dwell**; `DwellS` reports the dwell part separately rather than adding to it. Since SPA-264 an edge also records the corridor it runs over (`RouteID`) and its endpoints' chainages. Every hop is emitted in both directions — the reverse edge is the same hop backwards, carrying the same two chainages swapped, so one of the two directions always has descending chainages. Nothing that reads them treats that as a special case |
 | **VehicleType** | Rolling stock on the seeded model: top speed, acceleration, deceleration, floor height, and the two dwell figures. The authored model inlines the same numbers as `VehicleParams` instead |
-| **Compile job** | A row in `jobs`. Kinds: `compile_scenario`, `compile_user_scenario`, `compile_user_service`. Its `result` is a `TransitGraph`. Compilation runs **in-process in this API** |
+| **Compile job** | A row in `jobs`. Kinds: `compile_scenario`, `compile_user_scenario`, `compile_user_service`. Its `result` is a `TransitGraph`. Compilation runs **in-process in this API**, in `internal/compile`. That package is not the routing worker — the routing worker is a separate repository |
 | **Routing job** | A row in `routing_jobs`. Its `result` is the worker's isochrone GeoJSON. Created by the isochrone endpoints, executed **in the routing worker**, written back over `/api/internal/...`. Different table, different owning process — a "job" with no qualifier is ambiguous, so always say which |
 | **Prerendered isochrone** | An admin-curated, ready-to-display isochrone stored against a scenario, so a public page can show a result without enqueueing one. Also called a *curated* isochrone |
 
@@ -108,8 +108,9 @@ everyday one.
   `dwell_s` overriding both.
 - **Boarding wait** — seconds charged for waiting for the first vehicle. It is
   charged **once, at the origin of a path**, and is explicitly **not a transfer
-  penalty**: both graph searches — this repository's `TravelTimeBetween` and the
-  worker's — add a service's `WaitSecs` only on the hop leaving the path's origin
+  penalty**: the routing worker's graph search — and the test-only
+  `TravelTimeBetween` used to check graph equivalence — add a service's
+  `WaitSecs` only on the hop leaving the path's origin
   station, so riding through an interchange costs nothing extra.
   Policies are `none` (the default), `half_headway`, `full_headway`, and `fixed`.
   Resolution order is service override → scenario override → global

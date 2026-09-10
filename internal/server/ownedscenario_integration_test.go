@@ -212,10 +212,10 @@ func TestIntegration_AuthoringAnOwnedScenarioLeavesTheCuratedBaselineAlone(t *te
 		t.Errorf("curated scenarios went from %d to %d; authoring must not change it", len(before), len(after))
 	}
 
-	// The boot-time store compiles only curated scenarios, so it must not have
+	// The boot-time store reads only curated scenarios, so it must not have
 	// picked up the member's — and must still build at all, which is the
 	// failure mode a malformed owned scenario would otherwise cause.
-	store, err := transit.LoadStore(context.Background(), repo, transit.DefaultBoardingWaitPolicy())
+	store, err := transit.LoadStore(context.Background(), repo)
 	if err != nil {
 		t.Fatalf("LoadStore after a member authored a scenario: %v", err)
 	}
