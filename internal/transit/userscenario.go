@@ -65,23 +65,25 @@ func (s UserScenario) Validate() error {
 	// CompileServices' job, at compile time, when both are finally in scope
 	// together (see validateInterchangePairs).
 	for i, p := range s.InterchangePairs {
-		if strings.TrimSpace(p.A.ServiceID) == "" || strings.TrimSpace(p.A.Slug) == "" {
+		aBlank := strings.TrimSpace(p.A.ServiceID) == "" || strings.TrimSpace(p.A.Slug) == ""
+		bBlank := strings.TrimSpace(p.B.ServiceID) == "" || strings.TrimSpace(p.B.Slug) == ""
+		if aBlank {
 			faults = append(faults, fault.At("interchange_pairs.a", i, fault.RuleRequired,
 				fmt.Sprintf("interchange_pairs[%d].a: service_id and slug are required", i)))
 		}
-		if strings.TrimSpace(p.B.ServiceID) == "" || strings.TrimSpace(p.B.Slug) == "" {
+		if bBlank {
 			faults = append(faults, fault.At("interchange_pairs.b", i, fault.RuleRequired,
 				fmt.Sprintf("interchange_pairs[%d].b: service_id and slug are required", i)))
 		}
-		if p.A.ServiceID != "" && p.A.ServiceID == p.B.ServiceID {
+		if !aBlank && !bBlank && p.A.ServiceID == p.B.ServiceID {
 			faults = append(faults, fault.At("interchange_pairs", i, fault.RuleSameService,
 				fmt.Sprintf("interchange_pairs[%d]: both stops are on service %q, want two different services", i, p.A.ServiceID)))
 		}
-		if p.A.ServiceID != "" && !members[p.A.ServiceID] {
+		if !aBlank && !members[p.A.ServiceID] {
 			faults = append(faults, fault.At("interchange_pairs.a", i, fault.RuleNotMember,
 				fmt.Sprintf("interchange_pairs[%d].a: service %q is not a member of this scenario", i, p.A.ServiceID)))
 		}
-		if p.B.ServiceID != "" && !members[p.B.ServiceID] {
+		if !bBlank && !members[p.B.ServiceID] {
 			faults = append(faults, fault.At("interchange_pairs.b", i, fault.RuleNotMember,
 				fmt.Sprintf("interchange_pairs[%d].b: service %q is not a member of this scenario", i, p.B.ServiceID)))
 		}
