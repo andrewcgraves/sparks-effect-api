@@ -1,5 +1,5 @@
-// Package transit is the API's domain: scenarios, services, the Repository
-// seam, and TransitGraph compilation from seed and authored models.
+// Package transit is the API's domain: scenarios, services, StoreSource and
+// SeedSink, and TransitGraph compilation from seed and authored models.
 //
 // This package does not compute isochrones. A compile job produces a
 // TransitGraph; the routing worker in a separate repository plots isochrones

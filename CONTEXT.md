@@ -12,8 +12,9 @@ this file is a bug.
 
 > Declaration-level doc comments were deliberately removed from the source in
 > SPA-307 — they restated their declarations. Domain meaning lives here; the
-> *why* behind a decision lives in in-function comments, migration headers and
-> the README. Do not reintroduce godoc that only repeats a name.
+> *why* behind a decision lives in [ADRs](docs/adr/0001-api-and-worker-share-no-go-code.md),
+> in-function comments, migration headers and the README. Do not reintroduce
+> godoc that only repeats a name.
 
 ## The one that catches everyone: two scenarios, two services
 
@@ -257,8 +258,8 @@ stops a late worker from reviving it.
 | [`sparks-effect-website`](https://github.com/andrewcgraves/sparks-effect-website/blob/trunk/CONTEXT.md) | The time-remaining graph: view, lane, through, fork |
 | [`kustomize-config`](https://github.com/andrewcgraves/kustomize-config/blob/main/CONTEXT.md) | Deployment vocabulary: overlay, pin, generation, cycling the map, tileset |
 
-Decisions — as opposed to definitions — belong in ADRs (SPA-282), not here. A
-term explains what a thing is called; an ADR explains why it works the way it
-does, and is not to be re-litigated on the strength of a name. Until those exist,
-the standing rationale lives in the README, in migration headers, and in
-in-function comments.
+Decisions — as opposed to definitions — belong in ADRs, not here. A term
+explains what a thing is called; an ADR explains why it works the way it does,
+and is not to be re-litigated on the strength of a name.
+
+- [ADR-0001 — The API and worker share no Go code](docs/adr/0001-api-and-worker-share-no-go-code.md)
