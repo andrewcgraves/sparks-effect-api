@@ -1,9 +1,12 @@
 package route
 
 import (
+	"errors"
 	"math"
 	"strings"
 	"testing"
+
+	"github.com/andrewcgraves/sparks-effect-api/internal/fault"
 )
 
 func line(n int) Ingest {
@@ -79,6 +82,9 @@ func TestValidateRejectsBadGeometry(t *testing.T) {
 			if !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("Validate() = %q, want it to contain %q", err, tc.want)
 			}
+			if _, ok := asValidationFaults(err); !ok {
+				t.Errorf("Validate() = %v (%T), want fault.ValidationFaults", err, err)
+			}
 		})
 	}
 }
@@ -131,6 +137,10 @@ func TestValidateRejectsOutOfRangePhysics(t *testing.T) {
 			if !strings.Contains(err.Error(), "segment 0") {
 				t.Errorf("Validate() = %q, want it to identify the offending segment", err)
 			}
+			got := mustRouteFaults(t, err)
+			if len(got) != 1 || got[0].Index == nil || *got[0].Index != 0 {
+				t.Errorf("faults = %+v, want one fault at index 0", got)
+			}
 		})
 	}
 }
@@ -159,6 +169,10 @@ func TestValidateRequiresName(t *testing.T) {
 	err := Validate(in)
 	if err == nil || !strings.Contains(err.Error(), "name") {
 		t.Fatalf("Validate() = %v, want a name error", err)
+	}
+	got := mustRouteFaults(t, err)
+	if len(got) != 1 || got[0].Field != "name" || got[0].Rule != fault.RuleRequired {
+		t.Errorf("faults = %+v, want name/required", got)
 	}
 }
 
@@ -209,4 +223,35 @@ func TestSlugifyOutputIsAValidSlug(t *testing.T) {
 			t.Errorf("Slugify(%q) = %q, which IsValidSlug rejects", name, s)
 		}
 	}
+}
+
+func TestValidateReportsEveryBadCoordinate(t *testing.T) {
+	in := line(3)
+	in.Coordinates[0][1] = 91
+	in.Coordinates[2][0] = -181
+	got := mustRouteFaults(t, Validate(in))
+	if len(got) != 2 {
+		t.Fatalf("got %d faults, want 2: %+v", len(got), got)
+	}
+	if got[0].Field != "coordinates.lat" || got[0].Index == nil || *got[0].Index != 0 {
+		t.Errorf("fault 0 = %+v, want coordinates.lat at 0", got[0])
+	}
+	if got[1].Field != "coordinates.lng" || got[1].Index == nil || *got[1].Index != 2 {
+		t.Errorf("fault 1 = %+v, want coordinates.lng at 2", got[1])
+	}
+}
+
+func mustRouteFaults(t *testing.T, err error) fault.ValidationFaults {
+	t.Helper()
+	got, ok := asValidationFaults(err)
+	if !ok {
+		t.Fatalf("error %v (%T) is not fault.ValidationFaults", err, err)
+	}
+	return got
+}
+
+func asValidationFaults(err error) (fault.ValidationFaults, bool) {
+	var faults fault.ValidationFaults
+	ok := errors.As(err, &faults)
+	return faults, ok
 }

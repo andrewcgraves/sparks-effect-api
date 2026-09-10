@@ -149,45 +149,64 @@ func TestCreateRouteRejectsInvalidPayloads(t *testing.T) {
 	tests := []struct {
 		name string
 		body string
+		want int
 	}{
-		{"malformed json", `{"type":`},
-		{"not a linestring", `{"type":"Point","coordinates":[[-122,37]],"properties":{"name":"X"}}`},
-		{"too few coordinates", `{"type":"LineString","coordinates":[[-122,37]],"properties":{"name":"X"}}`},
-		{"latitude out of range", `{"type":"LineString","coordinates":[[-122,91],[-121,37]],"properties":{"name":"X"}}`},
-		{"missing name", `{"type":"LineString","coordinates":[[-122,37],[-121,37]],"properties":{}}`},
+		{"malformed json", `{"type":`, http.StatusBadRequest},
+		{"not a linestring", `{"type":"Point","coordinates":[[-122,37]],"properties":{"name":"X"}}`, http.StatusUnprocessableEntity},
+		{"too few coordinates", `{"type":"LineString","coordinates":[[-122,37]],"properties":{"name":"X"}}`, http.StatusUnprocessableEntity},
+		{"latitude out of range", `{"type":"LineString","coordinates":[[-122,91],[-121,37]],"properties":{"name":"X"}}`, http.StatusUnprocessableEntity},
+		{"missing name", `{"type":"LineString","coordinates":[[-122,37],[-121,37]],"properties":{}}`, http.StatusUnprocessableEntity},
 		{"segment count mismatch", `{"type":"LineString","coordinates":[[-122,37],[-121,37]],
-			"properties":{"name":"X","segments":[{"cant_mm":0},{"cant_mm":0}]}}`},
+			"properties":{"name":"X","segments":[{"cant_mm":0},{"cant_mm":0}]}}`, http.StatusUnprocessableEntity},
 		{"cant out of range", `{"type":"LineString","coordinates":[[-122,37],[-121,37]],
-			"properties":{"name":"X","segments":[{"cant_mm":9999}]}}`},
+			"properties":{"name":"X","segments":[{"cant_mm":9999}]}}`, http.StatusUnprocessableEntity},
 		{"curve radius out of range", `{"type":"LineString","coordinates":[[-122,37],[-121,37]],
-			"properties":{"name":"X","segments":[{"curve_radius_m":1}]}}`},
+			"properties":{"name":"X","segments":[{"curve_radius_m":1}]}}`, http.StatusUnprocessableEntity},
 		{"grade out of range", `{"type":"LineString","coordinates":[[-122,37],[-121,37]],
-			"properties":{"name":"X","segments":[{"grade_pct":45}]}}`},
+			"properties":{"name":"X","segments":[{"grade_pct":45}]}}`, http.StatusUnprocessableEntity},
 		{"name with no sluggable characters", `{"type":"LineString","coordinates":[[-122,37],[-121,37]],
-			"properties":{"name":"!!!"}}`},
+			"properties":{"name":"!!!"}}`, http.StatusBadRequest},
 		{"unknown scenario", `{"type":"LineString","coordinates":[[-122,37],[-121,37]],
-			"properties":{"name":"X","scenario_slug":"no-such-scenario"}}`},
+			"properties":{"name":"X","scenario_slug":"no-such-scenario"}}`, http.StatusBadRequest},
 		{"repeated coordinate", `{"type":"LineString","coordinates":[[-122,37],[-122,37]],
-			"properties":{"name":"X"}}`},
+			"properties":{"name":"X"}}`, http.StatusUnprocessableEntity},
 		// A misspelled physics key must be refused outright, not silently
 		// decoded as a zero-valued (tangent, level) segment.
 		{"misspelled physics key", `{"type":"LineString","coordinates":[[-122,37],[-121,37]],
-			"properties":{"name":"X","segments":[{"cant__mm":150}]}}`},
+			"properties":{"name":"X","segments":[{"cant__mm":150}]}}`, http.StatusBadRequest},
 		{"unknown top-level field", `{"type":"LineString","coordinates":[[-122,37],[-121,37]],
-			"properties":{"name":"X"},"nonsense":true}`},
+			"properties":{"name":"X"},"nonsense":true}`, http.StatusBadRequest},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			store := newFakeRouteStore()
 			rec := postJSON(t, handler.CreateRoute(store), "/api/admin/routes", tc.body)
-			if rec.Code != http.StatusBadRequest {
-				t.Errorf("status = %d, want 400; body %s", rec.Code, rec.Body.String())
+			if rec.Code != tc.want {
+				t.Errorf("status = %d, want %d; body %s", rec.Code, tc.want, rec.Body.String())
 			}
 			if len(store.routes) != 0 {
 				t.Error("a rejected route must not be persisted")
 			}
 		})
+	}
+}
+
+func TestCreateRouteValidationRejectionCarriesStructuredDetail(t *testing.T) {
+	body := `{"type":"LineString","coordinates":[[-122,91],[-121,-91]],"properties":{"name":"X"}}`
+	rec := postJSON(t, handler.CreateRoute(newFakeRouteStore()), "/api/admin/routes", body)
+	got := decodeValidationFault(t, rec)
+	if got.Code != handler.ValidationErrorCode {
+		t.Errorf("code = %q, want %q", got.Code, handler.ValidationErrorCode)
+	}
+	if len(got.Detail.Faults) != 2 {
+		t.Fatalf("got %d faults, want 2: %+v", len(got.Detail.Faults), got.Detail.Faults)
+	}
+	if got.Detail.Faults[0].Index == nil || *got.Detail.Faults[0].Index != 0 {
+		t.Errorf("fault 0 index = %v, want 0", got.Detail.Faults[0].Index)
+	}
+	if got.Detail.Faults[1].Index == nil || *got.Detail.Faults[1].Index != 1 {
+		t.Errorf("fault 1 index = %v, want 1", got.Detail.Faults[1].Index)
 	}
 }
 

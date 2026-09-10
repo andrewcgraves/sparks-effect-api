@@ -435,6 +435,22 @@ func TestScenarioCreateRejectsInvalidPayloads(t *testing.T) {
 	}
 }
 
+func TestScenarioCreateValidationRejectionCarriesStructuredDetail(t *testing.T) {
+	rec := scnServeAs(t, newFakeScenarioStore(), scnOwner, http.MethodPost, "/api/user-scenarios",
+		`{"name": "X", "service_ids": ["svc-1", "svc-1"]}`)
+	got := decodeValidationFault(t, rec)
+	if got.Code != handler.ValidationErrorCode {
+		t.Errorf("code = %q, want %q", got.Code, handler.ValidationErrorCode)
+	}
+	if len(got.Detail.Faults) != 1 {
+		t.Fatalf("got %d faults, want 1: %+v", len(got.Detail.Faults), got.Detail.Faults)
+	}
+	fault := got.Detail.Faults[0]
+	if fault.Field != "service_ids" || fault.Index == nil || *fault.Index != 1 {
+		t.Errorf("fault = %+v, want service_ids at index 1", fault)
+	}
+}
+
 func TestScenarioCreateAllowsEmptyMembership(t *testing.T) {
 	rec := scnServeAs(t, newFakeScenarioStore(), scnOwner, http.MethodPost, "/api/user-scenarios", `{"name": "Empty Shell"}`)
 	if rec.Code != http.StatusCreated {

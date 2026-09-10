@@ -201,6 +201,26 @@ func TestCreateOwnedRouteWorksAroundACollidingCuratedSlug(t *testing.T) {
 	}
 }
 
+func TestCreateOwnedRouteValidationRejectionCarriesStructuredDetail(t *testing.T) {
+	body := `{
+	  "type": "LineString",
+	  "coordinates": [[-122.4, 91], [-122.3, 37.70]],
+	  "properties": { "name": "Bay Link", "mode": "rail" }
+	}`
+	rec := asUser(t, handler.CreateOwnedRoute(newFakeOwnedRouteStore()), memberA,
+		http.MethodPost, "/api/me/routes", body)
+	got := decodeValidationFault(t, rec)
+	if got.Code != handler.ValidationErrorCode {
+		t.Errorf("code = %q, want %q", got.Code, handler.ValidationErrorCode)
+	}
+	if len(got.Detail.Faults) != 1 {
+		t.Fatalf("got %d faults, want 1: %+v", len(got.Detail.Faults), got.Detail.Faults)
+	}
+	if got.Detail.Faults[0].Field != "coordinates.lat" || got.Detail.Faults[0].Index == nil || *got.Detail.Faults[0].Index != 0 {
+		t.Errorf("fault = %+v, want coordinates.lat at index 0", got.Detail.Faults[0])
+	}
+}
+
 func TestCreateOwnedRouteRefusesAScenarioTheCallerDoesNotOwn(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
