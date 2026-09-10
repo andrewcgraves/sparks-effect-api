@@ -31,6 +31,9 @@ tuning knobs anyone has a reason to turn.
 
 - The queue message is a contract the compiler cannot check. It is pinned by
   a golden fixture both repositories assert (`internal/routing/testdata/message.golden.json`).
+  SPA-273 added a second: the worker-store HTTP envelope
+  (`internal/handler/testdata/worker-store.golden.json`). `make check-contract`
+  diffs both.
 - Speed constants, logger field names, and config env-vars are duplicated
   and can drift; they have.
 - SPA-273 retired the shared schema. The worker talks HTTP

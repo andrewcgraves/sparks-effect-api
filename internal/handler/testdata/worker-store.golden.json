@@ -1,0 +1,114 @@
+{
+  "cache_lookup_request": {
+    "keys": [
+      {
+        "compile_job_id": "0f3b7c2a-4d1e-4a5b-9c8d-2e6f1a0b3c4d",
+        "station_slug": "north",
+        "mode": "transit",
+        "contour_mins": 30,
+        "departs_on": "2026-09-02"
+      }
+    ]
+  },
+  "cache_lookup_response": {
+    "entries": [
+      {
+        "key": {
+          "compile_job_id": "0f3b7c2a-4d1e-4a5b-9c8d-2e6f1a0b3c4d",
+          "station_slug": "north",
+          "mode": "transit",
+          "contour_mins": 30,
+          "departs_on": "2026-09-02"
+        },
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -122.4,
+                37.8
+              ],
+              [
+                -122.3,
+                37.8
+              ],
+              [
+                -122.3,
+                37.7
+              ],
+              [
+                -122.4,
+                37.8
+              ]
+            ]
+          ]
+        }
+      }
+    ]
+  },
+  "cache_put_request": {
+    "entries": [
+      {
+        "key": {
+          "compile_job_id": "0f3b7c2a-4d1e-4a5b-9c8d-2e6f1a0b3c4d",
+          "station_slug": "north",
+          "mode": "transit",
+          "contour_mins": 30,
+          "departs_on": "2026-09-02"
+        },
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -122.4,
+                37.8
+              ],
+              [
+                -122.3,
+                37.8
+              ],
+              [
+                -122.3,
+                37.7
+              ],
+              [
+                -122.4,
+                37.8
+              ]
+            ]
+          ]
+        },
+        "tileset_at": "2026-03-01T12:00:00Z"
+      }
+    ]
+  },
+  "job_succeeded": {
+    "result": {
+      "type": "Polygon",
+      "coordinates": [
+        [
+          [
+            -122.4,
+            37.8
+          ],
+          [
+            -122.3,
+            37.8
+          ],
+          [
+            -122.3,
+            37.7
+          ],
+          [
+            -122.4,
+            37.8
+          ]
+        ]
+      ]
+    }
+  },
+  "job_failed": {
+    "error": "valhalla unreachable"
+  }
+}
