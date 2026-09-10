@@ -803,6 +803,55 @@ func TestOtherValidationFailuresCarryNoPlacementDetail(t *testing.T) {
 	}
 }
 
+func TestCreateValidationRejectionCarriesStructuredDetail(t *testing.T) {
+	body := `{"route_slug":"diagonal","name":"X",
+		"vehicle":{"max_speed_kmh":100,"acceleration_ms2":1,"deceleration_ms2":1},
+		"stops":[{"name":"A","lat":999,"lng":1},{"name":"B","lat":2,"lng":-200}]}`
+
+	rec := serveAs(t, newFakeServiceStore(), svcOwner, http.MethodPost, "/api/services", body)
+	got := decodeValidationFault(t, rec)
+	if got.Code != handler.ValidationErrorCode {
+		t.Errorf("code = %q, want %q", got.Code, handler.ValidationErrorCode)
+	}
+	if len(got.Detail.Faults) != 2 {
+		t.Fatalf("got %d faults, want 2: %+v", len(got.Detail.Faults), got.Detail.Faults)
+	}
+	if got.Detail.Faults[0].Field != "stops.lat" || got.Detail.Faults[0].Index == nil || *got.Detail.Faults[0].Index != 0 {
+		t.Errorf("fault 0 = %+v, want stops.lat at index 0", got.Detail.Faults[0])
+	}
+	if got.Detail.Faults[1].Field != "stops.lng" || got.Detail.Faults[1].Index == nil || *got.Detail.Faults[1].Index != 1 {
+		t.Errorf("fault 1 = %+v, want stops.lng at index 1", got.Detail.Faults[1])
+	}
+	if !strings.Contains(got.Error, "lat") {
+		t.Errorf("error message %q no longer names the field", got.Error)
+	}
+}
+
+type validationBody struct {
+	Error  string `json:"error"`
+	Code   string `json:"code"`
+	Detail struct {
+		Faults []struct {
+			Field   string `json:"field"`
+			Index   *int   `json:"index"`
+			Rule    string `json:"rule"`
+			Message string `json:"message"`
+		} `json:"faults"`
+	} `json:"detail"`
+}
+
+func decodeValidationFault(t *testing.T, rec *httptest.ResponseRecorder) validationBody {
+	t.Helper()
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("got %d, want %d (body %s)", rec.Code, http.StatusUnprocessableEntity, rec.Body)
+	}
+	var body validationBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decoding error body: %v (body %s)", err, rec.Body)
+	}
+	return body
+}
+
 func TestCreateRequiresARouteSlug(t *testing.T) {
 	body := `{"name":"No route","vehicle":{"max_speed_kmh":100,"acceleration_ms2":1,"deceleration_ms2":1},
 		"stops":[{"name":"A","lat":1,"lng":1},{"name":"B","lat":2,"lng":2}]}`

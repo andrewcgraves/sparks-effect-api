@@ -228,7 +228,7 @@ func decodeScenarioRequest(w http.ResponseWriter, r *http.Request) (userScenario
 
 func validateScenario(w http.ResponseWriter, r *http.Request, store ScenarioStore, sc transit.UserScenario) bool {
 	if err := sc.Validate(); err != nil {
-		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		writeUnprocessable(w, err)
 		return false
 	}
 	if len(sc.ServiceIDs) == 0 {

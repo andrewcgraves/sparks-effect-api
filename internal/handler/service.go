@@ -281,7 +281,7 @@ func validateAndSnapService(w http.ResponseWriter, r *http.Request, store Servic
 	// Validate first: it range-checks coordinates and the stop count, which
 	// snapping would otherwise trip over with a worse message.
 	if err := svc.Validate(); err != nil {
-		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		writeUnprocessable(w, err)
 		return false
 	}
 	if err := svc.SnapToRoute(rt); err != nil {
@@ -291,13 +291,7 @@ func validateAndSnapService(w http.ResponseWriter, r *http.Request, store Servic
 			writeInternalError(r.Context(), w, "snapping stops", err)
 			return false
 		}
-		var fault *transit.StopPlacementFault
-		if errors.As(err, &fault) {
-			writeErrorDetail(w, http.StatusUnprocessableEntity,
-				StopPlacementErrorCode, fault.Error(), stopPlacementDetailFrom(fault))
-			return false
-		}
-		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		writeUnprocessable(w, err)
 		return false
 	}
 	return true

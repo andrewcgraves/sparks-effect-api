@@ -225,7 +225,7 @@ func decodeRouteIngest(w http.ResponseWriter, r *http.Request) (route.Ingest, bo
 	// through HTTP. Its messages name the offending field and segment, so they
 	// are returned to the client as-is.
 	if err := route.Validate(in); err != nil {
-		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		writeUnprocessable(w, err)
 		return route.Ingest{}, false
 	}
 	return in, true
