@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
@@ -352,7 +353,7 @@ func (f *fakeCompileStore) waitForCompletion(t *testing.T) transit.Job {
 	}
 }
 
-func postAs(t *testing.T, h http.Handler, path, pathValueName, pathValue string, user transit.User) *httptest.ResponseRecorder {
+func postAs(t *testing.T, h http.Handler, path, pathValueName, pathValue string, user account.User) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, path, nil)
 	req.SetPathValue(pathValueName, pathValue)
@@ -362,7 +363,7 @@ func postAs(t *testing.T, h http.Handler, path, pathValueName, pathValue string,
 	return rec
 }
 
-func getWithPathValueAs(t *testing.T, h http.Handler, path, pathValueName, pathValue string, user *transit.User) *httptest.ResponseRecorder {
+func getWithPathValueAs(t *testing.T, h http.Handler, path, pathValueName, pathValue string, user *account.User) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, path, nil)
 	req.SetPathValue(pathValueName, pathValue)
@@ -379,7 +380,7 @@ func TestCompileScenarioReturnsQueuedJobAndCompilesAsync(t *testing.T) {
 	store.compilableFixture()
 
 	rec := postAs(t, handler.CompileScenario(store, transit.DefaultBoardingWaitPolicy()), "/api/scenarios/scenario-a/compile", "slug", "scenario-a",
-		transit.User{ID: "user-1"})
+		account.User{ID: "user-1"})
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202; body %s", rec.Code, rec.Body.String())
 	}
@@ -416,7 +417,7 @@ func TestCompileScenarioFailsJobOnBadScenarioData(t *testing.T) {
 	store.services[0].VehicleTypeID = "no-such-vehicle-type"
 
 	rec := postAs(t, handler.CompileScenario(store, transit.DefaultBoardingWaitPolicy()), "/api/scenarios/scenario-a/compile", "slug", "scenario-a",
-		transit.User{ID: "user-1"})
+		account.User{ID: "user-1"})
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202; body %s", rec.Code, rec.Body.String())
 	}
@@ -445,7 +446,7 @@ func TestCompileScenarioRequiresAuth(t *testing.T) {
 func TestCompileScenarioUnknownSlugIsNotFound(t *testing.T) {
 	store := newFakeCompileStore()
 	rec := postAs(t, handler.CompileScenario(store, transit.DefaultBoardingWaitPolicy()), "/api/scenarios/no-such-scenario/compile", "slug", "no-such-scenario",
-		transit.User{ID: "user-1"})
+		account.User{ID: "user-1"})
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rec.Code)
 	}
@@ -456,7 +457,7 @@ func TestCompileScenarioReportsStorageFailure(t *testing.T) {
 	store.createJobErr = errors.New("database is down")
 
 	rec := postAs(t, handler.CompileScenario(store, transit.DefaultBoardingWaitPolicy()), "/api/scenarios/scenario-a/compile", "slug", "scenario-a",
-		transit.User{ID: "user-1"})
+		account.User{ID: "user-1"})
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", rec.Code)
 	}
@@ -470,7 +471,7 @@ func TestJobStatusReturnsJobForItsOwner(t *testing.T) {
 	owner := "user-1"
 	store.jobs["job-1"] = transit.Job{ID: "job-1", Kind: "compile", Status: transit.JobStatusRunning, OwnerID: &owner}
 
-	user := transit.User{ID: "user-1"}
+	user := account.User{ID: "user-1"}
 	rec := getWithPathValueAs(t, handler.JobStatus(store), "/api/jobs/job-1", "id", "job-1", &user)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body.String())
@@ -489,7 +490,7 @@ func TestJobStatusHidesOtherUsersJobsAsNotFound(t *testing.T) {
 	owner := "user-2"
 	store.jobs["job-1"] = transit.Job{ID: "job-1", Kind: "compile", Status: transit.JobStatusRunning, OwnerID: &owner}
 
-	user := transit.User{ID: "user-1"}
+	user := account.User{ID: "user-1"}
 	rec := getWithPathValueAs(t, handler.JobStatus(store), "/api/jobs/job-1", "id", "job-1", &user)
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rec.Code)
@@ -501,7 +502,7 @@ func TestJobStatusAdminCanViewAnyJob(t *testing.T) {
 	owner := "user-2"
 	store.jobs["job-1"] = transit.Job{ID: "job-1", Kind: "compile", Status: transit.JobStatusRunning, OwnerID: &owner}
 
-	admin := transit.User{ID: "admin-1", IsAdmin: true}
+	admin := account.User{ID: "admin-1", IsAdmin: true}
 	rec := getWithPathValueAs(t, handler.JobStatus(store), "/api/jobs/job-1", "id", "job-1", &admin)
 	if rec.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", rec.Code)
@@ -510,7 +511,7 @@ func TestJobStatusAdminCanViewAnyJob(t *testing.T) {
 
 func TestJobStatusUnknownIDIsNotFound(t *testing.T) {
 	store := newFakeCompileStore()
-	user := transit.User{ID: "user-1"}
+	user := account.User{ID: "user-1"}
 	rec := getWithPathValueAs(t, handler.JobStatus(store), "/api/jobs/no-such-job", "id", "no-such-job", &user)
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rec.Code)

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 	"github.com/jackc/pgx/v5"
@@ -30,8 +31,8 @@ const (
 )
 
 func mustCreateUser(t *testing.T, repo interface {
-	CreateUser(context.Context, transit.User, string) error
-}, u transit.User, password string) {
+	CreateUser(context.Context, account.User, string) error
+}, u account.User, password string) {
 	t.Helper()
 	hash, err := auth.NewHasher(bcrypt.MinCost).Hash(password)
 	if err != nil {
@@ -46,7 +47,7 @@ func TestCredentialsRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	repo, _ := freshRepo(t)
 
-	u := transit.User{ID: ownerAID, Email: "owner@example.com", Name: "Owner"}
+	u := account.User{ID: ownerAID, Email: "owner@example.com", Name: "Owner"}
 	mustCreateUser(t, repo, u, "s3cret-password")
 
 	got, hash, ok, err := repo.GetUserCredentialsByEmail(ctx, u.Email)
@@ -72,14 +73,14 @@ func TestSessionLifecycle(t *testing.T) {
 	ctx := context.Background()
 	repo, _ := freshRepo(t)
 
-	u := transit.User{ID: ownerAID, Email: "owner@example.com", IsAdmin: true}
+	u := account.User{ID: ownerAID, Email: "owner@example.com", IsAdmin: true}
 	mustCreateUser(t, repo, u, "pw")
 
 	token, hash, err := auth.NewToken()
 	if err != nil {
 		t.Fatalf("NewToken: %v", err)
 	}
-	if err := repo.CreateSession(ctx, transit.Session{
+	if err := repo.CreateSession(ctx, account.Session{
 		TokenHash: hash, UserID: u.ID, ExpiresAt: time.Now().Add(time.Hour),
 	}); err != nil {
 		t.Fatalf("CreateSession: %v", err)
@@ -107,14 +108,14 @@ func TestExpiredSessionIsRejectedAndPruned(t *testing.T) {
 	ctx := context.Background()
 	repo, _ := freshRepo(t)
 
-	u := transit.User{ID: ownerAID, Email: "owner@example.com"}
+	u := account.User{ID: ownerAID, Email: "owner@example.com"}
 	mustCreateUser(t, repo, u, "pw")
 
 	_, expiredHash, err := auth.NewToken()
 	if err != nil {
 		t.Fatalf("NewToken: %v", err)
 	}
-	if err := repo.CreateSession(ctx, transit.Session{
+	if err := repo.CreateSession(ctx, account.Session{
 		TokenHash: expiredHash, UserID: u.ID, ExpiresAt: time.Now().Add(-time.Minute),
 	}); err != nil {
 		t.Fatalf("CreateSession: %v", err)
@@ -123,7 +124,7 @@ func TestExpiredSessionIsRejectedAndPruned(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewToken: %v", err)
 	}
-	if err := repo.CreateSession(ctx, transit.Session{
+	if err := repo.CreateSession(ctx, account.Session{
 		TokenHash: liveHash, UserID: u.ID, ExpiresAt: time.Now().Add(time.Hour),
 	}); err != nil {
 		t.Fatalf("CreateSession: %v", err)
@@ -150,14 +151,14 @@ func TestDeletingUserCascadesToSessions(t *testing.T) {
 	ctx := context.Background()
 	repo, url := freshRepo(t)
 
-	u := transit.User{ID: ownerAID, Email: "owner@example.com"}
+	u := account.User{ID: ownerAID, Email: "owner@example.com"}
 	mustCreateUser(t, repo, u, "pw")
 
 	_, hash, err := auth.NewToken()
 	if err != nil {
 		t.Fatalf("NewToken: %v", err)
 	}
-	if err := repo.CreateSession(ctx, transit.Session{
+	if err := repo.CreateSession(ctx, account.Session{
 		TokenHash: hash, UserID: u.ID, ExpiresAt: time.Now().Add(time.Hour),
 	}); err != nil {
 		t.Fatalf("CreateSession: %v", err)
@@ -174,8 +175,8 @@ func TestOwnerScopedReads(t *testing.T) {
 	ctx := context.Background()
 	repo, _ := freshRepo(t)
 
-	mustCreateUser(t, repo, transit.User{ID: ownerAID, Email: "a@example.com"}, "pw")
-	mustCreateUser(t, repo, transit.User{ID: ownerBID, Email: "b@example.com"}, "pw")
+	mustCreateUser(t, repo, account.User{ID: ownerAID, Email: "a@example.com"}, "pw")
+	mustCreateUser(t, repo, account.User{ID: ownerBID, Email: "b@example.com"}, "pw")
 
 	const (
 		scenarioA = "00000000-0000-4001-8003-000000000001"

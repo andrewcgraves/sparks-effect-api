@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
@@ -126,9 +127,9 @@ func (f *fakeScenarioStore) UserServiceIDsOwnedBy(_ context.Context, ownerID str
 // --- test harness ---
 
 var (
-	scnOwner    = transit.User{ID: "user-1", Email: "owner@example.com"}
-	scnStranger = transit.User{ID: "user-2", Email: "stranger@example.com"}
-	scnAdmin    = transit.User{ID: "user-3", Email: "admin@example.com", IsAdmin: true}
+	scnOwner    = account.User{ID: "user-1", Email: "owner@example.com"}
+	scnStranger = account.User{ID: "user-2", Email: "stranger@example.com"}
+	scnAdmin    = account.User{ID: "user-3", Email: "admin@example.com", IsAdmin: true}
 )
 
 const scenarioCreatePayload = `{"name": "Weekend Getaway", "description": "Fri-Sun", "service_ids": ["svc-1", "svc-2"]}`
@@ -143,7 +144,7 @@ func scenarioMux(store handler.ScenarioStore) *http.ServeMux {
 	return mux
 }
 
-func scnServeAs(t *testing.T, store handler.ScenarioStore, user transit.User, method, target, body string) *httptest.ResponseRecorder {
+func scnServeAs(t *testing.T, store handler.ScenarioStore, user account.User, method, target, body string) *httptest.ResponseRecorder {
 	t.Helper()
 
 	var r *http.Request
@@ -371,7 +372,7 @@ func TestScenarioAnonymousIsRejectedOnEveryRoute(t *testing.T) {
 			store := newFakeScenarioStore()
 			seedScenarioRow(store, "scn-1", "seeded", scnOwner.ID, []string{"svc-1"})
 
-			rec := scnServeAs(t, store, transit.User{}, tc.method, tc.target, tc.body)
+			rec := scnServeAs(t, store, account.User{}, tc.method, tc.target, tc.body)
 			if rec.Code != http.StatusUnauthorized {
 				t.Fatalf("got %d, want %d", rec.Code, http.StatusUnauthorized)
 			}

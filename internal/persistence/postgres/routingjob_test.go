@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 	"github.com/jackc/pgx/v5"
@@ -113,7 +114,7 @@ func TestRoutingJobWithAnOwner(t *testing.T) {
 	ctx := context.Background()
 	repo, _ := freshRepo(t)
 	seedCompileJob(t, repo, routingCompileJobID)
-	if err := repo.CreateUser(ctx, transit.User{
+	if err := repo.CreateUser(ctx, account.User{
 		ID: routingUserID, Email: "routing@example.com", Name: "Routing",
 	}, "hash-placeholder"); err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -200,7 +201,7 @@ func TestRoutingJobCascadesWithItsOwnerRatherThanBecomingPublic(t *testing.T) {
 	ctx := context.Background()
 	repo, url := freshRepo(t)
 	seedCompileJob(t, repo, routingCompileJobID)
-	if err := repo.CreateUser(ctx, transit.User{
+	if err := repo.CreateUser(ctx, account.User{
 		ID: routingUserID, Email: "routing@example.com", Name: "Routing",
 	}, "hash-placeholder"); err != nil {
 		t.Fatalf("CreateUser: %v", err)

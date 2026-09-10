@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/routing"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
@@ -41,7 +42,7 @@ func TestCompileAuthoredTargetNonOwnerIsNotFound(t *testing.T) {
 			store := newFakeCompileStore()
 			store.compilableUserFixture("owner")
 
-			rec := postAs(t, tt.handler(store), tt.path, "slug", tt.slug, transit.User{ID: "someone-else"})
+			rec := postAs(t, tt.handler(store), tt.path, "slug", tt.slug, account.User{ID: "someone-else"})
 			if rec.Code != http.StatusNotFound {
 				t.Fatalf("status = %d, want 404; body %s", rec.Code, rec.Body.String())
 			}
@@ -68,7 +69,7 @@ func TestAuthoredTargetGraphNotYetCompiledNamesItsTarget(t *testing.T) {
 			store := newFakeCompileStore()
 			store.compilableUserFixture("user-1")
 
-			owner := transit.User{ID: "user-1"}
+			owner := account.User{ID: "user-1"}
 			rec := getWithPathValueAs(t, tt.handler(store), tt.path, "slug", tt.slug, &owner)
 			if rec.Code != http.StatusNotFound {
 				t.Fatalf("status = %d, want 404; body %s", rec.Code, rec.Body.String())
@@ -117,7 +118,7 @@ func TestAuthoredTargetGraphBundlesRoutesForBothTargets(t *testing.T) {
 			svcID, scenarioID := store.compilableUserFixture("user-1")
 			tt.seed(store, svcID, scenarioID)
 
-			owner := transit.User{ID: "user-1"}
+			owner := account.User{ID: "user-1"}
 			rec := getWithPathValueAs(t, tt.handler(store), tt.path, "slug", tt.slug, &owner)
 			if rec.Code != http.StatusOK {
 				t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body.String())

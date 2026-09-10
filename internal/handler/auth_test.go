@@ -10,21 +10,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
-	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 	"golang.org/x/crypto/bcrypt"
 )
 
 type fakeAuthStore struct {
 	users    map[string]userRecord
-	sessions map[string]transit.Session
-	created  []transit.User
+	sessions map[string]account.Session
+	created  []account.User
 	failWith error
 }
 
 type userRecord struct {
-	user transit.User
+	user account.User
 	hash string
 }
 
@@ -41,35 +41,35 @@ func newFakeAuthStore(t *testing.T) *fakeAuthStore {
 	return &fakeAuthStore{
 		users: map[string]userRecord{
 			"user@example.com": {
-				user: transit.User{ID: "user-1", Email: "user@example.com", Name: "User"},
+				user: account.User{ID: "user-1", Email: "user@example.com", Name: "User"},
 				hash: hash,
 			},
 			"admin@example.com": {
-				user: transit.User{ID: "admin-1", Email: "admin@example.com", IsAdmin: true},
+				user: account.User{ID: "admin-1", Email: "admin@example.com", IsAdmin: true},
 				hash: adminHash,
 			},
 			// Provisioned but with no password set yet.
 			"nopass@example.com": {
-				user: transit.User{ID: "user-2", Email: "nopass@example.com"},
+				user: account.User{ID: "user-2", Email: "nopass@example.com"},
 				hash: "",
 			},
 		},
-		sessions: map[string]transit.Session{},
+		sessions: map[string]account.Session{},
 	}
 }
 
-func (f *fakeAuthStore) GetUserCredentialsByEmail(_ context.Context, email string) (transit.User, string, bool, error) {
+func (f *fakeAuthStore) GetUserCredentialsByEmail(_ context.Context, email string) (account.User, string, bool, error) {
 	if f.failWith != nil {
-		return transit.User{}, "", false, f.failWith
+		return account.User{}, "", false, f.failWith
 	}
 	rec, ok := f.users[email]
 	if !ok {
-		return transit.User{}, "", false, nil
+		return account.User{}, "", false, nil
 	}
 	return rec.user, rec.hash, true, nil
 }
 
-func (f *fakeAuthStore) CreateSession(_ context.Context, s transit.Session) error {
+func (f *fakeAuthStore) CreateSession(_ context.Context, s account.Session) error {
 	if f.failWith != nil {
 		return f.failWith
 	}
@@ -85,12 +85,12 @@ func (f *fakeAuthStore) DeleteSession(_ context.Context, tokenHash string) error
 	return nil
 }
 
-func (f *fakeAuthStore) GetUserByEmail(_ context.Context, email string) (transit.User, bool, error) {
+func (f *fakeAuthStore) GetUserByEmail(_ context.Context, email string) (account.User, bool, error) {
 	rec, ok := f.users[email]
 	return rec.user, ok, nil
 }
 
-func (f *fakeAuthStore) CreateUser(_ context.Context, u transit.User, hash string) error {
+func (f *fakeAuthStore) CreateUser(_ context.Context, u account.User, hash string) error {
 	if f.failWith != nil {
 		return f.failWith
 	}
@@ -124,7 +124,7 @@ func TestLoginSuccessReturnsUsableToken(t *testing.T) {
 	var resp struct {
 		Token     string       `json:"token"`
 		ExpiresAt time.Time    `json:"expires_at"`
-		User      transit.User `json:"user"`
+		User      account.User `json:"user"`
 	}
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -226,7 +226,7 @@ func TestLogoutRevokesTheSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewToken: %v", err)
 	}
-	store.sessions[hash] = transit.Session{
+	store.sessions[hash] = account.Session{
 		TokenHash: hash, UserID: "user-1", ExpiresAt: time.Now().Add(time.Hour),
 	}
 
@@ -244,7 +244,7 @@ func TestLogoutRevokesTheSession(t *testing.T) {
 }
 
 func TestMeReturnsTheAuthenticatedIdentity(t *testing.T) {
-	user := transit.User{ID: "user-1", Email: "user@example.com", Name: "User"}
+	user := account.User{ID: "user-1", Email: "user@example.com", Name: "User"}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
 	req = req.WithContext(auth.WithUser(req.Context(), user))
@@ -254,7 +254,7 @@ func TestMeReturnsTheAuthenticatedIdentity(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
-	var got transit.User
+	var got account.User
 	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}

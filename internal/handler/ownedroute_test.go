@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
@@ -22,9 +23,9 @@ const (
 )
 
 var (
-	memberA = transit.User{ID: ownerAID, Email: "a@example.com"}
-	memberB = transit.User{ID: ownerBID, Email: "b@example.com"}
-	adminU  = transit.User{ID: "00000000-0000-4100-8000-000000000009", Email: "admin@example.com", IsAdmin: true}
+	memberA = account.User{ID: ownerAID, Email: "a@example.com"}
+	memberB = account.User{ID: ownerBID, Email: "b@example.com"}
+	adminU  = account.User{ID: "00000000-0000-4100-8000-000000000009", Email: "admin@example.com", IsAdmin: true}
 )
 
 type fakeOwnedRouteStore struct {
@@ -120,7 +121,7 @@ func (f *fakeOwnedRouteStore) GetScenarioBySlug(_ context.Context, slug string) 
 	return sc, ok, nil
 }
 
-func runWithSlug(t *testing.T, h http.HandlerFunc, user transit.User,
+func runWithSlug(t *testing.T, h http.HandlerFunc, user account.User,
 	method, target, slug, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(method, target, strings.NewReader(body))
@@ -132,7 +133,7 @@ func runWithSlug(t *testing.T, h http.HandlerFunc, user transit.User,
 	return rec
 }
 
-func asUser(t *testing.T, h http.HandlerFunc, user transit.User, method, target, body string) *httptest.ResponseRecorder {
+func asUser(t *testing.T, h http.HandlerFunc, user account.User, method, target, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	slug := strings.Trim(strings.TrimPrefix(target, "/api/me/routes"), "/")
 	return runWithSlug(t, h, user, method, target, slug, body)
@@ -254,7 +255,7 @@ func TestOwnedRouteAnswers404ToEveryoneButItsOwner(t *testing.T) {
 
 	for _, tc := range []struct {
 		name string
-		user transit.User
+		user account.User
 		want int
 	}{
 		{"its owner", memberA, http.StatusOK},

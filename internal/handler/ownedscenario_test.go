@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
@@ -79,7 +80,7 @@ func scenarioBody(name, description, status string) string {
 	return `{"name":"` + name + `","description":"` + description + `","status":"` + status + `"}`
 }
 
-func asScenarioUser(t *testing.T, h http.HandlerFunc, user transit.User, method, target, body string) *httptest.ResponseRecorder {
+func asScenarioUser(t *testing.T, h http.HandlerFunc, user account.User, method, target, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	slug := strings.Trim(strings.TrimPrefix(target, "/api/me/scenarios"), "/")
 	return runWithSlug(t, h, user, method, target, slug, body)
@@ -148,7 +149,7 @@ func TestCreateOwnedScenarioRejectsAnUnsluggableName(t *testing.T) {
 func TestCuratedScenarioIsNotEditableByANonAdmin(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		user transit.User
+		user account.User
 		want int
 	}{
 		{"a member", memberA, http.StatusNotFound},
@@ -176,7 +177,7 @@ func TestOwnedScenarioAnswers404ToStrangers(t *testing.T) {
 
 	for _, tc := range []struct {
 		name string
-		user transit.User
+		user account.User
 		want int
 	}{
 		{"its owner", memberA, http.StatusOK},

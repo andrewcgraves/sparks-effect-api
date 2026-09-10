@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
@@ -130,9 +131,9 @@ func seedServiceRow(f *fakeServiceStore, id, slug, ownerID string, updatedAt tim
 // --- test harness ---
 
 var (
-	svcOwner    = transit.User{ID: "user-1", Email: "owner@example.com"}
-	svcStranger = transit.User{ID: "user-2", Email: "stranger@example.com"}
-	svcAdmin    = transit.User{ID: "user-3", Email: "admin@example.com", IsAdmin: true}
+	svcOwner    = account.User{ID: "user-1", Email: "owner@example.com"}
+	svcStranger = account.User{ID: "user-2", Email: "stranger@example.com"}
+	svcAdmin    = account.User{ID: "user-3", Email: "admin@example.com", IsAdmin: true}
 )
 
 const createPayload = `{
@@ -156,7 +157,7 @@ func serviceMux(store handler.ServiceStore) *http.ServeMux {
 	return mux
 }
 
-func serveAs(t *testing.T, store handler.ServiceStore, user transit.User, method, target, body string) *httptest.ResponseRecorder {
+func serveAs(t *testing.T, store handler.ServiceStore, user account.User, method, target, body string) *httptest.ResponseRecorder {
 	t.Helper()
 
 	var r *http.Request
@@ -459,7 +460,7 @@ func TestAnonymousIsRejectedOnEveryRoute(t *testing.T) {
 			store := newFakeServiceStore()
 			seedService(store, "svc-1", "seeded", svcOwner.ID)
 
-			rec := serveAs(t, store, transit.User{}, tc.method, tc.target, tc.body)
+			rec := serveAs(t, store, account.User{}, tc.method, tc.target, tc.body)
 			if rec.Code != http.StatusUnauthorized {
 				t.Fatalf("got %d, want %d", rec.Code, http.StatusUnauthorized)
 			}

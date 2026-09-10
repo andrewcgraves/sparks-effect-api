@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/persistence/postgres"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
@@ -23,7 +24,7 @@ func userScenarioFixture(t *testing.T) (*postgres.Repo, context.Context) {
 	ctx := context.Background()
 	repo, _ := freshRepo(t)
 
-	for _, u := range []transit.User{
+	for _, u := range []account.User{
 		{ID: usnOwnerID, Email: "usn-owner@example.com", Name: "Owner"},
 		{ID: usnStrangerID, Email: "usn-stranger@example.com", Name: "Stranger"},
 	} {
