@@ -21,7 +21,10 @@ type Repo struct {
 	pool *pgxpool.Pool
 }
 
-var _ transit.Repository = (*Repo)(nil)
+var (
+	_ transit.StoreSource = (*Repo)(nil)
+	_ transit.SeedSink    = (*Repo)(nil)
+)
 
 func Connect(ctx context.Context, databaseURL string, maxConns int) (*Repo, error) {
 	cfg, err := pgxpool.ParseConfig(databaseURL)

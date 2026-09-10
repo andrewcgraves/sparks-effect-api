@@ -46,37 +46,46 @@ func NewStore(boardingWait BoardingWaitPolicy) (*Store, error) {
 	return s, nil
 }
 
-func LoadStore(ctx context.Context, repo Repository, boardingWait BoardingWaitPolicy) (*Store, error) {
+type StoreSource interface {
+	ListVehicleTypes(ctx context.Context) ([]VehicleType, error)
+	ListCuratedScenarios(ctx context.Context) ([]Scenario, error)
+	ListRoutesByScenario(ctx context.Context, scenarioID string) ([]Route, error)
+	ListStationsByScenario(ctx context.Context, scenarioID string) ([]Station, error)
+	ListServicesByScenario(ctx context.Context, scenarioID string) ([]Service, error)
+	GetTravelTimes(ctx context.Context, scenarioSlug string) (TravelTimes, bool, error)
+}
+
+func LoadStore(ctx context.Context, src StoreSource, boardingWait BoardingWaitPolicy) (*Store, error) {
 	s := &Store{
 		travelTimes: make(map[string]TravelTimes),
 		graphs:      make(map[string]*TransitGraph),
 	}
 
-	vts, err := repo.ListVehicleTypes(ctx)
+	vts, err := src.ListVehicleTypes(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("transit: loading vehicle types: %w", err)
 	}
 	s.vehicleTypes = vts
 
-	scenarios, err := repo.ListCuratedScenarios(ctx)
+	scenarios, err := src.ListCuratedScenarios(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("transit: listing scenarios: %w", err)
 	}
 
 	for _, sc := range scenarios {
-		routes, err := repo.ListRoutesByScenario(ctx, sc.ID)
+		routes, err := src.ListRoutesByScenario(ctx, sc.ID)
 		if err != nil {
 			return nil, fmt.Errorf("transit: loading routes for %q: %w", sc.Slug, err)
 		}
-		stations, err := repo.ListStationsByScenario(ctx, sc.ID)
+		stations, err := src.ListStationsByScenario(ctx, sc.ID)
 		if err != nil {
 			return nil, fmt.Errorf("transit: loading stations for %q: %w", sc.Slug, err)
 		}
-		services, err := repo.ListServicesByScenario(ctx, sc.ID)
+		services, err := src.ListServicesByScenario(ctx, sc.ID)
 		if err != nil {
 			return nil, fmt.Errorf("transit: loading services for %q: %w", sc.Slug, err)
 		}
-		tt, _, err := repo.GetTravelTimes(ctx, sc.Slug)
+		tt, _, err := src.GetTravelTimes(ctx, sc.Slug)
 		if err != nil {
 			return nil, fmt.Errorf("transit: loading travel times for %q: %w", sc.Slug, err)
 		}

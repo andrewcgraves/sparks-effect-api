@@ -6,21 +6,32 @@ import (
 	"io/fs"
 )
 
-func SeedIfEmpty(ctx context.Context, repo Repository) (bool, error) {
-	existing, err := repo.ListCuratedScenarios(ctx)
+type SeedSink interface {
+	ListCuratedScenarios(ctx context.Context) ([]Scenario, error)
+	CreateScenario(ctx context.Context, sc Scenario) error
+	CreateVehicleType(ctx context.Context, vt VehicleType) error
+	CreateRoute(ctx context.Context, r Route) error
+	CreateStation(ctx context.Context, st Station) error
+	CreateService(ctx context.Context, svc Service) error
+	AddServiceToScenario(ctx context.Context, scenarioID, serviceID string) error
+	UpsertTravelTimes(ctx context.Context, tt TravelTimes) error
+}
+
+func SeedIfEmpty(ctx context.Context, sink SeedSink) (bool, error) {
+	existing, err := sink.ListCuratedScenarios(ctx)
 	if err != nil {
 		return false, fmt.Errorf("transit: checking for existing scenarios: %w", err)
 	}
 	if len(existing) > 0 {
 		return false, nil
 	}
-	if err := SeedFromEmbedded(ctx, repo); err != nil {
+	if err := SeedFromEmbedded(ctx, sink); err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
-func SeedFromEmbedded(ctx context.Context, repo Repository) error {
+func SeedFromEmbedded(ctx context.Context, sink SeedSink) error {
 	entries, err := fs.ReadDir(dataFS, "data/scenarios")
 	if err != nil {
 		return fmt.Errorf("transit: reading scenarios dir: %w", err)
@@ -29,21 +40,21 @@ func SeedFromEmbedded(ctx context.Context, repo Repository) error {
 		if !e.IsDir() {
 			continue
 		}
-		if err := seedScenario(ctx, repo, e.Name()); err != nil {
+		if err := seedScenario(ctx, sink, e.Name()); err != nil {
 			return fmt.Errorf("transit: seeding scenario %q: %w", e.Name(), err)
 		}
 	}
 	return nil
 }
 
-func seedScenario(ctx context.Context, repo Repository, slug string) error {
+func seedScenario(ctx context.Context, sink SeedSink, slug string) error {
 	base := "data/scenarios/" + slug
 
 	var sc Scenario
 	if err := unmarshalFile(dataFS, base+"/scenario.yaml", &sc); err != nil {
 		return err
 	}
-	if err := repo.CreateScenario(ctx, sc); err != nil {
+	if err := sink.CreateScenario(ctx, sc); err != nil {
 		return fmt.Errorf("creating scenario: %w", err)
 	}
 
@@ -52,7 +63,7 @@ func seedScenario(ctx context.Context, repo Repository, slug string) error {
 		return err
 	}
 	for _, vt := range vts {
-		if err := repo.CreateVehicleType(ctx, vt); err != nil {
+		if err := sink.CreateVehicleType(ctx, vt); err != nil {
 			return fmt.Errorf("creating vehicle type %q: %w", vt.ID, err)
 		}
 	}
@@ -62,7 +73,7 @@ func seedScenario(ctx context.Context, repo Repository, slug string) error {
 		return err
 	}
 	for _, r := range routes {
-		if err := repo.CreateRoute(ctx, r); err != nil {
+		if err := sink.CreateRoute(ctx, r); err != nil {
 			return fmt.Errorf("creating route %q: %w", r.ID, err)
 		}
 	}
@@ -72,7 +83,7 @@ func seedScenario(ctx context.Context, repo Repository, slug string) error {
 		return err
 	}
 	for _, st := range stations {
-		if err := repo.CreateStation(ctx, st); err != nil {
+		if err := sink.CreateStation(ctx, st); err != nil {
 			return fmt.Errorf("creating station %q: %w", st.ID, err)
 		}
 	}
@@ -87,10 +98,10 @@ func seedScenario(ctx context.Context, repo Repository, slug string) error {
 				return fmt.Errorf("service %q: %w", svc.ID, err)
 			}
 		}
-		if err := repo.CreateService(ctx, svc); err != nil {
+		if err := sink.CreateService(ctx, svc); err != nil {
 			return fmt.Errorf("creating service %q: %w", svc.ID, err)
 		}
-		if err := repo.AddServiceToScenario(ctx, svc.ScenarioID, svc.ID); err != nil {
+		if err := sink.AddServiceToScenario(ctx, svc.ScenarioID, svc.ID); err != nil {
 			return fmt.Errorf("linking service %q to scenario: %w", svc.ID, err)
 		}
 	}
@@ -102,7 +113,7 @@ func seedScenario(ctx context.Context, repo Repository, slug string) error {
 	if err := validateSegmentRoutes(routes, tt); err != nil {
 		return err
 	}
-	if err := repo.UpsertTravelTimes(ctx, tt); err != nil {
+	if err := sink.UpsertTravelTimes(ctx, tt); err != nil {
 		return fmt.Errorf("upserting travel times: %w", err)
 	}
 
