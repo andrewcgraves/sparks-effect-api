@@ -114,5 +114,11 @@ tag that contains it is promoted.
 Create both pipelines in Linear (Settings → Releases), generate an access key
 per pipeline, and paste them into the secrets in the table above. The first
 sync in each pipeline only sees the current commit — there is no previous SHA
-to bound the range from. To backfill, re-run with an explicit `--base-ref`
-pointing at the last commit that should count as already released.
+to bound the range from.
+
+To backfill an already-promoted tag, re-run **Release** (*Run workflow*) with
+that tag and `base_ref` set to the previous release tag. Linear scans
+`<base_ref>..HEAD` exclusively, so `v0.2.0` with `base_ref=v0.1.0` attaches
+every `SPA-` issue in that range rather than only HEAD. A rollback
+(re-promoting an older tag) does not rewrite Linear history: the original
+production release stays as the one that first shipped those issues.

@@ -16,6 +16,10 @@ on:
         description: "Existing release tag to promote, e.g. v1.4.2. Pass an older tag to roll back."
         required: true
         type: string
+      base_ref:
+        description: "Optional exclusive git ref for Linear's commit scan (e.g. v0.1.0). Leave empty to use the last Linear release in the production pipeline."
+        required: false
+        type: string
 
 # Two promotions racing would leave `:prd` pointing at whichever re-tag landed
 # last rather than whichever was asked for last.
@@ -128,6 +132,15 @@ jobs:
             railway redeploy --yes
           fi
 
+      # Linear scans this working tree, so it must be the promoted commit —
+      # not `main`. A tag push already checks out that SHA; workflow_dispatch
+      # of an older tag would otherwise scan trunk HEAD and attach issues
+      # that are not in the promoted image.
+      - name: Check out the promoted commit
+        env:
+          SHA: ${{ steps.target.outputs.sha }}
+        run: git checkout --detach "$SHA"
+
       # Production is a different Linear pipeline from staging: the same issue
       # can sit on staging for a while before a tag promotes it, and staging
       # can already be several commits ahead. See docs/releases.md.
@@ -148,12 +161,25 @@ jobs:
           fi
 
       - name: Sync Linear production release
-        if: steps.linear.outputs.configured == 'true'
+        if: steps.linear.outputs.configured == 'true' && (github.event_name != 'workflow_dispatch' || github.event.inputs.base_ref == '')
         uses: linear/linear-release-action@v0
         with:
           access_key: ${{ secrets.LINEAR_ACCESS_KEY_PRODUCTION }}
           name: ${{ steps.target.outputs.tag }}
           version: ${{ steps.target.outputs.tag }}
+          links: |
+            Commit=${{ github.server_url }}/${{ github.repository }}/commit/${{ steps.target.outputs.sha }}
+            CI run=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            Image=https://github.com/${{ github.repository }}/pkgs/container/sparks-effect-api
+
+      - name: Sync Linear production release with explicit scan base
+        if: steps.linear.outputs.configured == 'true' && github.event_name == 'workflow_dispatch' && github.event.inputs.base_ref != ''
+        uses: linear/linear-release-action@v0
+        with:
+          access_key: ${{ secrets.LINEAR_ACCESS_KEY_PRODUCTION }}
+          name: ${{ steps.target.outputs.tag }}
+          version: ${{ steps.target.outputs.tag }}
+          base_ref: ${{ github.event.inputs.base_ref }}
           links: |
             Commit=${{ github.server_url }}/${{ github.repository }}/commit/${{ steps.target.outputs.sha }}
             CI run=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
