@@ -16,7 +16,10 @@ the replace drops and both consumers `go get` a version.
 
 The routing-worker companion — import this module, delete its hand copies,
 retire its `check-contract` for these types — is a follow-up. This environment
-cannot write that repository.
+cannot write that repository. Until the worker imports a tagged module,
+consumers still run `check-contract` against the API's
+`internal/routing/testdata/message.golden.json` and
+`internal/handler/testdata/worker-store.golden.json` (the paths the worker curls).
 
 `geo`, `config`, and `logger` stay duplicated in each consumer. They are the
 weakest members of the original inventory; shipping the three packages that

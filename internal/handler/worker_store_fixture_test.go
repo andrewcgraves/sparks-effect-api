@@ -54,24 +54,38 @@ func goldenEnvelope() workerStoreEnvelope {
 	key := goldenIsochroneKey()
 	geom := goldenGeometry()
 	return workerStoreEnvelope{
-		CacheLookupRequest: cacheLookupRequest{Keys: []IsochroneKey{key}},
-		CacheLookupResponse: cacheLookupResponse{
-			Entries: []cacheLookupEntry{{Key: key, Geometry: geom}},
+		CacheLookupRequest: store.CacheLookupRequest{Keys: []IsochroneKey{key}},
+		CacheLookupResponse: store.CacheLookupResponse{
+			Entries: []store.CacheLookupEntry{{Key: key, Geometry: geom}},
 		},
-		CachePutRequest: cachePutRequest{
+		CachePutRequest: store.CachePutRequest{
 			Entries: []CachedIsochrone{{
 				Key:       key,
 				Geometry:  geom,
 				TilesetAt: goldenTilesetAt(),
 			}},
 		},
-		JobSucceeded: jobSucceededBody{Result: geom},
-		JobFailed:    jobFailedBody{Error: "valhalla unreachable"},
+		JobSucceeded: store.JobSucceededBody{Result: geom},
+		JobFailed:    store.JobFailedBody{Error: "valhalla unreachable"},
 	}
 }
 
 func workerStoreGoldenPath() string {
 	return filepath.Join("testdata", "worker-store.golden.json")
+}
+
+func TestWorkerStoreGolden_matchesContractModuleCopy(t *testing.T) {
+	local, err := os.ReadFile(workerStoreGoldenPath())
+	if err != nil {
+		t.Fatalf("read internal copy: %v", err)
+	}
+	canonical, err := os.ReadFile("../../contract/store/testdata/worker-store.golden.json")
+	if err != nil {
+		t.Fatalf("read contract copy: %v", err)
+	}
+	if !bytes.Equal(local, canonical) {
+		t.Error("internal/handler/testdata/worker-store.golden.json drifted from contract/store/testdata/worker-store.golden.json — check-contract curls the internal/ path")
+	}
 }
 
 func TestWorkerStoreEnvelope_matchesGoldenFixture(t *testing.T) {
@@ -229,7 +243,7 @@ func TestWorkerJobTransitions_acceptTheGoldenEnvelope(t *testing.T) {
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("succeeded status = %d, want 204; body %s", rec.Code, rec.Body.String())
 	}
-	if !bytes.Equal(store.result, env.JobSucceeded.Result) {
+	if !bytes.Equal(compactJSON(t, store.result), compactJSON(t, env.JobSucceeded.Result)) {
 		t.Errorf("result = %s, want %s", store.result, env.JobSucceeded.Result)
 	}
 

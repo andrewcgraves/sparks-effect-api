@@ -8,6 +8,9 @@ doc comment on the speed constants in `internal/geo/geo.go`.*
 Superseded in part by [ADR-0003](0003-shared-contract-module.md). The routing
 message, the transit-graph types that travel inside it, and the worker-store
 HTTP envelope now live in `github.com/andrewcgraves/sparks-effect-contract`.
+The golden fixtures still live at `internal/routing/testdata/message.golden.json`
+and `internal/handler/testdata/worker-store.golden.json` as well as in the
+contract module, because the worker still curls those paths.
 `geo`, `config`, and `logger` remain duplicated, as this decision recorded.
 
 ## Context

@@ -1,6 +1,8 @@
 package routing_test
 
 import (
+	"bytes"
+	"os"
 	"testing"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/routing"
@@ -33,5 +35,19 @@ func TestMessageFor_copiesJobFields(t *testing.T) {
 	}
 	if got.TraceID != "trace-1" {
 		t.Errorf("TraceID = %q, want trace-1", got.TraceID)
+	}
+}
+
+func TestMessageGolden_matchesContractModuleCopy(t *testing.T) {
+	local, err := os.ReadFile("testdata/message.golden.json")
+	if err != nil {
+		t.Fatalf("read internal copy: %v", err)
+	}
+	canonical, err := os.ReadFile("../../contract/routing/testdata/message.golden.json")
+	if err != nil {
+		t.Fatalf("read contract copy: %v", err)
+	}
+	if !bytes.Equal(local, canonical) {
+		t.Error("internal/routing/testdata/message.golden.json drifted from contract/routing/testdata/message.golden.json — the worker's check-contract curls the internal/ path")
 	}
 }

@@ -4,9 +4,10 @@
 
 ## Status
 
-Accepted. Supersedes [ADR-0001](0001-api-and-worker-share-no-go-code.md) for
-the routing message, the transit-graph types that travel inside it, and the
-worker-store HTTP envelope.
+Accepted for this repository's bootstrap. Supersession of
+[ADR-0001](0001-api-and-worker-share-no-go-code.md) for the wire types is
+complete when both consumers import a tagged `sparks-effect-contract` and
+delete their hand copies.
 
 ## Context
 
@@ -55,10 +56,11 @@ touch that repository.
 
 ## Consequences
 
-- `make check-contract` and the CI "Queue-message contract" job are retired
-  for the message and the store envelope. The contract module's tests pin
-  both shapes, including a reflective check that every JSON tag appears
-  non-zero in the fixture.
+- `make check-contract` and the CI "API↔worker contract" job stay until
+  the worker consumes the module. Nested-module tests pin local shape; they
+  do not replace the cross-repo golden diff. The worker still has hand-copied
+  types, and its CI still curls `internal/routing/testdata/message.golden.json`
+  and `internal/handler/testdata/worker-store.golden.json`.
 - The API re-exports the migrated types via aliases (`transit.TransitGraph`,
   `handler.IsochroneKey`, `routing.Message`) so existing call sites keep
   compiling. Struct definitions of those types are deleted from `internal/`.
