@@ -60,8 +60,11 @@ The message is a contract between two repositories with no compiler checking
 it ([ADR-0001](docs/adr/0001-api-and-worker-share-no-go-code.md)), so it is
 pinned by a golden fixture — `internal/routing/testdata/message.golden.json` —
 which this repo asserts it produces and the worker repo asserts it consumes.
-That file is the on-the-wire shape; a prose copy of it is a third copy and
-goes stale.
+`make check-contract` (and a CI job of the same name) fetches the worker's
+copy on `main` and diffs it, so a field added on either side turns the other
+side's pipeline red. It is not part of `make dev-workflow`: it needs the
+network. That file is the on-the-wire shape; a prose copy of it is a third
+copy and goes stale.
 
 The graph travels inline — 2,894 bytes for CA HSR, roughly 30 KB for a large
 authored scenario — so the worker needs no database of its own. Publisher
@@ -449,6 +452,7 @@ CI environments match. Use `make db-up DOCKER=podman` to use podman.
 | `make run`              | Build and run the API locally                        |
 | `make lint`             | Run `golangci-lint`                                  |
 | `make vet`              | Run `go vet`                                         |
+| `make check-contract`   | Diff the routing-message fixture against the worker  |
 | `make dev-workflow`     | Run test, vet, lint, and build — full verification   |
 | `make tidy`             | Sync `go.mod`/`go.sum` with imports                  |
 | `make clean`            | Remove build output                                  |
@@ -480,7 +484,10 @@ internal/routing/            queue message contract + confirm-mode AMQP publishe
 ## CI
 
 GitHub Actions runs `test`, `vet`, and `lint` on every pull request and on
-pushes to `main`, then builds the binary and uploads it as a workflow artifact.
+pushes to `main`, diffs the queue-message golden fixture against the worker
+as its own job (`make check-contract`), then builds the binary and uploads it
+as a workflow artifact. The contract job needs `GH_CONTRACT_TOKEN` — a PAT
+that can read `sparks-effect-routing-worker` — because that repo is private.
 A push to `main` also builds the Docker image and publishes it to the GitHub
 Container Registry at `ghcr.io/andrewcgraves/sparks-effect-api`, tagged
 `sha-<commit>` (immutable) and `staging` (moving).

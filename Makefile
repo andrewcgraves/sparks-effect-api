@@ -3,8 +3,11 @@ BUILD_DIR := ./bin
 CMD_DIR := ./cmd/api
 
 GOLANGCI_LINT_VERSION := v2.12.2
-GOBIN := $(shell go env GOPATH)/bin
-GOLANGCI_LINT := $(GOBIN)/golangci-lint
+# Recursive so `make check-contract` does not invoke `go` (and, on a
+# runner without the module's toolchain, download it) just to expand
+# a path the target never uses.
+GOBIN = $(shell go env GOPATH)/bin
+GOLANGCI_LINT = $(GOBIN)/golangci-lint
 
 # --- Throwaway Postgres for integration tests (single source of truth) ---
 # These same values drive `make db-up` locally AND the CI job, so the local and
@@ -28,7 +31,8 @@ TEST_MQ_PORT     := 5672
 TEST_AMQP_URL    := amqp://guest:guest@localhost:$(TEST_MQ_PORT)/
 
 .PHONY: all deps build run test test-race test-integration itest \
-	db-up db-wait db-down mq-up mq-wait mq-down vet lint tidy clean dev-workflow
+	db-up db-wait db-down mq-up mq-wait mq-down vet lint tidy clean \
+	dev-workflow check-contract
 
 all: build
 
@@ -40,6 +44,9 @@ all: build
 # stays fast enough to actually be run on every change. The raced suite against
 # real services is what gates the merge — CI runs it on the PR, and `make itest`
 # reproduces it locally.
+#
+# `check-contract` is deliberately not here: it needs the network, and this
+# target is the offline verification loop.
 dev-workflow: test vet lint build
 
 deps:
@@ -186,6 +193,36 @@ $(GOLANGCI_LINT):
 
 tidy:
 	go mod tidy
+
+# check-contract diffs this copy of the routing-message golden fixture
+# against the worker's copy on main. The two repositories share no Go
+# code by design; this file is the contract. A human remembering to copy
+# a file across repositories is not an invariant.
+#
+# Fetching unpinned `main` is deliberate: what has to hold is agreement
+# with what the other side publishes *now*. A green PR can go red on
+# rerun with no local change.
+#
+# Not part of `dev-workflow`: it needs the network.
+#
+# The worker repo is private, so raw.githubusercontent.com 404s without
+# credentials. When GH_TOKEN (or GITHUB_TOKEN) can read that repo, it is
+# sent as a Bearer token; CI supplies secrets.GH_CONTRACT_TOKEN. Override
+# WORKER_GOLDEN_URL to point at a local file:// copy when testing the
+# diff itself.
+WORKER_GOLDEN_URL ?= https://api.github.com/repos/andrewcgraves/sparks-effect-routing-worker/contents/internal/routing/testdata/message.golden.json?ref=main
+
+check-contract:
+	@curl -fsSL \
+		$(if $(or $(GH_TOKEN),$(GITHUB_TOKEN)),-H "Authorization: Bearer $(or $(GH_TOKEN),$(GITHUB_TOKEN))") \
+		-H "Accept: application/vnd.github.raw" \
+		-H "X-GitHub-Api-Version: 2022-11-28" \
+		-o /tmp/worker-message.golden.json \
+		"$(WORKER_GOLDEN_URL)" \
+		|| { echo "failed to fetch the worker's golden fixture from $(WORKER_GOLDEN_URL)" >&2; \
+		     echo "if that repo is private, set GH_TOKEN to a token that can read it" >&2; \
+		     exit 1; }
+	diff -u /tmp/worker-message.golden.json internal/routing/testdata/message.golden.json
 
 clean:
 	rm -rf $(BUILD_DIR)
