@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
@@ -19,8 +20,8 @@ var preNow = time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
 const preScenarioSlug = "ca-hsr"
 
 var (
-	preAdmin     = transit.User{ID: "admin-9", Email: "admin@example.com", IsAdmin: true}
-	preNonAdmin  = transit.User{ID: "user-9", Email: "user@example.com"}
+	preAdmin     = account.User{ID: "admin-9", Email: "admin@example.com", IsAdmin: true}
+	preNonAdmin  = account.User{ID: "user-9", Email: "user@example.com"}
 	preAdminTok  = "prerendered-admin-token"
 	preUserToken = "prerendered-user-token"
 )
@@ -136,14 +137,14 @@ func seededEntry(id, label string) transit.PrerenderedIsochrone {
 }
 
 func prerenderedMux(store handler.PrerenderedStore) *http.ServeMux {
-	lookup := func(_ context.Context, tokenHash string) (transit.User, bool, error) {
+	lookup := func(_ context.Context, tokenHash string) (account.User, bool, error) {
 		switch tokenHash {
 		case auth.HashToken(preAdminTok):
 			return preAdmin, true, nil
 		case auth.HashToken(preUserToken):
 			return preNonAdmin, true, nil
 		}
-		return transit.User{}, false, nil
+		return account.User{}, false, nil
 	}
 
 	mux := http.NewServeMux()

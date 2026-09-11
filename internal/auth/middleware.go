@@ -8,21 +8,21 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
+	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 )
 
-type SessionLookup func(ctx context.Context, tokenHash string) (transit.User, bool, error)
+type SessionLookup func(ctx context.Context, tokenHash string) (account.User, bool, error)
 
 type contextKey struct{}
 
 var userKey contextKey
 
-func WithUser(ctx context.Context, u transit.User) context.Context {
+func WithUser(ctx context.Context, u account.User) context.Context {
 	return context.WithValue(ctx, userKey, u)
 }
 
-func UserFrom(ctx context.Context) (transit.User, bool) {
-	u, ok := ctx.Value(userKey).(transit.User)
+func UserFrom(ctx context.Context) (account.User, bool) {
+	u, ok := ctx.Value(userKey).(account.User)
 	return u, ok
 }
 

@@ -7,14 +7,14 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/ids"
-	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
 type UserStore interface {
-	CreateUser(ctx context.Context, u transit.User, passwordHash string) error
-	GetUserByEmail(ctx context.Context, email string) (transit.User, bool, error)
+	CreateUser(ctx context.Context, u account.User, passwordHash string) error
+	GetUserByEmail(ctx context.Context, email string) (account.User, bool, error)
 }
 
 type createUserRequest struct {
@@ -68,7 +68,7 @@ func CreateUser(store UserStore, hasher auth.Hasher) http.HandlerFunc {
 			return
 		}
 
-		user := transit.User{
+		user := account.User{
 			ID:      id,
 			Email:   email,
 			Name:    strings.TrimSpace(req.Name),

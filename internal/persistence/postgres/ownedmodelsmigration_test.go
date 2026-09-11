@@ -23,8 +23,8 @@ func rewindOwnedDomainModelsMigration(t *testing.T, url string) {
 		`DROP INDEX IF EXISTS routes_owner_id_idx`,
 		`ALTER TABLE stations DROP COLUMN IF EXISTS owner_id`,
 		`ALTER TABLE routes DROP COLUMN IF EXISTS description`,
-		`ALTER TABLE routes DROP COLUMN IF EXISTS owner_id`,
-		`DELETE FROM goose_db_version WHERE version_id = 22`)
+		`ALTER TABLE routes DROP COLUMN IF EXISTS owner_id`)
+	rewindTo(t, url, 22)
 }
 
 func TestOwnedDomainModelsMigrationAddsOwnershipColumns(t *testing.T) {
@@ -94,10 +94,9 @@ func TestOwnedDomainModelsMigrationLeavesExistingRowsCurated(t *testing.T) {
 func TestOwnedDomainModelsMigrationIsSafeToReRun(t *testing.T) {
 	_, url := freshRepo(t)
 
-	// 00023 and 00024 are unrecorded too: goose applies only versions above the
-	// highest one recorded, so leaving either would make this re-run skip 00022
-	// and prove nothing. Both are re-runnable over the schema they already wrote.
-	exec(t, url, `DELETE FROM goose_db_version WHERE version_id IN (22, 23, 24)`)
+	// Later versions are unrecorded too: goose applies only versions above the
+	// highest one recorded, so leaving any would make this re-run skip 00022.
+	rewindTo(t, url, 22)
 	if err := postgres.Migrate(context.Background(), url); err != nil {
 		t.Fatalf("re-running 00022 over the schema it already created: %v", err)
 	}

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
@@ -45,7 +46,7 @@ func newFakeOwnerStore() *fakeOwnerStore {
 	}
 }
 
-func getAs(t *testing.T, h http.Handler, path string, user transit.User) *httptest.ResponseRecorder {
+func getAs(t *testing.T, h http.Handler, path string, user account.User) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, path, nil)
 	req = req.WithContext(auth.WithUser(req.Context(), user))
@@ -56,7 +57,7 @@ func getAs(t *testing.T, h http.Handler, path string, user transit.User) *httpte
 
 func TestMyScenariosReturnsOnlyTheCallersRows(t *testing.T) {
 	store := newFakeOwnerStore()
-	rec := getAs(t, handler.MyScenarios(store), "/api/me/scenarios", transit.User{ID: "user-1"})
+	rec := getAs(t, handler.MyScenarios(store), "/api/me/scenarios", account.User{ID: "user-1"})
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
@@ -75,7 +76,7 @@ func TestMyScenariosReturnsOnlyTheCallersRows(t *testing.T) {
 
 func TestMyServicesReturnsOnlyTheCallersRows(t *testing.T) {
 	store := newFakeOwnerStore()
-	rec := getAs(t, handler.MyServices(store, transit.DefaultBoardingWaitPolicy()), "/api/me/services", transit.User{ID: "user-2"})
+	rec := getAs(t, handler.MyServices(store, transit.DefaultBoardingWaitPolicy()), "/api/me/services", account.User{ID: "user-2"})
 
 	var got []transit.Service
 	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
@@ -89,7 +90,7 @@ func TestMyServicesReturnsOnlyTheCallersRows(t *testing.T) {
 func TestOwnerScopingIgnoresClientSuppliedOwnerID(t *testing.T) {
 	store := newFakeOwnerStore()
 	rec := getAs(t, handler.MyScenarios(store),
-		"/api/me/scenarios?owner_id=user-2", transit.User{ID: "user-1"})
+		"/api/me/scenarios?owner_id=user-2", account.User{ID: "user-1"})
 
 	var got []transit.Scenario
 	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
@@ -105,7 +106,7 @@ func TestOwnerScopingIgnoresClientSuppliedOwnerID(t *testing.T) {
 
 func TestMyScenariosReturnsEmptyArrayNotNull(t *testing.T) {
 	store := newFakeOwnerStore()
-	rec := getAs(t, handler.MyScenarios(store), "/api/me/scenarios", transit.User{ID: "user-nothing"})
+	rec := getAs(t, handler.MyScenarios(store), "/api/me/scenarios", account.User{ID: "user-nothing"})
 
 	if body := rec.Body.String(); body != "[]\n" {
 		t.Errorf("body = %q, want an empty array", body)
@@ -115,7 +116,7 @@ func TestMyScenariosReturnsEmptyArrayNotNull(t *testing.T) {
 func TestMyScenariosScopesAdminsToo(t *testing.T) {
 	store := newFakeOwnerStore()
 	getAs(t, handler.MyScenarios(store), "/api/me/scenarios",
-		transit.User{ID: "admin-1", IsAdmin: true})
+		account.User{ID: "admin-1", IsAdmin: true})
 
 	if store.askedFor[0] != "admin-1" {
 		t.Errorf("store queried for %q, want admin-1", store.askedFor[0])

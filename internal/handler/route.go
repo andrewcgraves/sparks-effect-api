@@ -39,7 +39,7 @@ func CreateRoute(store RouteStore) http.HandlerFunc {
 		// through HTTP. Its messages name the offending field and segment, so
 		// they are returned to the client as-is.
 		if err := route.Validate(in); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
+			writeUnprocessable(w, err)
 			return
 		}
 

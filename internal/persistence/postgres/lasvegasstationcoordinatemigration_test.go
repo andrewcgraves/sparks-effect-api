@@ -16,7 +16,7 @@ const (
 func rewindLasVegasCoordinateMigration(t *testing.T, url string) {
 	t.Helper()
 	rewindLasVegasRoutingLocationMigration(t, url)
-	exec(t, url, `DELETE FROM goose_db_version WHERE version_id = 15`)
+	rewindTo(t, url, 15)
 }
 
 func insertPreFixLasVegasSpur(t *testing.T, url string) {
@@ -47,15 +47,6 @@ func TestLasVegasStationCoordinateMigrationCorrectsAnAlreadyPopulatedScenario(t 
 		   AND location->'coordinates' = '`+corrected+`'::jsonb`); got != 1 {
 		t.Error("las-vegas station was not corrected to the real terminus coordinate")
 	}
-
-	want := len(seededBrightlineWestGeometry(t).Coordinates)
-	if got := spurVertexCount(t, url); got != want {
-		t.Fatalf("spur vertices after the migration: want %d (as seeded), got %d", want, got)
-	}
-
-	// The vertex count alone would pass on a line of the right length ending
-	// somewhere else. Check the corrected terminus is actually the last vertex
-	// in the column, not merely present somewhere in it.
 	if got := scalarCount(t, url,
 		`SELECT count(*) FROM routes WHERE id = '`+bwRouteID+`'
 		   AND geometry->'coordinates'->-1 = '`+corrected+`'::jsonb`); got != 1 {

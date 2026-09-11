@@ -1,9 +1,11 @@
 package transit_test
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/fault"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
@@ -39,24 +41,27 @@ func TestValidateRejectsBadServices(t *testing.T) {
 		name   string
 		mutate func(*transit.UserService)
 		want   string
+		field  string
+		rule   string
+		index  *int
 	}{
-		{"no name", func(s *transit.UserService) { s.Name = "" }, "name"},
-		{"no route", func(s *transit.UserService) { s.RouteID = "" }, "route_id"},
-		{"one stop", func(s *transit.UserService) { s.Stops = s.Stops[:1] }, "at least two stops"},
-		{"no stops", func(s *transit.UserService) { s.Stops = nil }, "at least two stops"},
-		{"unnamed stop", func(s *transit.UserService) { s.Stops[1].Name = "" }, "name"},
-		{"lat out of range", func(s *transit.UserService) { s.Stops[0].Lat = 91 }, "lat"},
-		{"lng out of range", func(s *transit.UserService) { s.Stops[0].Lng = -181 }, "lng"},
-		{"zero max speed", func(s *transit.UserService) { s.Vehicle.MaxSpeedKMH = 0 }, "max_speed_kmh"},
-		{"negative accel", func(s *transit.UserService) { s.Vehicle.AccelerationMS2 = -1 }, "acceleration_ms2"},
-		{"zero decel", func(s *transit.UserService) { s.Vehicle.DecelerationMS2 = 0 }, "deceleration_ms2"},
-		{"negative dwell", func(s *transit.UserService) { s.Vehicle.DwellS = -5 }, "dwell_s"},
+		{"no name", func(s *transit.UserService) { s.Name = "" }, "name", "name", fault.RuleRequired, nil},
+		{"no route", func(s *transit.UserService) { s.RouteID = "" }, "route_id", "route_id", fault.RuleRequired, nil},
+		{"one stop", func(s *transit.UserService) { s.Stops = s.Stops[:1] }, "at least two stops", "stops", fault.RuleMinCount, nil},
+		{"no stops", func(s *transit.UserService) { s.Stops = nil }, "at least two stops", "stops", fault.RuleMinCount, nil},
+		{"unnamed stop", func(s *transit.UserService) { s.Stops[1].Name = "" }, "name", "stops.name", fault.RuleRequired, fault.Index(1)},
+		{"lat out of range", func(s *transit.UserService) { s.Stops[0].Lat = 91 }, "lat", "stops.lat", fault.RuleRange, fault.Index(0)},
+		{"lng out of range", func(s *transit.UserService) { s.Stops[0].Lng = -181 }, "lng", "stops.lng", fault.RuleRange, fault.Index(0)},
+		{"zero max speed", func(s *transit.UserService) { s.Vehicle.MaxSpeedKMH = 0 }, "max_speed_kmh", "vehicle.max_speed_kmh", fault.RulePositive, nil},
+		{"negative accel", func(s *transit.UserService) { s.Vehicle.AccelerationMS2 = -1 }, "acceleration_ms2", "vehicle.acceleration_ms2", fault.RulePositive, nil},
+		{"zero decel", func(s *transit.UserService) { s.Vehicle.DecelerationMS2 = 0 }, "deceleration_ms2", "vehicle.deceleration_ms2", fault.RulePositive, nil},
+		{"negative dwell", func(s *transit.UserService) { s.Vehicle.DwellS = -5 }, "dwell_s", "vehicle.dwell_s", fault.RuleNonNegative, nil},
 		{"zero headway", func(s *transit.UserService) {
 			s.FrequencyWindows[0].HeadwayS = 0
-		}, "headway_s"},
+		}, "headway_s", "frequency_windows.headway_s", fault.RulePositive, fault.Index(0)},
 		{"blank window time", func(s *transit.UserService) {
 			s.FrequencyWindows[0].StartTime = ""
-		}, "start_time"},
+		}, "start_time", "frequency_windows.start_time", fault.RuleRequired, fault.Index(0)},
 	}
 
 	for _, tc := range tests {
@@ -70,8 +75,25 @@ func TestValidateRejectsBadServices(t *testing.T) {
 			if !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("Validate: got %q, want it to mention %q", err, tc.want)
 			}
+			got := mustValidationFaults(t, err)
+			if len(got) != 1 {
+				t.Fatalf("got %d faults, want 1: %+v", len(got), got)
+			}
+			assertFault(t, got[0], tc.field, tc.rule, tc.index)
 		})
 	}
+}
+
+func TestValidateReportsEveryBadStop(t *testing.T) {
+	svc := validUserService()
+	svc.Stops[0].Lat = 91
+	svc.Stops[1].Lng = -181
+	got := mustValidationFaults(t, svc.Validate())
+	if len(got) != 2 {
+		t.Fatalf("got %d faults, want 2: %+v", len(got), got)
+	}
+	assertFault(t, got[0], "stops.lat", fault.RuleRange, fault.Index(0))
+	assertFault(t, got[1], "stops.lng", fault.RuleRange, fault.Index(1))
 }
 
 func TestValidateAcceptsNoFrequencyWindows(t *testing.T) {
@@ -127,5 +149,35 @@ func TestSlugifyTruncatesWithoutTrailingDash(t *testing.T) {
 	}
 	if strings.HasSuffix(got, "-") {
 		t.Fatalf("slug has trailing dash: %q", got)
+	}
+}
+
+func mustValidationFaults(t *testing.T, err error) fault.ValidationFaults {
+	t.Helper()
+	var faults fault.ValidationFaults
+	if !errors.As(err, &faults) {
+		t.Fatalf("error %v (%T) is not fault.ValidationFaults", err, err)
+	}
+	return faults
+}
+
+func assertFault(t *testing.T, got fault.ValidationFault, field, rule string, index *int) {
+	t.Helper()
+	if got.Field != field {
+		t.Errorf("field = %q, want %q", got.Field, field)
+	}
+	if got.Rule != rule {
+		t.Errorf("rule = %q, want %q", got.Rule, rule)
+	}
+	switch {
+	case index == nil && got.Index != nil:
+		t.Errorf("index = %d, want nil", *got.Index)
+	case index != nil && got.Index == nil:
+		t.Errorf("index = nil, want %d", *index)
+	case index != nil && got.Index != nil && *index != *got.Index:
+		t.Errorf("index = %d, want %d", *got.Index, *index)
+	}
+	if got.Message == "" {
+		t.Error("message is empty")
 	}
 }

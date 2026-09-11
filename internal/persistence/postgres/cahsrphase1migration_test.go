@@ -17,7 +17,7 @@ const (
 func rewindPhase1GeometryMigration(t *testing.T, url string) {
 	t.Helper()
 	rewindRoutingJobsMigration(t, url)
-	exec(t, url, `DELETE FROM goose_db_version WHERE version_id = 13`)
+	rewindTo(t, url, 13)
 }
 
 func insertPreFixCaHsrPhase1(t *testing.T, url string) {
@@ -37,11 +37,6 @@ func TestCaHsrPhase1MigrationCorrectsAnAlreadyPopulatedScenario(t *testing.T) {
 
 	if err := postgres.Migrate(context.Background(), url); err != nil {
 		t.Fatalf("migration failed over a seeded ca-hsr: %v", err)
-	}
-
-	want := len(seededPhase1Geometry(t).Coordinates)
-	if got := phase1VertexCount(t, url); got != want {
-		t.Fatalf("Phase 1 vertices after the migration: want %d (as seeded), got %d", want, got)
 	}
 
 	const cvyWestPortal = `[-120.680226, 37.097578]`

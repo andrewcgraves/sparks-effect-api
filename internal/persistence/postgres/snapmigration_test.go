@@ -13,9 +13,9 @@ func rewindSnapMigration(t *testing.T, url string) {
 	t.Helper()
 	exec(t, url,
 		`ALTER TABLE user_services DROP CONSTRAINT IF EXISTS user_services_stops_have_slugs`,
-		`ALTER TABLE user_services DROP CONSTRAINT IF EXISTS user_services_stops_are_snapped`,
-		`DELETE FROM goose_db_version WHERE version_id IN (7, 8)`)
+		`ALTER TABLE user_services DROP CONSTRAINT IF EXISTS user_services_stops_are_snapped`)
 	rewindJobTargetsMigration(t, url)
+	rewindTo(t, url, 7)
 }
 
 func rewindJobTargetsMigration(t *testing.T, url string) {
@@ -26,16 +26,16 @@ func rewindJobTargetsMigration(t *testing.T, url string) {
 		`ALTER TABLE jobs DROP CONSTRAINT IF EXISTS jobs_one_target`,
 		`ALTER TABLE jobs DROP COLUMN IF EXISTS compiled_service_ids`,
 		`ALTER TABLE jobs DROP COLUMN IF EXISTS user_service_id`,
-		`ALTER TABLE jobs DROP COLUMN IF EXISTS user_scenario_id`,
-		`DELETE FROM goose_db_version WHERE version_id = 9`)
+		`ALTER TABLE jobs DROP COLUMN IF EXISTS user_scenario_id`)
+	rewindTo(t, url, 9)
 	rewindInterchangePairsMigration(t, url)
 }
 
 func rewindInterchangePairsMigration(t *testing.T, url string) {
 	t.Helper()
 	exec(t, url,
-		`ALTER TABLE user_scenarios DROP COLUMN IF EXISTS interchange_pairs`,
-		`DELETE FROM goose_db_version WHERE version_id = 10`)
+		`ALTER TABLE user_scenarios DROP COLUMN IF EXISTS interchange_pairs`)
+	rewindTo(t, url, 10)
 	rewindSegmentRouteIDMigration(t, url)
 }
 

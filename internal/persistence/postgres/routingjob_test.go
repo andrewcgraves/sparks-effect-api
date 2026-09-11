@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 	"github.com/jackc/pgx/v5"
@@ -23,8 +24,8 @@ func rewindRoutingJobsMigration(t *testing.T, url string) {
 	rewindLasVegasCoordinateMigration(t, url)
 	exec(t, url,
 		`DROP TABLE IF EXISTS isochrone_cache`,
-		`DROP TABLE IF EXISTS routing_jobs`,
-		`DELETE FROM goose_db_version WHERE version_id = 14`)
+		`DROP TABLE IF EXISTS routing_jobs`)
+	rewindTo(t, url, 14)
 }
 
 func seedCompileJob(t *testing.T, repo interface {
@@ -113,7 +114,7 @@ func TestRoutingJobWithAnOwner(t *testing.T) {
 	ctx := context.Background()
 	repo, _ := freshRepo(t)
 	seedCompileJob(t, repo, routingCompileJobID)
-	if err := repo.CreateUser(ctx, transit.User{
+	if err := repo.CreateUser(ctx, account.User{
 		ID: routingUserID, Email: "routing@example.com", Name: "Routing",
 	}, "hash-placeholder"); err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -200,7 +201,7 @@ func TestRoutingJobCascadesWithItsOwnerRatherThanBecomingPublic(t *testing.T) {
 	ctx := context.Background()
 	repo, url := freshRepo(t)
 	seedCompileJob(t, repo, routingCompileJobID)
-	if err := repo.CreateUser(ctx, transit.User{
+	if err := repo.CreateUser(ctx, account.User{
 		ID: routingUserID, Email: "routing@example.com", Name: "Routing",
 	}, "hash-placeholder"); err != nil {
 		t.Fatalf("CreateUser: %v", err)

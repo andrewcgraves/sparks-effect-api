@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
@@ -14,7 +15,7 @@ func TestCompileUserServiceReturnsQueuedJobAndCompilesAsync(t *testing.T) {
 	svcID, _ := store.compilableUserFixture("user-1")
 
 	rec := postAs(t, handler.CompileUserService(store, transit.DefaultBoardingWaitPolicy()), "/api/services/line-a/compile", "slug", "line-a",
-		transit.User{ID: "user-1"})
+		account.User{ID: "user-1"})
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202; body %s", rec.Code, rec.Body.String())
 	}
@@ -50,7 +51,7 @@ func TestCompileUserServiceRejectsNonOwner(t *testing.T) {
 	store.compilableUserFixture("owner")
 
 	rec := postAs(t, handler.CompileUserService(store, transit.DefaultBoardingWaitPolicy()), "/api/services/line-a/compile", "slug", "line-a",
-		transit.User{ID: "someone-else"})
+		account.User{ID: "someone-else"})
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404 for a non-owner", rec.Code)
 	}
@@ -59,7 +60,7 @@ func TestCompileUserServiceRejectsNonOwner(t *testing.T) {
 func TestCompileUserServiceUnknownSlugIsNotFound(t *testing.T) {
 	store := newFakeCompileStore()
 	rec := postAs(t, handler.CompileUserService(store, transit.DefaultBoardingWaitPolicy()), "/api/services/nope/compile", "slug", "nope",
-		transit.User{ID: "user-1"})
+		account.User{ID: "user-1"})
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rec.Code)
 	}
@@ -81,7 +82,7 @@ func TestCompileUserScenarioReturnsQueuedJobAndCompilesAsync(t *testing.T) {
 	svcID, scenarioID := store.compilableUserFixture("user-1")
 
 	rec := postAs(t, handler.CompileUserScenario(store, transit.DefaultBoardingWaitPolicy()), "/api/user-scenarios/trip/compile", "slug", "trip",
-		transit.User{ID: "user-1"})
+		account.User{ID: "user-1"})
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202; body %s", rec.Code, rec.Body.String())
 	}
@@ -111,7 +112,7 @@ func TestCompileUserScenarioRejectsNonOwner(t *testing.T) {
 	store.compilableUserFixture("owner")
 
 	rec := postAs(t, handler.CompileUserScenario(store, transit.DefaultBoardingWaitPolicy()), "/api/user-scenarios/trip/compile", "slug", "trip",
-		transit.User{ID: "someone-else"})
+		account.User{ID: "someone-else"})
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404 for a non-owner", rec.Code)
 	}
@@ -126,7 +127,7 @@ func TestUserScenarioGraphReturnsCompiledResultForOwner(t *testing.T) {
 		Result:         &transit.TransitGraph{Services: []transit.ServiceGraph{{ServiceID: "usvc-1"}}},
 	}
 
-	owner := transit.User{ID: "user-1"}
+	owner := account.User{ID: "user-1"}
 	rec := getWithPathValueAs(t, handler.UserScenarioGraph(store), "/api/user-scenarios/trip/graph", "slug", "trip", &owner)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body.String())
@@ -149,7 +150,7 @@ func TestUserScenarioGraphBundlesMemberRoutes(t *testing.T) {
 		Result:         &transit.TransitGraph{Services: []transit.ServiceGraph{{ServiceID: "usvc-1"}}},
 	}
 
-	owner := transit.User{ID: "user-1"}
+	owner := account.User{ID: "user-1"}
 	rec := getWithPathValueAs(t, handler.UserScenarioGraph(store), "/api/user-scenarios/trip/graph", "slug", "trip", &owner)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body.String())
@@ -183,7 +184,7 @@ func TestUserScenarioGraphRejectsNonOwner(t *testing.T) {
 		Result:         &transit.TransitGraph{Services: []transit.ServiceGraph{{ServiceID: "usvc-1"}}},
 	}
 
-	stranger := transit.User{ID: "someone-else"}
+	stranger := account.User{ID: "someone-else"}
 	rec := getWithPathValueAs(t, handler.UserScenarioGraph(store), "/api/user-scenarios/trip/graph", "slug", "trip", &stranger)
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404 for a non-owner", rec.Code)
@@ -194,7 +195,7 @@ func TestUserScenarioGraphNotYetCompiledIsNotFound(t *testing.T) {
 	store := newFakeCompileStore()
 	store.compilableUserFixture("user-1")
 
-	owner := transit.User{ID: "user-1"}
+	owner := account.User{ID: "user-1"}
 	rec := getWithPathValueAs(t, handler.UserScenarioGraph(store), "/api/user-scenarios/trip/graph", "slug", "trip", &owner)
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404 before any compile", rec.Code)
@@ -218,7 +219,7 @@ func TestUserServiceGraphReturnsCompiledGraphAndRouteForOwner(t *testing.T) {
 		Services: []transit.ServiceGraph{{ServiceID: "usvc-1"}},
 	})
 
-	owner := transit.User{ID: "user-1"}
+	owner := account.User{ID: "user-1"}
 	rec := getWithPathValueAs(t, handler.UserServiceGraph(store), "/api/services/line-a/graph", "slug", "line-a", &owner)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body.String())
@@ -251,7 +252,7 @@ func TestUserServiceGraphRejectsNonOwner(t *testing.T) {
 		Services: []transit.ServiceGraph{{ServiceID: "usvc-1"}},
 	})
 
-	stranger := transit.User{ID: "someone-else"}
+	stranger := account.User{ID: "someone-else"}
 	rec := getWithPathValueAs(t, handler.UserServiceGraph(store), "/api/services/line-a/graph", "slug", "line-a", &stranger)
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404 for a non-owner", rec.Code)
@@ -261,7 +262,7 @@ func TestUserServiceGraphRejectsNonOwner(t *testing.T) {
 func TestUserServiceGraphUnknownSlugIsNotFound(t *testing.T) {
 	store := newFakeCompileStore()
 
-	owner := transit.User{ID: "user-1"}
+	owner := account.User{ID: "user-1"}
 	rec := getWithPathValueAs(t, handler.UserServiceGraph(store), "/api/services/nope/graph", "slug", "nope", &owner)
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404 for an unknown slug", rec.Code)
@@ -272,7 +273,7 @@ func TestUserServiceGraphNotYetCompiledIsNotFound(t *testing.T) {
 	store := newFakeCompileStore()
 	store.compilableUserFixture("user-1")
 
-	owner := transit.User{ID: "user-1"}
+	owner := account.User{ID: "user-1"}
 	rec := getWithPathValueAs(t, handler.UserServiceGraph(store), "/api/services/line-a/graph", "slug", "line-a", &owner)
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404 before any compile", rec.Code)
@@ -288,7 +289,7 @@ func TestUserServiceGraphIgnoresScenarioCompileJobs(t *testing.T) {
 		Result:         &transit.TransitGraph{Services: []transit.ServiceGraph{{ServiceID: "usvc-1"}}},
 	}
 
-	owner := transit.User{ID: "user-1"}
+	owner := account.User{ID: "user-1"}
 	rec := getWithPathValueAs(t, handler.UserServiceGraph(store), "/api/services/line-a/graph", "slug", "line-a", &owner)
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404 when only a scenario compile exists", rec.Code)

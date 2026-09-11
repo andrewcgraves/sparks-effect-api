@@ -7,16 +7,16 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
-	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-func stubLookup(wantHash string, u transit.User) auth.SessionLookup {
-	return func(_ context.Context, hash string) (transit.User, bool, error) {
+func stubLookup(wantHash string, u account.User) auth.SessionLookup {
+	return func(_ context.Context, hash string) (account.User, bool, error) {
 		if hash == wantHash {
 			return u, true, nil
 		}
-		return transit.User{}, false, nil
+		return account.User{}, false, nil
 	}
 }
 
@@ -35,7 +35,7 @@ func echoUser(t *testing.T) http.HandlerFunc {
 }
 
 func TestRequireAuthAcceptsValidBearerToken(t *testing.T) {
-	user := transit.User{ID: "user-1", Email: "a@example.com"}
+	user := account.User{ID: "user-1", Email: "a@example.com"}
 	h := auth.RequireAuth(stubLookup(auth.HashToken("good-token"), user))(echoUser(t))
 
 	req := httptest.NewRequest(http.MethodPost, "/api/thing", nil)
@@ -52,7 +52,7 @@ func TestRequireAuthAcceptsValidBearerToken(t *testing.T) {
 }
 
 func TestRequireAuthRejectsBadCredentials(t *testing.T) {
-	lookup := stubLookup(auth.HashToken("good-token"), transit.User{ID: "user-1"})
+	lookup := stubLookup(auth.HashToken("good-token"), account.User{ID: "user-1"})
 
 	tests := []struct {
 		name   string
@@ -90,8 +90,8 @@ func TestRequireAuthRejectsBadCredentials(t *testing.T) {
 }
 
 func TestRequireAuthSurfacesLookupErrors(t *testing.T) {
-	lookup := func(context.Context, string) (transit.User, bool, error) {
-		return transit.User{}, false, errors.New("db is down")
+	lookup := func(context.Context, string) (account.User, bool, error) {
+		return account.User{}, false, errors.New("db is down")
 	}
 	var reached bool
 	h := auth.RequireAuth(lookup)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
@@ -112,7 +112,7 @@ func TestRequireAuthSurfacesLookupErrors(t *testing.T) {
 }
 
 func TestRequireAdminAllowsAdmins(t *testing.T) {
-	admin := transit.User{ID: "admin-1", IsAdmin: true}
+	admin := account.User{ID: "admin-1", IsAdmin: true}
 	h := auth.RequireAdmin(stubLookup(auth.HashToken("admin-token"), admin))(echoUser(t))
 
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/thing", nil)
@@ -126,7 +126,7 @@ func TestRequireAdminAllowsAdmins(t *testing.T) {
 }
 
 func TestRequireAdminForbidsNonAdmins(t *testing.T) {
-	user := transit.User{ID: "user-1", IsAdmin: false}
+	user := account.User{ID: "user-1", IsAdmin: false}
 	var reached bool
 	h := auth.RequireAdmin(stubLookup(auth.HashToken("user-token"), user))(
 		http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reached = true }))
@@ -145,7 +145,7 @@ func TestRequireAdminForbidsNonAdmins(t *testing.T) {
 }
 
 func TestRequireAdminRejectsAnonymous(t *testing.T) {
-	h := auth.RequireAdmin(stubLookup(auth.HashToken("x"), transit.User{}))(
+	h := auth.RequireAdmin(stubLookup(auth.HashToken("x"), account.User{}))(
 		http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 
 	rec := httptest.NewRecorder()

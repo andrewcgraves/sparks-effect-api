@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/logger"
@@ -21,7 +22,7 @@ func userIsochroneMux(store handler.ScenarioIsochroneStore, pub routing.Publishe
 	return mux
 }
 
-func isoServeAs(t *testing.T, store handler.ScenarioIsochroneStore, pub routing.Publisher, user transit.User, target, body string) *httptest.ResponseRecorder {
+func isoServeAs(t *testing.T, store handler.ScenarioIsochroneStore, pub routing.Publisher, user account.User, target, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	r := httptest.NewRequest(http.MethodPost, target, strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
@@ -59,7 +60,7 @@ func TestUserScenarioIsochrone_401_unauthenticated(t *testing.T) {
 	store := newFakeScenarioStore()
 	seedScenarioRow(store, "scn-1", "trip", scnOwner.ID, []string{"svc-1"})
 
-	rec := isoServeAs(t, store, &routing.FakePublisher{}, transit.User{}, "/api/user-scenarios/trip/isochrone", isoValidBody)
+	rec := isoServeAs(t, store, &routing.FakePublisher{}, account.User{}, "/api/user-scenarios/trip/isochrone", isoValidBody)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status: want 401, got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -221,7 +222,7 @@ func userServiceIsochroneMux(store handler.ServiceIsochroneStore, pub routing.Pu
 	return mux
 }
 
-func svcIsoServeAs(t *testing.T, store handler.ServiceIsochroneStore, pub routing.Publisher, user transit.User, target, body string) *httptest.ResponseRecorder {
+func svcIsoServeAs(t *testing.T, store handler.ServiceIsochroneStore, pub routing.Publisher, user account.User, target, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	r := httptest.NewRequest(http.MethodPost, target, strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
@@ -237,7 +238,7 @@ func TestUserServiceIsochrone_401_unauthenticated(t *testing.T) {
 	store := newFakeServiceStore()
 	seedServiceRow(store, "svc-1", "line-a", svcOwner.ID, time.Now())
 
-	rec := svcIsoServeAs(t, store, &routing.FakePublisher{}, transit.User{}, "/api/services/line-a/isochrone", isoValidBody)
+	rec := svcIsoServeAs(t, store, &routing.FakePublisher{}, account.User{}, "/api/services/line-a/isochrone", isoValidBody)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status: want 401, got %d: %s", rec.Code, rec.Body.String())
 	}

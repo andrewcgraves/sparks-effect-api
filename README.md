@@ -40,8 +40,8 @@ routing worker (separate repo, inside the cluster)
 GET /api/routing-jobs/{id}  →  status, then the result
 ```
 
-Runtime unit of truth is **seconds** (`Edge.Seconds`, `WaitSecs`,
-`TravelTimeBetween`). HTTP fields that are already minute-labeled
+Runtime unit of truth is **seconds** (`Edge.Seconds`, `WaitSecs`).
+HTTP fields that are already minute-labeled
 (`budget_mins`, `access_mins`, `remaining_mins`) stay as-is on the wire.
 
 `BOARDING_WAIT_POLICY` is one of `none` (the default), `half_headway`,
@@ -58,7 +58,7 @@ re-derives `min(headway)/2` itself.
 
 The message is a contract between two repositories with no compiler checking
 it ([ADR-0001](docs/adr/0001-api-and-worker-share-no-go-code.md)), so it is
-pinned by a golden fixture — `internal/routing/testdata/message.golden.json`,
+pinned by a golden fixture — `internal/routing/testdata/message.golden.json` —
 which this repo asserts it produces and the worker repo asserts it consumes.
 
 The worker-store HTTP envelope is a second contract of the same kind:
@@ -73,19 +73,8 @@ field cannot hide.
 `make check-contract` (and a CI job of the same name) fetches the worker's
 copies on `main` and diffs both fixtures, so a field added on either
 side turns the other side's pipeline red. It is not part of
-`make dev-workflow`: it needs the network.
-
-```json
-{
-  "schema_version": 1,
-  "routing_job_id": "<uuid>",
-  "compile_job_id": "<uuid>",
-  "graph": { "...compiled TransitGraph..." },
-  "lat": 0.0, "lng": 0.0,
-  "budget_mins": 0,
-  "mode": "walk | bike | drive | transit"
-}
-```
+`make dev-workflow`: it needs the network. Those files are the on-the-wire
+shape; a prose copy of them is a third copy and goes stale.
 
 The graph travels inline — 2,894 bytes for CA HSR, roughly 30 KB for a large
 authored scenario — so the worker needs no database of its own. Publisher
@@ -298,8 +287,9 @@ Domain data (scenarios, routes, stations, vehicle types, services, jobs, users)
 is stored in Postgres via `pgx/v5` (pure Go — the `CGO_ENABLED=0` static
 build is preserved), with geometry stored as GeoJSON in `jsonb` columns and
 native `uuid`/`timestamptz`/`boolean` types throughout. Handlers depend on
-narrow store interfaces; boot-time load and seed talk to `transit.StoreSource`
-and `transit.SeedSink`. `postgres.Repo` satisfies all of them.
+narrow store interfaces; boot-time load and seed talk to `transit.StoreSource`,
+`transit.SeedSink`, and `transit.SeedReconciler`. `postgres.Repo` satisfies all
+of them.
 
 - **Connection:** set `DATABASE_URL` (Railway injects this via its private
   network). Cap the pool with `DATABASE_MAX_CONNS`. When `DATABASE_URL` is unset,
@@ -314,8 +304,11 @@ and `transit.SeedSink`. `postgres.Repo` satisfies all of them.
 - **Seed:** on first boot against an empty database, the embedded `ca-hsr` seed
   data is written through `SeedSink` and then compiled, leaving a succeeded
   compile job whose result is the scenario's graph — no manual step, no admin
-  credentials. A boot that finds a graph already there leaves it alone, so
-  restarting is not a recompile.
+  credentials. On every boot `ReconcileSeed` upserts embedded YAML rows whose
+  content no longer matches what is stored, scoped to seeded scenarios, so a
+  YAML correction reaches a deployed database without a migration. A boot that
+  finds a graph already matching its source rows leaves it alone, so restarting
+  is not a recompile.
 
 ## Authentication
 
@@ -376,7 +369,7 @@ That invariant is why containment is cheap. Only two reads filter on ownership �
 return so the contract is visible at the call site. Everything scenario-scoped
 stays unfiltered, because scoping to a scenario has already scoped to its owner.
 `LoadStore` and `CompileSeededIfNeeded` read the curated list and nothing else,
-so no owned row is ever compiled into the public store or served by
+so no owned row is ever loaded into the public store or served by
 `GET /api/scenarios`.
 
 By-slug reads cannot filter — slugs are globally unique across curated and owned
@@ -492,6 +485,7 @@ internal/server/             HTTP server and route registration
 internal/handler/            HTTP handlers
 internal/auth/               password hashing, session tokens, middleware, ownership rule
 internal/ids/                UUID generation for runtime-created rows
+internal/compile/            in-process compile-job runner (not the routing worker)
 internal/transit/            domain types, TransitGraph compile, seed
 internal/persistence/postgres/  Postgres repository + goose migrations
 internal/routing/            queue message contract + confirm-mode AMQP publisher

@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
 	"github.com/andrewcgraves/sparks-effect-api/internal/ids"
@@ -117,6 +118,10 @@ func loadStore(ctx context.Context, cfg config.Config, lg *slog.Logger) (*transi
 		return nil, nil, noop, err
 	}
 
+	// YAML is the source of truth for seeded rows. SeedIfEmpty only fills an
+	// empty database; ReconcileSeed upserts embedded rows whose content no
+	// longer matches, so a YAML correction reaches a deployed database without
+	// a data-correction migration (SPA-285). Authored rows are out of scope.
 	seeded, err := transit.SeedIfEmpty(ctx, repo)
 	if err != nil {
 		repo.Close()
@@ -125,11 +130,20 @@ func loadStore(ctx context.Context, cfg config.Config, lg *slog.Logger) (*transi
 	if seeded {
 		lg.Info("seeded embedded scenario data into empty database")
 	}
+	reconciled, err := transit.ReconcileSeed(ctx, repo)
+	if err != nil {
+		repo.Close()
+		return nil, nil, noop, err
+	}
+	if reconciled > 0 {
+		lg.Info("reconciled embedded seed", "rows", reconciled)
+	}
 
 	// Compile what was seeded, so a freshly deployed environment can answer the
 	// public isochrone without an admin triggering a compile by hand (SPA-181).
 	// A scenario that already has a compiled graph is skipped, so a restart
-	// against a populated database does no work here.
+	// against a populated database does no work here. A reconcile that changed
+	// source rows makes sameCompiledGraph fail, so the next line recompiles.
 	//
 	// Changing BOARDING_WAIT_POLICY makes every stored ServiceGraph compare
 	// unequal (WaitPolicy / WaitSecs), so the first boot after a policy change
@@ -146,7 +160,8 @@ func loadStore(ctx context.Context, cfg config.Config, lg *slog.Logger) (*transi
 	// Curated isochrones ship as repo seed data, so every environment has them
 	// with no manual post-deploy step. This runs unconditionally rather than
 	// under SeedIfEmpty, which returns early on any populated database and so
-	// would never reach a deployed one; idempotency comes from the stable id in
+	// would never reach a deployed one (ReconcileSeed does not insert
+	// prerendered isochrones); idempotency comes from the stable id in
 	// each seed file instead. It must run after the compile above, so the
 	// service membership it snapshots is the scenario's settled one.
 	if err := transit.SeedPrerenderedIsochronesFromEmbedded(ctx, repo); err != nil {
@@ -154,7 +169,7 @@ func loadStore(ctx context.Context, cfg config.Config, lg *slog.Logger) (*transi
 		return nil, nil, noop, err
 	}
 
-	store, err := transit.LoadStore(ctx, repo, cfg.BoardingWait)
+	store, err := transit.LoadStore(ctx, repo)
 	if err != nil {
 		repo.Close()
 		return nil, nil, noop, err
@@ -184,7 +199,7 @@ func bootstrapAdmin(ctx context.Context, cfg config.Config, repo *postgres.Repo,
 		return err
 	}
 
-	if err := repo.CreateUser(ctx, transit.User{
+	if err := repo.CreateUser(ctx, account.User{
 		ID: id, Email: email, Name: "Bootstrap Admin", IsAdmin: true,
 	}, hash); err != nil {
 		return err

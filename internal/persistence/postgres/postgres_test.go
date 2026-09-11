@@ -4,12 +4,26 @@ import (
 	"context"
 	"testing"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/persistence/postgres"
 	"github.com/andrewcgraves/sparks-effect-api/internal/testdb"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
 func ptr[T any](v T) *T { return &v }
+
+func hopSeconds(t *testing.T, g transit.TransitGraph, from, to string) (seconds int, serviceID string) {
+	t.Helper()
+	for _, sg := range g.Services {
+		for _, e := range sg.Edges {
+			if e.FromSlug == from && e.ToSlug == to {
+				return e.Seconds, sg.ServiceID
+			}
+		}
+	}
+	t.Fatalf("no edge %s→%s", from, to)
+	return 0, ""
+}
 
 func TestMain(m *testing.M) { testdb.Main(m) }
 
@@ -66,6 +80,13 @@ func TestSeedAndCompiledReadPathAcrossRestart(t *testing.T) {
 	if again {
 		t.Fatal("expected second SeedIfEmpty to be a no-op")
 	}
+	reconciled, err := transit.ReconcileSeed(ctx, repo)
+	if err != nil {
+		t.Fatalf("ReconcileSeed: %v", err)
+	}
+	if reconciled != 0 {
+		t.Fatalf("ReconcileSeed wrote %d rows on a just-seeded database, want 0", reconciled)
+	}
 
 	// Simulate a process restart: an independent pool, no re-migrate/re-seed.
 	repo2, err := postgres.Connect(ctx, url, 0)
@@ -74,7 +95,7 @@ func TestSeedAndCompiledReadPathAcrossRestart(t *testing.T) {
 	}
 	defer repo2.Close()
 
-	store, err := transit.LoadStore(ctx, repo2, transit.DefaultBoardingWaitPolicy())
+	store, err := transit.LoadStore(ctx, repo2)
 	if err != nil {
 		t.Fatalf("LoadStore: %v", err)
 	}
@@ -121,12 +142,13 @@ func TestSeedAndCompiledReadPathAcrossRestart(t *testing.T) {
 		}
 	}
 
-	// The compiled-graph read path must still produce isochrone travel times
-	// from the stored rows: sf→millbrae = 760 run + 90 dwell = 850.
-	secs, _, svcID, ok := store.TravelTimeBetween("ca-hsr", "sf", "millbrae")
-	if !ok {
-		t.Fatal("TravelTimeBetween sf→millbrae not found")
+	// Seeded rows must still compile to the calibrated hop times: sf→millbrae
+	// = 760 run + 90 dwell = 850.
+	graph, err := transit.CompileSeededScenario(ctx, repo2, sc, transit.DefaultBoardingWaitPolicy())
+	if err != nil {
+		t.Fatalf("CompileSeededScenario: %v", err)
 	}
+	secs, svcID := hopSeconds(t, graph, "sf", "millbrae")
 	if secs != 850 {
 		t.Errorf("sf→millbrae: want 850s, got %d", secs)
 	}
@@ -148,7 +170,7 @@ func TestUsersRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	repo, _ := freshRepo(t)
 
-	u := transit.User{
+	u := account.User{
 		ID:      "00000000-0000-4009-8001-000000000001",
 		Email:   "andrew@example.com",
 		Name:    "Andrew",

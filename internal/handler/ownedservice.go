@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/ids"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
@@ -148,7 +149,7 @@ func DeleteOwnedService(store OwnedServiceStore) http.HandlerFunc {
 
 func resolveOwnedService(
 	w http.ResponseWriter, r *http.Request, store OwnedServiceStore,
-	user transit.User, req ownedServiceRequest, svc *transit.Service,
+	user account.User, req ownedServiceRequest, svc *transit.Service,
 ) bool {
 	if strings.TrimSpace(req.Name) == "" {
 		writeError(w, http.StatusUnprocessableEntity, "name is required")

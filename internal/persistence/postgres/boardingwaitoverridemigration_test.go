@@ -14,8 +14,8 @@ func rewindBoardingWaitOverrideMigration(t *testing.T, url string) {
 	exec(t, url,
 		`ALTER TABLE user_services DROP COLUMN IF EXISTS boarding_wait_policy, DROP COLUMN IF EXISTS boarding_wait_fixed_secs`,
 		`ALTER TABLE user_scenarios DROP COLUMN IF EXISTS boarding_wait_policy, DROP COLUMN IF EXISTS boarding_wait_fixed_secs`,
-		`ALTER TABLE services DROP COLUMN IF EXISTS boarding_wait_policy, DROP COLUMN IF EXISTS boarding_wait_fixed_secs`,
-		`DELETE FROM goose_db_version WHERE version_id = 20`)
+		`ALTER TABLE services DROP COLUMN IF EXISTS boarding_wait_policy, DROP COLUMN IF EXISTS boarding_wait_fixed_secs`)
+	rewindTo(t, url, 20)
 }
 
 func TestBoardingWaitOverridesMigrationIsSafeToReRun(t *testing.T) {
@@ -44,17 +44,10 @@ func TestBoardingWaitOverridesMigrationIsSafeToReRun(t *testing.T) {
 
 	// Forget that it ran while keeping the columns it added, so the second
 	// pass meets a database that already has them. ADD COLUMN IF NOT EXISTS
-	// must succeed rather than fail on "column already exists".
-	//
-	// 00021–00024 are unrecorded too, and their schema/data deliberately left
-	// in place. Not for their own sake but for this test's: goose applies only
-	// versions above the highest one recorded, so leaving any recorded would
-	// make it skip 00020 silently and this re-run would prove nothing. All
-	// four are re-runnable over what they already wrote by construction —
-	// 00021 drops each constraint before adding it, 00022 is IF NOT EXISTS
-	// throughout, 00023 re-assigns the same UPDATE literals, 00024 drops the
-	// unique before adding it.
-	exec(t, url, `DELETE FROM goose_db_version WHERE version_id IN (20, 21, 22, 23, 24)`)
+	// must succeed rather than fail on "column already exists". Later
+	// versions are unrecorded too: goose applies only versions above the
+	// highest one recorded, so leaving any recorded would skip 00020.
+	rewindTo(t, url, 20)
 	if err := postgres.Migrate(context.Background(), url); err != nil {
 		t.Fatalf("migration re-run over columns it already added: %v", err)
 	}
