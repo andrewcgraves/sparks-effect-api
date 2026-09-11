@@ -23,8 +23,8 @@ func rewindBrightlineWestMigration(t *testing.T, url string) {
 		`DELETE FROM services WHERE id = '`+bwServiceID+`'`,
 		`DELETE FROM segments WHERE route_id = '`+bwRouteID+`'`,
 		`DELETE FROM routes WHERE id = '`+bwRouteID+`'`,
-		`DELETE FROM stations WHERE id IN ('`+bwVictorID+`', '`+bwVegasID+`')`,
-		`DELETE FROM goose_db_version WHERE version_id = 12`)
+		`DELETE FROM stations WHERE id IN ('`+bwVictorID+`', '`+bwVegasID+`')`)
+	rewindTo(t, url, 12)
 }
 
 func insertPreSpa153CaHsr(t *testing.T, url string) {

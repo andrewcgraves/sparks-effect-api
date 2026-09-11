@@ -1,10 +1,11 @@
 package transit
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/andrewcgraves/sparks-effect-api/internal/fault"
 )
 
 type UserScenario struct {
@@ -36,17 +37,22 @@ func (s *UserScenario) ResolveBoardingWait(global BoardingWaitPolicy) error {
 }
 
 func (s UserScenario) Validate() error {
+	var faults fault.ValidationFaults
 	if strings.TrimSpace(s.Name) == "" {
-		return errors.New("name is required")
+		faults = append(faults, fault.Whole("name", fault.RuleRequired, "name is required"))
 	}
 	seen := make(map[string]bool, len(s.ServiceIDs))
 	members := make(map[string]bool, len(s.ServiceIDs))
 	for i, id := range s.ServiceIDs {
 		if strings.TrimSpace(id) == "" {
-			return fmt.Errorf("service_ids[%d]: must not be blank", i)
+			faults = append(faults, fault.At("service_ids", i, fault.RuleRequired,
+				fmt.Sprintf("service_ids[%d]: must not be blank", i)))
+			continue
 		}
 		if seen[id] {
-			return fmt.Errorf("service_ids[%d]: duplicate service id %q", i, id)
+			faults = append(faults, fault.At("service_ids", i, fault.RuleDuplicate,
+				fmt.Sprintf("service_ids[%d]: duplicate service id %q", i, id)))
+			continue
 		}
 		seen[id] = true
 		members[id] = true
@@ -59,21 +65,28 @@ func (s UserScenario) Validate() error {
 	// CompileServices' job, at compile time, when both are finally in scope
 	// together (see validateInterchangePairs).
 	for i, p := range s.InterchangePairs {
-		if strings.TrimSpace(p.A.ServiceID) == "" || strings.TrimSpace(p.A.Slug) == "" {
-			return fmt.Errorf("interchange_pairs[%d].a: service_id and slug are required", i)
+		aBlank := strings.TrimSpace(p.A.ServiceID) == "" || strings.TrimSpace(p.A.Slug) == ""
+		bBlank := strings.TrimSpace(p.B.ServiceID) == "" || strings.TrimSpace(p.B.Slug) == ""
+		if aBlank {
+			faults = append(faults, fault.At("interchange_pairs.a", i, fault.RuleRequired,
+				fmt.Sprintf("interchange_pairs[%d].a: service_id and slug are required", i)))
 		}
-		if strings.TrimSpace(p.B.ServiceID) == "" || strings.TrimSpace(p.B.Slug) == "" {
-			return fmt.Errorf("interchange_pairs[%d].b: service_id and slug are required", i)
+		if bBlank {
+			faults = append(faults, fault.At("interchange_pairs.b", i, fault.RuleRequired,
+				fmt.Sprintf("interchange_pairs[%d].b: service_id and slug are required", i)))
 		}
-		if p.A.ServiceID == p.B.ServiceID {
-			return fmt.Errorf("interchange_pairs[%d]: both stops are on service %q, want two different services", i, p.A.ServiceID)
+		if !aBlank && !bBlank && p.A.ServiceID == p.B.ServiceID {
+			faults = append(faults, fault.At("interchange_pairs", i, fault.RuleSameService,
+				fmt.Sprintf("interchange_pairs[%d]: both stops are on service %q, want two different services", i, p.A.ServiceID)))
 		}
-		if !members[p.A.ServiceID] {
-			return fmt.Errorf("interchange_pairs[%d].a: service %q is not a member of this scenario", i, p.A.ServiceID)
+		if !aBlank && !members[p.A.ServiceID] {
+			faults = append(faults, fault.At("interchange_pairs.a", i, fault.RuleNotMember,
+				fmt.Sprintf("interchange_pairs[%d].a: service %q is not a member of this scenario", i, p.A.ServiceID)))
 		}
-		if !members[p.B.ServiceID] {
-			return fmt.Errorf("interchange_pairs[%d].b: service %q is not a member of this scenario", i, p.B.ServiceID)
+		if !bBlank && !members[p.B.ServiceID] {
+			faults = append(faults, fault.At("interchange_pairs.b", i, fault.RuleNotMember,
+				fmt.Sprintf("interchange_pairs[%d].b: service %q is not a member of this scenario", i, p.B.ServiceID)))
 		}
 	}
-	return nil
+	return faults.Err()
 }

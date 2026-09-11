@@ -2,7 +2,10 @@ package transit
 
 import "fmt"
 
-func CompileScenario(routes []Route, stations []Station, services []Service, vehicleTypes []VehicleType, boardingWait BoardingWaitPolicy) (TransitGraph, error) {
+func compileSeededPhysics(routes []Route, stations []Station, services []Service, vehicleTypes []VehicleType, boardingWait BoardingWaitPolicy) (TransitGraph, error) {
+	// Production seeded compile jobs run Compile (calibrated segment times).
+	// This physics path is the second CompilableService adapter, kept so the
+	// seam has more than one proof it generalises.
 	routesByID := make(map[string]Route, len(routes))
 	for _, rt := range routes {
 		routesByID[rt.ID] = rt
@@ -26,7 +29,7 @@ func CompileScenario(routes []Route, stations []Station, services []Service, veh
 			return TransitGraph{}, fmt.Errorf("compile: service %q references unknown vehicle type %q", svc.ID, svc.VehicleTypeID)
 		}
 
-		cs, err := CompilableFromService(rt, stations, svc, vt)
+		cs, err := compilableFromService(rt, stations, svc, vt)
 		if err != nil {
 			return TransitGraph{}, err
 		}

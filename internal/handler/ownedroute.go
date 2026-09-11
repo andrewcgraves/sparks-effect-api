@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/ids"
 	"github.com/andrewcgraves/sparks-effect-api/internal/route"
@@ -184,7 +185,7 @@ func loadOwnedRoute(w http.ResponseWriter, r *http.Request, store OwnedRouteStor
 
 func resolveOwnScenarioOrFail(
 	w http.ResponseWriter, r *http.Request, store OwnedRouteStore,
-	user transit.User, slug string,
+	user account.User, slug string,
 ) (*string, bool) {
 	if slug == "" {
 		return nil, true
@@ -225,7 +226,7 @@ func decodeRouteIngest(w http.ResponseWriter, r *http.Request) (route.Ingest, bo
 	// through HTTP. Its messages name the offending field and segment, so they
 	// are returned to the client as-is.
 	if err := route.Validate(in); err != nil {
-		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		writeUnprocessable(w, err)
 		return route.Ingest{}, false
 	}
 	return in, true

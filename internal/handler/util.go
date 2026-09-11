@@ -2,8 +2,12 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
+
+	"github.com/andrewcgraves/sparks-effect-api/internal/fault"
+	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -30,4 +34,26 @@ func writeErrorCode(w http.ResponseWriter, status int, code, msg string) {
 
 func writeErrorDetail(w http.ResponseWriter, status int, code, msg string, detail any) {
 	writeJSON(w, status, errorResponse{Error: msg, Code: code, Detail: detail})
+}
+
+const ValidationErrorCode = "validation"
+
+type validationDetail struct {
+	Faults fault.ValidationFaults `json:"faults"`
+}
+
+func writeUnprocessable(w http.ResponseWriter, err error) {
+	var faults fault.ValidationFaults
+	if errors.As(err, &faults) {
+		writeErrorDetail(w, http.StatusUnprocessableEntity,
+			ValidationErrorCode, faults.Error(), validationDetail{Faults: faults})
+		return
+	}
+	var placement *transit.StopPlacementFault
+	if errors.As(err, &placement) {
+		writeErrorDetail(w, http.StatusUnprocessableEntity,
+			StopPlacementErrorCode, placement.Error(), stopPlacementDetailFrom(placement))
+		return
+	}
+	writeError(w, http.StatusUnprocessableEntity, err.Error())
 }

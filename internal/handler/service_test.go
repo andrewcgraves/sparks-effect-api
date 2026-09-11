@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
@@ -130,9 +131,9 @@ func seedServiceRow(f *fakeServiceStore, id, slug, ownerID string, updatedAt tim
 // --- test harness ---
 
 var (
-	svcOwner    = transit.User{ID: "user-1", Email: "owner@example.com"}
-	svcStranger = transit.User{ID: "user-2", Email: "stranger@example.com"}
-	svcAdmin    = transit.User{ID: "user-3", Email: "admin@example.com", IsAdmin: true}
+	svcOwner    = account.User{ID: "user-1", Email: "owner@example.com"}
+	svcStranger = account.User{ID: "user-2", Email: "stranger@example.com"}
+	svcAdmin    = account.User{ID: "user-3", Email: "admin@example.com", IsAdmin: true}
 )
 
 const createPayload = `{
@@ -156,7 +157,7 @@ func serviceMux(store handler.ServiceStore) *http.ServeMux {
 	return mux
 }
 
-func serveAs(t *testing.T, store handler.ServiceStore, user transit.User, method, target, body string) *httptest.ResponseRecorder {
+func serveAs(t *testing.T, store handler.ServiceStore, user account.User, method, target, body string) *httptest.ResponseRecorder {
 	t.Helper()
 
 	var r *http.Request
@@ -459,7 +460,7 @@ func TestAnonymousIsRejectedOnEveryRoute(t *testing.T) {
 			store := newFakeServiceStore()
 			seedService(store, "svc-1", "seeded", svcOwner.ID)
 
-			rec := serveAs(t, store, transit.User{}, tc.method, tc.target, tc.body)
+			rec := serveAs(t, store, account.User{}, tc.method, tc.target, tc.body)
 			if rec.Code != http.StatusUnauthorized {
 				t.Fatalf("got %d, want %d", rec.Code, http.StatusUnauthorized)
 			}
@@ -801,6 +802,55 @@ func TestOtherValidationFailuresCarryNoPlacementDetail(t *testing.T) {
 	if body422["error"] == "" {
 		t.Errorf("body %s has no message to display", rec.Body)
 	}
+}
+
+func TestCreateValidationRejectionCarriesStructuredDetail(t *testing.T) {
+	body := `{"route_slug":"diagonal","name":"X",
+		"vehicle":{"max_speed_kmh":100,"acceleration_ms2":1,"deceleration_ms2":1},
+		"stops":[{"name":"A","lat":999,"lng":1},{"name":"B","lat":2,"lng":-200}]}`
+
+	rec := serveAs(t, newFakeServiceStore(), svcOwner, http.MethodPost, "/api/services", body)
+	got := decodeValidationFault(t, rec)
+	if got.Code != handler.ValidationErrorCode {
+		t.Errorf("code = %q, want %q", got.Code, handler.ValidationErrorCode)
+	}
+	if len(got.Detail.Faults) != 2 {
+		t.Fatalf("got %d faults, want 2: %+v", len(got.Detail.Faults), got.Detail.Faults)
+	}
+	if got.Detail.Faults[0].Field != "stops.lat" || got.Detail.Faults[0].Index == nil || *got.Detail.Faults[0].Index != 0 {
+		t.Errorf("fault 0 = %+v, want stops.lat at index 0", got.Detail.Faults[0])
+	}
+	if got.Detail.Faults[1].Field != "stops.lng" || got.Detail.Faults[1].Index == nil || *got.Detail.Faults[1].Index != 1 {
+		t.Errorf("fault 1 = %+v, want stops.lng at index 1", got.Detail.Faults[1])
+	}
+	if !strings.Contains(got.Error, "lat") {
+		t.Errorf("error message %q no longer names the field", got.Error)
+	}
+}
+
+type validationBody struct {
+	Error  string `json:"error"`
+	Code   string `json:"code"`
+	Detail struct {
+		Faults []struct {
+			Field   string `json:"field"`
+			Index   *int   `json:"index"`
+			Rule    string `json:"rule"`
+			Message string `json:"message"`
+		} `json:"faults"`
+	} `json:"detail"`
+}
+
+func decodeValidationFault(t *testing.T, rec *httptest.ResponseRecorder) validationBody {
+	t.Helper()
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("got %d, want %d (body %s)", rec.Code, http.StatusUnprocessableEntity, rec.Body)
+	}
+	var body validationBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decoding error body: %v (body %s)", err, rec.Body)
+	}
+	return body
 }
 
 func TestCreateRequiresARouteSlug(t *testing.T) {

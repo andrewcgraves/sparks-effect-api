@@ -8,9 +8,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
+	"github.com/andrewcgraves/sparks-effect-api/internal/persistence/postgres"
 	"github.com/andrewcgraves/sparks-effect-api/internal/routing"
 	"github.com/andrewcgraves/sparks-effect-api/internal/traceid"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
@@ -33,8 +35,10 @@ type AuthDeps interface {
 	handler.WorkerStore
 	handler.RoutingBacklogStore
 	handler.PrerenderedStore
-	GetSessionUser(ctx context.Context, tokenHash string) (transit.User, bool, error)
+	GetSessionUser(ctx context.Context, tokenHash string) (account.User, bool, error)
 }
+
+var _ AuthDeps = (*postgres.Repo)(nil)
 
 func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routing.Publisher, lg *slog.Logger) *http.Server {
 	mux := http.NewServeMux()

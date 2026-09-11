@@ -81,11 +81,11 @@ func crossingScenario() ([]Route, []Station, []Service, []VehicleType) {
 	return routes, stations, services, []VehicleType{physicsTestVehicle()}
 }
 
-func TestCompileScenario_nodesCloseOverEveryEdgeKey(t *testing.T) {
+func TestCompileSeededPhysics_nodesCloseOverEveryEdgeKey(t *testing.T) {
 	routes, stations, services, vehicleTypes := crossingScenario()
-	graph, err := CompileScenario(routes, stations, services, vehicleTypes, DefaultBoardingWaitPolicy())
+	graph, err := compileSeededPhysics(routes, stations, services, vehicleTypes, DefaultBoardingWaitPolicy())
 	if err != nil {
-		t.Fatalf("CompileScenario() error = %v, want nil", err)
+		t.Fatalf("compileSeededPhysics() error = %v, want nil", err)
 	}
 
 	bySlug := nodeBySlug(graph.Nodes)
@@ -116,11 +116,11 @@ func TestCompileScenario_nodesCloseOverEveryEdgeKey(t *testing.T) {
 	}
 }
 
-func TestCompileScenario_mergedNodeUsesKeyMemberCoordinate(t *testing.T) {
+func TestCompileSeededPhysics_mergedNodeUsesKeyMemberCoordinate(t *testing.T) {
 	routes, stations, services, vehicleTypes := crossingScenario()
-	graph, err := CompileScenario(routes, stations, services, vehicleTypes, DefaultBoardingWaitPolicy())
+	graph, err := compileSeededPhysics(routes, stations, services, vehicleTypes, DefaultBoardingWaitPolicy())
 	if err != nil {
-		t.Fatalf("CompileScenario() error = %v, want nil", err)
+		t.Fatalf("compileSeededPhysics() error = %v, want nil", err)
 	}
 
 	// cross-a sorts before cross-b, so it is the anchor and the key.

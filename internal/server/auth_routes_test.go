@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
@@ -18,17 +19,17 @@ import (
 )
 
 type stubAuthDeps struct {
-	sessions map[string]transit.User
+	sessions map[string]account.User
 	inFlight int
 }
 
-func (s *stubAuthDeps) GetSessionUser(_ context.Context, tokenHash string) (transit.User, bool, error) {
+func (s *stubAuthDeps) GetSessionUser(_ context.Context, tokenHash string) (account.User, bool, error) {
 	u, ok := s.sessions[tokenHash]
 	return u, ok, nil
 }
 
-func (s *stubAuthDeps) GetUserCredentialsByEmail(context.Context, string) (transit.User, string, bool, error) {
-	return transit.User{}, "", false, nil
+func (s *stubAuthDeps) GetUserCredentialsByEmail(context.Context, string) (account.User, string, bool, error) {
+	return account.User{}, "", false, nil
 }
 
 func (s *stubAuthDeps) CreateUserService(context.Context, transit.UserService) error { return nil }
@@ -67,11 +68,11 @@ func (s *stubAuthDeps) UserServiceIDsOwnedBy(context.Context, string, []string) 
 	return nil, nil
 }
 
-func (s *stubAuthDeps) CreateSession(context.Context, transit.Session) error   { return nil }
+func (s *stubAuthDeps) CreateSession(context.Context, account.Session) error   { return nil }
 func (s *stubAuthDeps) DeleteSession(context.Context, string) error            { return nil }
-func (s *stubAuthDeps) CreateUser(context.Context, transit.User, string) error { return nil }
-func (s *stubAuthDeps) GetUserByEmail(context.Context, string) (transit.User, bool, error) {
-	return transit.User{}, false, nil
+func (s *stubAuthDeps) CreateUser(context.Context, account.User, string) error { return nil }
+func (s *stubAuthDeps) GetUserByEmail(context.Context, string) (account.User, bool, error) {
+	return account.User{}, false, nil
 }
 func (s *stubAuthDeps) ListScenariosByOwner(context.Context, string) ([]transit.Scenario, error) {
 	return nil, nil
@@ -218,7 +219,7 @@ func newTestServer(t *testing.T, deps AuthDeps) http.Handler {
 }
 
 func newStubDeps() *stubAuthDeps {
-	return &stubAuthDeps{sessions: map[string]transit.User{
+	return &stubAuthDeps{sessions: map[string]account.User{
 		auth.HashToken(adminToken): {ID: "admin-1", Email: "admin@example.com", IsAdmin: true},
 		auth.HashToken(userToken):  {ID: "user-1", Email: "user@example.com"},
 	}}

@@ -6,106 +6,136 @@ import (
 	"io/fs"
 )
 
-func SeedIfEmpty(ctx context.Context, repo Repository) (bool, error) {
-	existing, err := repo.ListCuratedScenarios(ctx)
+type SeedSink interface {
+	ListCuratedScenarios(ctx context.Context) ([]Scenario, error)
+	CreateScenario(ctx context.Context, sc Scenario) error
+	CreateVehicleType(ctx context.Context, vt VehicleType) error
+	CreateRoute(ctx context.Context, r Route) error
+	CreateStation(ctx context.Context, st Station) error
+	CreateService(ctx context.Context, svc Service) error
+	AddServiceToScenario(ctx context.Context, scenarioID, serviceID string) error
+	UpsertTravelTimes(ctx context.Context, tt TravelTimes) error
+}
+
+func SeedIfEmpty(ctx context.Context, sink SeedSink) (bool, error) {
+	existing, err := sink.ListCuratedScenarios(ctx)
 	if err != nil {
 		return false, fmt.Errorf("transit: checking for existing scenarios: %w", err)
 	}
 	if len(existing) > 0 {
 		return false, nil
 	}
-	if err := SeedFromEmbedded(ctx, repo); err != nil {
+	if err := SeedFromEmbedded(ctx, sink); err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
-func SeedFromEmbedded(ctx context.Context, repo Repository) error {
-	entries, err := fs.ReadDir(dataFS, "data/scenarios")
+func SeedFromEmbedded(ctx context.Context, sink SeedSink) error {
+	seeds, err := loadEmbeddedScenarios()
 	if err != nil {
-		return fmt.Errorf("transit: reading scenarios dir: %w", err)
+		return err
 	}
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		if err := seedScenario(ctx, repo, e.Name()); err != nil {
-			return fmt.Errorf("transit: seeding scenario %q: %w", e.Name(), err)
+	for _, seed := range seeds {
+		if err := writeEmbeddedScenario(ctx, sink, seed); err != nil {
+			return fmt.Errorf("transit: seeding scenario %q: %w", seed.scenario.Slug, err)
 		}
 	}
 	return nil
 }
 
-func seedScenario(ctx context.Context, repo Repository, slug string) error {
-	base := "data/scenarios/" + slug
+type embeddedScenario struct {
+	scenario     Scenario
+	vehicleTypes []VehicleType
+	routes       []Route
+	stations     []Station
+	services     []Service
+	travelTimes  TravelTimes
+}
 
-	var sc Scenario
-	if err := unmarshalFile(dataFS, base+"/scenario.yaml", &sc); err != nil {
-		return err
+func loadEmbeddedScenarios() ([]embeddedScenario, error) {
+	entries, err := fs.ReadDir(dataFS, "data/scenarios")
+	if err != nil {
+		return nil, fmt.Errorf("transit: reading scenarios dir: %w", err)
 	}
-	if err := repo.CreateScenario(ctx, sc); err != nil {
+	var out []embeddedScenario
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		seed, err := loadEmbeddedScenario(e.Name())
+		if err != nil {
+			return nil, fmt.Errorf("transit: loading scenario %q: %w", e.Name(), err)
+		}
+		out = append(out, seed)
+	}
+	return out, nil
+}
+
+func loadEmbeddedScenario(slug string) (embeddedScenario, error) {
+	base := "data/scenarios/" + slug
+	var seed embeddedScenario
+	if err := unmarshalFile(dataFS, base+"/scenario.yaml", &seed.scenario); err != nil {
+		return embeddedScenario{}, err
+	}
+	if err := unmarshalFile(dataFS, base+"/vehicle_types.yaml", &seed.vehicleTypes); err != nil {
+		return embeddedScenario{}, err
+	}
+	if err := unmarshalFile(dataFS, base+"/routes.yaml", &seed.routes); err != nil {
+		return embeddedScenario{}, err
+	}
+	if err := unmarshalFile(dataFS, base+"/stations.yaml", &seed.stations); err != nil {
+		return embeddedScenario{}, err
+	}
+	if err := unmarshalFile(dataFS, base+"/services.yaml", &seed.services); err != nil {
+		return embeddedScenario{}, err
+	}
+	for _, svc := range seed.services {
+		if svc.BoardingWait != nil {
+			if _, err := svc.BoardingWait.Parse(); err != nil {
+				return embeddedScenario{}, fmt.Errorf("service %q: %w", svc.ID, err)
+			}
+		}
+	}
+	if err := unmarshalFile(dataFS, base+"/segment_run_times.yaml", &seed.travelTimes); err != nil {
+		return embeddedScenario{}, err
+	}
+	if err := validateSegmentRoutes(seed.routes, seed.travelTimes); err != nil {
+		return embeddedScenario{}, err
+	}
+	return seed, nil
+}
+
+func writeEmbeddedScenario(ctx context.Context, sink SeedSink, seed embeddedScenario) error {
+	if err := sink.CreateScenario(ctx, seed.scenario); err != nil {
 		return fmt.Errorf("creating scenario: %w", err)
 	}
-
-	var vts []VehicleType
-	if err := unmarshalFile(dataFS, base+"/vehicle_types.yaml", &vts); err != nil {
-		return err
-	}
-	for _, vt := range vts {
-		if err := repo.CreateVehicleType(ctx, vt); err != nil {
+	for _, vt := range seed.vehicleTypes {
+		if err := sink.CreateVehicleType(ctx, vt); err != nil {
 			return fmt.Errorf("creating vehicle type %q: %w", vt.ID, err)
 		}
 	}
-
-	var routes []Route
-	if err := unmarshalFile(dataFS, base+"/routes.yaml", &routes); err != nil {
-		return err
-	}
-	for _, r := range routes {
-		if err := repo.CreateRoute(ctx, r); err != nil {
+	for _, r := range seed.routes {
+		if err := sink.CreateRoute(ctx, r); err != nil {
 			return fmt.Errorf("creating route %q: %w", r.ID, err)
 		}
 	}
-
-	var stations []Station
-	if err := unmarshalFile(dataFS, base+"/stations.yaml", &stations); err != nil {
-		return err
-	}
-	for _, st := range stations {
-		if err := repo.CreateStation(ctx, st); err != nil {
+	for _, st := range seed.stations {
+		if err := sink.CreateStation(ctx, st); err != nil {
 			return fmt.Errorf("creating station %q: %w", st.ID, err)
 		}
 	}
-
-	var services []Service
-	if err := unmarshalFile(dataFS, base+"/services.yaml", &services); err != nil {
-		return err
-	}
-	for _, svc := range services {
-		if svc.BoardingWait != nil {
-			if _, err := svc.BoardingWait.Parse(); err != nil {
-				return fmt.Errorf("service %q: %w", svc.ID, err)
-			}
-		}
-		if err := repo.CreateService(ctx, svc); err != nil {
+	for _, svc := range seed.services {
+		if err := sink.CreateService(ctx, svc); err != nil {
 			return fmt.Errorf("creating service %q: %w", svc.ID, err)
 		}
-		if err := repo.AddServiceToScenario(ctx, svc.ScenarioID, svc.ID); err != nil {
+		if err := sink.AddServiceToScenario(ctx, svc.ScenarioID, svc.ID); err != nil {
 			return fmt.Errorf("linking service %q to scenario: %w", svc.ID, err)
 		}
 	}
-
-	var tt TravelTimes
-	if err := unmarshalFile(dataFS, base+"/segment_run_times.yaml", &tt); err != nil {
-		return err
-	}
-	if err := validateSegmentRoutes(routes, tt); err != nil {
-		return err
-	}
-	if err := repo.UpsertTravelTimes(ctx, tt); err != nil {
+	if err := sink.UpsertTravelTimes(ctx, seed.travelTimes); err != nil {
 		return fmt.Errorf("upserting travel times: %w", err)
 	}
-
 	return nil
 }
 

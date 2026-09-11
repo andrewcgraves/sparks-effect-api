@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
-	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
 func TestCreateUserProvisionsALoggableAccount(t *testing.T) {
@@ -19,7 +19,7 @@ func TestCreateUserProvisionsALoggableAccount(t *testing.T) {
 		t.Fatalf("status = %d, want 201; body %s", rec.Code, rec.Body.String())
 	}
 
-	var created transit.User
+	var created account.User
 	if err := json.NewDecoder(rec.Body).Decode(&created); err != nil {
 		t.Fatalf("decode: %v", err)
 	}

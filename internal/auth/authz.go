@@ -1,8 +1,8 @@
 package auth
 
-import "github.com/andrewcgraves/sparks-effect-api/internal/transit"
+import "github.com/andrewcgraves/sparks-effect-api/internal/account"
 
-func CanAccess(user transit.User, ownerID *string) bool {
+func CanAccess(user account.User, ownerID *string) bool {
 	if user.IsAdmin {
 		return true
 	}
@@ -17,6 +17,6 @@ func CanAccess(user transit.User, ownerID *string) bool {
 	return *ownerID == user.ID
 }
 
-func CanReference(user transit.User, ownerID *string) bool {
+func CanReference(user account.User, ownerID *string) bool {
 	return ownerID == nil || CanAccess(user, ownerID)
 }

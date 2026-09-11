@@ -19,8 +19,8 @@ func rewindTravelModeTransitMigration(t *testing.T, url string) {
 		`ALTER TABLE IF EXISTS routing_jobs
 		   DROP CONSTRAINT IF EXISTS routing_jobs_mode_valid`,
 		`ALTER TABLE IF EXISTS prerendered_isochrones
-		   DROP CONSTRAINT IF EXISTS prerendered_isochrones_mode_valid`,
-		`DELETE FROM goose_db_version WHERE version_id = 21`)
+		   DROP CONSTRAINT IF EXISTS prerendered_isochrones_mode_valid`)
+	rewindTo(t, url, 21)
 }
 
 func modeJobID(i int) string {
@@ -197,11 +197,10 @@ func TestTravelModeCheckMigrationIsSafeToReRun(t *testing.T) {
 	seedCompileJob(t, repo, routingCompileJobID)
 
 	// Forget that it ran while keeping the constraints it added, so the second
-	// pass meets exactly the state a deployed database presents. 00022–00024
+	// pass meets exactly the state a deployed database presents. Later versions
 	// are unrecorded with it: goose applies only versions above the highest
-	// one recorded, so leaving any of them would make this re-run skip 00021
-	// and prove nothing.
-	execSQL(t, url, `DELETE FROM goose_db_version WHERE version_id IN (21, 22, 23, 24)`)
+	// one recorded, so leaving any of them would make this re-run skip 00021.
+	rewindTo(t, url, 21)
 	if err := postgres.Migrate(context.Background(), url); err != nil {
 		t.Fatalf("00021 re-run over the constraints it already added: %v", err)
 	}

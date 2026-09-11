@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
@@ -26,7 +27,7 @@ func ownershipFixture(t *testing.T) (repo interface {
 	r, u := freshRepo(t)
 	ctx := context.Background()
 
-	mustCreateUser(t, r, transit.User{ID: ownershipOwnerID, Email: "owner@example.com"}, "pw")
+	mustCreateUser(t, r, account.User{ID: ownershipOwnerID, Email: "owner@example.com"}, "pw")
 
 	for _, sc := range []transit.Scenario{
 		{ID: ownershipCuratedID, Slug: "curated-baseline", Name: "Curated Baseline"},
@@ -116,7 +117,7 @@ func TestDeletingUserCascadesToOwnedDomainRows(t *testing.T) {
 	repo, url := freshRepo(t)
 	ctx := context.Background()
 
-	mustCreateUser(t, repo, transit.User{ID: ownershipOwnerID, Email: "owner@example.com"}, "pw")
+	mustCreateUser(t, repo, account.User{ID: ownershipOwnerID, Email: "owner@example.com"}, "pw")
 	if err := repo.CreateScenario(ctx, transit.Scenario{
 		ID: ownershipOwnedScID, Slug: "owned-draft", Name: "Owned Draft",
 		OwnerID: ptr(ownershipOwnerID),

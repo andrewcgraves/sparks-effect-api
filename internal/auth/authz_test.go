@@ -3,20 +3,20 @@ package auth_test
 import (
 	"testing"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
-	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
 func ptr(s string) *string { return &s }
 
 func TestCanAccess(t *testing.T) {
-	owner := transit.User{ID: "user-1"}
-	other := transit.User{ID: "user-2"}
-	admin := transit.User{ID: "user-3", IsAdmin: true}
+	owner := account.User{ID: "user-1"}
+	other := account.User{ID: "user-2"}
+	admin := account.User{ID: "user-3", IsAdmin: true}
 
 	tests := []struct {
 		name    string
-		user    transit.User
+		user    account.User
 		ownerID *string
 		want    bool
 	}{
@@ -29,7 +29,7 @@ func TestCanAccess(t *testing.T) {
 		{"unowned resource is admin-only", owner, nil, false},
 		{"admin reaches unowned resource", admin, nil, true},
 		// A user ID must never match by emptiness.
-		{"empty user ID does not match empty owner", transit.User{}, ptr(""), false},
+		{"empty user ID does not match empty owner", account.User{}, ptr(""), false},
 	}
 
 	for _, tt := range tests {

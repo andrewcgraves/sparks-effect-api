@@ -8,13 +8,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
-	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
 type AuthStore interface {
-	GetUserCredentialsByEmail(ctx context.Context, email string) (transit.User, string, bool, error)
-	CreateSession(ctx context.Context, s transit.Session) error
+	GetUserCredentialsByEmail(ctx context.Context, email string) (account.User, string, bool, error)
+	CreateSession(ctx context.Context, s account.Session) error
 	DeleteSession(ctx context.Context, tokenHash string) error
 }
 
@@ -26,7 +26,7 @@ type loginRequest struct {
 type loginResponse struct {
 	Token     string       `json:"token"`
 	ExpiresAt time.Time    `json:"expires_at"`
-	User      transit.User `json:"user"`
+	User      account.User `json:"user"`
 }
 
 const invalidCredentials = "invalid email or password"
@@ -68,7 +68,7 @@ func Login(store AuthStore, ttl time.Duration, hasher auth.Hasher) http.HandlerF
 		}
 
 		expiresAt := time.Now().Add(ttl)
-		if err := store.CreateSession(r.Context(), transit.Session{
+		if err := store.CreateSession(r.Context(), account.Session{
 			TokenHash: tokenHash,
 			UserID:    user.ID,
 			ExpiresAt: expiresAt,

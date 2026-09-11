@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -21,7 +22,11 @@ type Repo struct {
 	pool *pgxpool.Pool
 }
 
-var _ transit.Repository = (*Repo)(nil)
+var (
+	_ transit.StoreSource    = (*Repo)(nil)
+	_ transit.SeedSink       = (*Repo)(nil)
+	_ transit.SeedReconciler = (*Repo)(nil)
+)
 
 func Connect(ctx context.Context, databaseURL string, maxConns int) (*Repo, error) {
 	cfg, err := pgxpool.ParseConfig(databaseURL)
@@ -565,24 +570,24 @@ func (r *Repo) GetTravelTimes(ctx context.Context, scenarioSlug string) (transit
 
 // --- Users ---
 
-func (r *Repo) CreateUser(ctx context.Context, u transit.User, passwordHash string) error {
+func (r *Repo) CreateUser(ctx context.Context, u account.User, passwordHash string) error {
 	_, err := r.pool.Exec(ctx,
 		`INSERT INTO users (id, email, name, is_admin, password_hash) VALUES ($1, $2, $3, $4, $5)`,
 		u.ID, u.Email, u.Name, u.IsAdmin, passwordHash)
 	return wrap("CreateUser", err)
 }
 
-func (r *Repo) GetUserCredentialsByEmail(ctx context.Context, email string) (transit.User, string, bool, error) {
-	var u transit.User
+func (r *Repo) GetUserCredentialsByEmail(ctx context.Context, email string) (account.User, string, bool, error) {
+	var u account.User
 	var hash string
 	err := r.pool.QueryRow(ctx,
 		`SELECT `+userColumns+`, password_hash FROM users WHERE email = $1`, email).
 		Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin, &u.CreatedAt, &u.UpdatedAt, &hash)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return transit.User{}, "", false, nil
+		return account.User{}, "", false, nil
 	}
 	if err != nil {
-		return transit.User{}, "", false, wrap("GetUserCredentialsByEmail", err)
+		return account.User{}, "", false, wrap("GetUserCredentialsByEmail", err)
 	}
 	return u, hash, true, nil
 }
@@ -591,36 +596,36 @@ const userColumns = `id, email, name, is_admin, created_at, updated_at`
 
 const userColumnsU = `u.id, u.email, u.name, u.is_admin, u.created_at, u.updated_at`
 
-func (r *Repo) GetUserByID(ctx context.Context, id string) (transit.User, bool, error) {
+func (r *Repo) GetUserByID(ctx context.Context, id string) (account.User, bool, error) {
 	return scanUser(r.pool.QueryRow(ctx, `SELECT `+userColumns+` FROM users WHERE id = $1`, id))
 }
 
-func (r *Repo) GetUserByEmail(ctx context.Context, email string) (transit.User, bool, error) {
+func (r *Repo) GetUserByEmail(ctx context.Context, email string) (account.User, bool, error) {
 	return scanUser(r.pool.QueryRow(ctx, `SELECT `+userColumns+` FROM users WHERE email = $1`, email))
 }
 
-func scanUser(row pgx.Row) (transit.User, bool, error) {
-	var u transit.User
+func scanUser(row pgx.Row) (account.User, bool, error) {
+	var u account.User
 	err := row.Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin, &u.CreatedAt, &u.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return transit.User{}, false, nil
+		return account.User{}, false, nil
 	}
 	if err != nil {
-		return transit.User{}, false, wrap("scanUser", err)
+		return account.User{}, false, wrap("scanUser", err)
 	}
 	return u, true, nil
 }
 
-func (r *Repo) ListUsers(ctx context.Context) ([]transit.User, error) {
+func (r *Repo) ListUsers(ctx context.Context) ([]account.User, error) {
 	rows, err := r.pool.Query(ctx, `SELECT `+userColumns+` FROM users ORDER BY email`)
 	if err != nil {
 		return nil, wrap("ListUsers", err)
 	}
 	defer rows.Close()
 
-	var out []transit.User
+	var out []account.User
 	for rows.Next() {
-		var u transit.User
+		var u account.User
 		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin, &u.CreatedAt, &u.UpdatedAt); err != nil {
 			return nil, wrap("ListUsers scan", err)
 		}
@@ -631,14 +636,14 @@ func (r *Repo) ListUsers(ctx context.Context) ([]transit.User, error) {
 
 // --- Sessions ---
 
-func (r *Repo) CreateSession(ctx context.Context, s transit.Session) error {
+func (r *Repo) CreateSession(ctx context.Context, s account.Session) error {
 	_, err := r.pool.Exec(ctx,
 		`INSERT INTO sessions (token_hash, user_id, expires_at) VALUES ($1, $2, $3)`,
 		s.TokenHash, s.UserID, s.ExpiresAt)
 	return wrap("CreateSession", err)
 }
 
-func (r *Repo) GetSessionUser(ctx context.Context, tokenHash string) (transit.User, bool, error) {
+func (r *Repo) GetSessionUser(ctx context.Context, tokenHash string) (account.User, bool, error) {
 	return scanUser(r.pool.QueryRow(ctx,
 		`SELECT `+userColumnsU+`
 		 FROM sessions s JOIN users u ON u.id = s.user_id

@@ -1,4 +1,4 @@
-package worker
+package compile
 
 import (
 	"context"
@@ -20,19 +20,19 @@ type Store interface {
 
 func Compile(ctx context.Context, store Store, job transit.Job, boardingWait transit.BoardingWaitPolicy) error {
 	if err := store.UpdateJobStatus(ctx, job.ID, transit.JobStatusRunning, ""); err != nil {
-		return fmt.Errorf("worker: marking job %s running: %w", job.ID, err)
+		return fmt.Errorf("compile: marking job %s running: %w", job.ID, err)
 	}
 
 	graph, err := compile(ctx, store, job, boardingWait)
 	if err != nil {
 		if failErr := store.UpdateJobStatus(ctx, job.ID, transit.JobStatusFailed, err.Error()); failErr != nil {
-			return fmt.Errorf("worker: recording failure for job %s: %w", job.ID, failErr)
+			return fmt.Errorf("compile: recording failure for job %s: %w", job.ID, failErr)
 		}
 		return nil
 	}
 
 	if err := store.CompleteJob(ctx, job.ID, graph, transit.CompiledServiceIDs(graph)); err != nil {
-		return fmt.Errorf("worker: completing job %s: %w", job.ID, err)
+		return fmt.Errorf("compile: completing job %s: %w", job.ID, err)
 	}
 	return nil
 }
@@ -41,31 +41,31 @@ func compile(ctx context.Context, store Store, job transit.Job, boardingWait tra
 	switch job.Kind {
 	case transit.JobKindCompileScenario:
 		if job.ScenarioID == nil {
-			return transit.TransitGraph{}, fmt.Errorf("worker: %s job has no scenario_id", job.Kind)
+			return transit.TransitGraph{}, fmt.Errorf("compile: %s job has no scenario_id", job.Kind)
 		}
 		return compileScenario(ctx, store, *job.ScenarioID, boardingWait)
 	case transit.JobKindCompileUserScenario:
 		if job.UserScenarioID == nil {
-			return transit.TransitGraph{}, fmt.Errorf("worker: %s job has no user_scenario_id", job.Kind)
+			return transit.TransitGraph{}, fmt.Errorf("compile: %s job has no user_scenario_id", job.Kind)
 		}
 		return compileUserScenario(ctx, store, *job.UserScenarioID, boardingWait)
 	case transit.JobKindCompileUserService:
 		if job.UserServiceID == nil {
-			return transit.TransitGraph{}, fmt.Errorf("worker: %s job has no user_service_id", job.Kind)
+			return transit.TransitGraph{}, fmt.Errorf("compile: %s job has no user_service_id", job.Kind)
 		}
 		return compileUserService(ctx, store, *job.UserServiceID, boardingWait)
 	default:
-		return transit.TransitGraph{}, fmt.Errorf("worker: unknown job kind %q", job.Kind)
+		return transit.TransitGraph{}, fmt.Errorf("compile: unknown job kind %q", job.Kind)
 	}
 }
 
 func compileScenario(ctx context.Context, store Store, scenarioID string, boardingWait transit.BoardingWaitPolicy) (transit.TransitGraph, error) {
 	sc, found, err := store.GetScenarioByID(ctx, scenarioID)
 	if err != nil {
-		return transit.TransitGraph{}, fmt.Errorf("worker: loading scenario: %w", err)
+		return transit.TransitGraph{}, fmt.Errorf("compile: loading scenario: %w", err)
 	}
 	if !found {
-		return transit.TransitGraph{}, fmt.Errorf("worker: scenario %q not found", scenarioID)
+		return transit.TransitGraph{}, fmt.Errorf("compile: scenario %q not found", scenarioID)
 	}
 	return transit.CompileSeededScenario(ctx, store, sc, boardingWait)
 }
@@ -73,15 +73,15 @@ func compileScenario(ctx context.Context, store Store, scenarioID string, boardi
 func compileUserScenario(ctx context.Context, store Store, id string, boardingWait transit.BoardingWaitPolicy) (transit.TransitGraph, error) {
 	sc, found, err := store.GetUserScenarioByID(ctx, id)
 	if err != nil {
-		return transit.TransitGraph{}, fmt.Errorf("worker: loading user scenario: %w", err)
+		return transit.TransitGraph{}, fmt.Errorf("compile: loading user scenario: %w", err)
 	}
 	if !found {
-		return transit.TransitGraph{}, fmt.Errorf("worker: user scenario %q not found", id)
+		return transit.TransitGraph{}, fmt.Errorf("compile: user scenario %q not found", id)
 	}
 
 	services, err := store.ListUserServicesByIDs(ctx, sc.ServiceIDs)
 	if err != nil {
-		return transit.TransitGraph{}, fmt.Errorf("worker: loading member services: %w", err)
+		return transit.TransitGraph{}, fmt.Errorf("compile: loading member services: %w", err)
 	}
 	return compileUserServices(ctx, store, services, sc.InterchangePairs, sc.BoardingWait, boardingWait)
 }
@@ -89,10 +89,10 @@ func compileUserScenario(ctx context.Context, store Store, id string, boardingWa
 func compileUserService(ctx context.Context, store Store, id string, boardingWait transit.BoardingWaitPolicy) (transit.TransitGraph, error) {
 	svc, found, err := store.GetUserServiceByID(ctx, id)
 	if err != nil {
-		return transit.TransitGraph{}, fmt.Errorf("worker: loading user service: %w", err)
+		return transit.TransitGraph{}, fmt.Errorf("compile: loading user service: %w", err)
 	}
 	if !found {
-		return transit.TransitGraph{}, fmt.Errorf("worker: user service %q not found", id)
+		return transit.TransitGraph{}, fmt.Errorf("compile: user service %q not found", id)
 	}
 	return compileUserServices(ctx, store, []transit.UserService{svc}, nil, nil, boardingWait)
 }
@@ -100,7 +100,7 @@ func compileUserService(ctx context.Context, store Store, id string, boardingWai
 func compileUserServices(ctx context.Context, store Store, services []transit.UserService, pairs []transit.InterchangePair, scenarioWait *transit.BoardingWaitOverride, boardingWait transit.BoardingWaitPolicy) (transit.TransitGraph, error) {
 	routes, err := store.ListRoutesByIDs(ctx, routeIDsOf(services))
 	if err != nil {
-		return transit.TransitGraph{}, fmt.Errorf("worker: loading routes: %w", err)
+		return transit.TransitGraph{}, fmt.Errorf("compile: loading routes: %w", err)
 	}
 	return transit.CompileUserScenario(routes, services, pairs, scenarioWait, boardingWait)
 }

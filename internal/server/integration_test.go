@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
 	"github.com/andrewcgraves/sparks-effect-api/internal/ids"
@@ -65,7 +66,7 @@ func provisionAdmin(t *testing.T, repo *postgres.Repo, email, password string) s
 	if err != nil {
 		t.Fatalf("NewUUID: %v", err)
 	}
-	if err := repo.CreateUser(context.Background(), transit.User{
+	if err := repo.CreateUser(context.Background(), account.User{
 		ID: id, Email: email, Name: "Admin", IsAdmin: true,
 	}, hash); err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -110,7 +111,7 @@ func TestIntegration_ProvisionedAccountLogsInAndUsesItsToken(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("/api/auth/me: status %d, want 200", rec.Code)
 	}
-	var me transit.User
+	var me account.User
 	if err := json.NewDecoder(rec.Body).Decode(&me); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -179,7 +180,7 @@ func TestIntegration_OwnershipScopingIsEnforcedServerSide(t *testing.T) {
 		if rec.Code != http.StatusCreated {
 			t.Fatalf("provisioning %s: status %d", email, rec.Code)
 		}
-		var u transit.User
+		var u account.User
 		if err := json.NewDecoder(rec.Body).Decode(&u); err != nil {
 			t.Fatalf("decode: %v", err)
 		}

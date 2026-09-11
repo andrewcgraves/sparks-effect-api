@@ -14,8 +14,8 @@ func rewindSegmentRouteIDMigration(t *testing.T, url string) {
 	rewindBrightlineWestMigration(t, url)
 	exec(t, url,
 		`DROP INDEX IF EXISTS segments_route_id_idx`,
-		`ALTER TABLE segments DROP COLUMN IF EXISTS route_id`,
-		`DELETE FROM goose_db_version WHERE version_id = 11`)
+		`ALTER TABLE segments DROP COLUMN IF EXISTS route_id`)
+	rewindTo(t, url, 11)
 }
 
 const (

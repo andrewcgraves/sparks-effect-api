@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/persistence/postgres"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 	"github.com/jackc/pgx/v5"
@@ -24,7 +25,7 @@ func userServiceFixture(t *testing.T) (*postgres.Repo, context.Context, string) 
 	ctx := context.Background()
 	repo, url := freshRepo(t)
 
-	for _, u := range []transit.User{
+	for _, u := range []account.User{
 		{ID: usOwnerID, Email: "owner@example.com", Name: "Owner"},
 		{ID: usStrangerID, Email: "stranger@example.com", Name: "Stranger"},
 	} {
