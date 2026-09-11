@@ -96,10 +96,8 @@ at the worker's client boundary, which is also where `transit` becomes
 Valhalla's `multimodal` (SPA-246). A Postgres CHECK holds the same set
 (migration 00021), so a mode the API would refuse is not storable either.
 
-`transit` is walking plus scheduled local transit, and like the other three it
-covers only the access and egress legs — how a rider reaches a station. The ride
-along the authored line is physics-compiled here and never routed, so no mode
-applies to it.
+The meaning of each mode — including that `transit` covers only the access and
+egress legs — lives in [CONTEXT.md](CONTEXT.md#travel-mode-vs-costing).
 
 ### Capping the backlog
 
@@ -358,11 +356,10 @@ the baseline does, via `POST /api/scenarios/{slug}/compile`. It just never
 appears on a public surface.
 
 One invariant holds that together: **a scenario and all of its children share
-one owner.** A curated scenario has curated children; an owned scenario's
-routes, stations, services, and segments belong to the same person. The sole
-exception is a standalone route (no scenario), which carries its own owner. The
-create and update handlers enforce it by refusing to attach a child to a
-scenario the caller does not own.
+one owner**, defined under **Seeded / curated / authored / owned** in
+[CONTEXT.md](CONTEXT.md#seeded-curated-authored-owned). The create and update
+handlers enforce it by refusing to attach a child to a scenario the caller does
+not own.
 
 That invariant is why containment is cheap. Only two reads filter on ownership —
 `ListCuratedScenarios` and `ListCuratedRouteSummaries`, named for what they
