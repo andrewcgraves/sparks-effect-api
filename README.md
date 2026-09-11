@@ -76,7 +76,7 @@ side turns the other side's pipeline red. It is not part of
 `make dev-workflow`: it needs the network. Those files are the on-the-wire
 shape; a prose copy of them is a third copy and goes stale.
 
-The graph travels inline — 2,894 bytes for CA HSR, roughly 30 KB for a large
+The graph travels inline — ~7 KB for CA HSR, roughly 30 KB for a large
 authored scenario — so the worker needs no database of its own. Publisher
 confirms are required: without them the API could insert a routing job, fail to
 publish, and strand it in `queued` while a client polls work no worker will ever
@@ -139,31 +139,23 @@ into the binary. Each scenario directory contains:
 | `routes.yaml` | Alignments (geometry + mode) |
 | `stations.yaml` | Stations (slug, location, platform height) |
 | `services.yaml` | Stopping patterns, frequency windows, vehicle |
-| `travel_times.yaml` | Adjacent segment times (compiler input) |
+| `segment_run_times.yaml` | Adjacent segment run times (compiler input) |
 
 Until the editor exists, these YAML files are the authoring interface.
 
 ### Segment times
 
-`travel_times.yaml` segments use `minutes` today. The intended semantics are
-**run time only** (train in motion); dwell is resolved separately at compile
-time from vehicle × platform height (or a per-stop override). A follow-up
-renames the seed field to `run_seconds` and recalibrates values so dwell is not
-double-counted.
+`segment_run_times.yaml` holds **run time** only (`run_seconds`; train in
+motion). Dwell is resolved separately at compile time from vehicle × platform
+height (or a per-stop override) and folded into `Edge.Seconds`. See **Run
+time** in [`CONTEXT.md`](CONTEXT.md).
 
 ### Provenance tiers
 
-Services will carry a provenance tier that gates which levers are honest in the
-editor:
-
-| Tier | Meaning |
-| --- | --- |
-| `computed` | Physics-compiled; all levers |
-| `calibrated` | Imported timetable run times; dwell/frequency/stops editable; vehicle swap disabled |
-| `frozen` | Geometry-less import; display + frequency/wait only |
-
-CA HSR seed services are calibrated (Business Plan matrix). The field is wired
-via the scenario API as that contract lands.
+Services carry a provenance tier that gates which editor levers are honest. The
+three tiers, and the trap that `travel_time_sets.provenance` is a different
+free-form field, are defined under **Provenance tier** in
+[`CONTEXT.md`](CONTEXT.md). CA HSR seed services are `calibrated`.
 
 ## Branching and releases
 
