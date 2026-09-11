@@ -91,13 +91,11 @@ its startup ping is `GET /api/internal/worker`. Transit cache rows also carry
 `departs_on` (SPA-269); walk/bike/drive omit it.
 
 Travel mode is stored in the domain's own vocabulary — `walk` / `bike` /
-`drive` / `transit`. "Costing" is Valhalla's word for the same concept and stays
-at the worker's client boundary, which is also where `transit` becomes
-Valhalla's `multimodal` (SPA-246). A Postgres CHECK holds the same set
-(migration 00021), so a mode the API would refuse is not storable either.
-
-The meaning of each mode — including that `transit` covers only the access and
-egress legs — lives in [CONTEXT.md](CONTEXT.md#travel-mode-vs-costing).
+`drive` / `transit` ([CONTEXT.md](CONTEXT.md#travel-mode-vs-costing)). "Costing"
+is Valhalla's word for the same concept and stays at the worker's client
+boundary, which is also where `transit` becomes Valhalla's `multimodal`
+(SPA-246). A Postgres CHECK holds the same set (migration 00021), so a mode the
+API would refuse is not storable either.
 
 ### Capping the backlog
 
@@ -356,10 +354,9 @@ the baseline does, via `POST /api/scenarios/{slug}/compile`. It just never
 appears on a public surface.
 
 One invariant holds that together: **a scenario and all of its children share
-one owner**, defined under **Seeded / curated / authored / owned** in
-[CONTEXT.md](CONTEXT.md#seeded-curated-authored-owned). The create and update
-handlers enforce it by refusing to attach a child to a scenario the caller does
-not own.
+one owner** ([CONTEXT.md](CONTEXT.md#seeded--curated--authored--owned)). The
+create and update handlers enforce it by refusing to attach a child to a
+scenario the caller does not own.
 
 That invariant is why containment is cheap. Only two reads filter on ownership —
 `ListCuratedScenarios` and `ListCuratedRouteSummaries`, named for what they
