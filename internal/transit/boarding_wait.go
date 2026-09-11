@@ -106,7 +106,7 @@ func (p BoardingWaitPolicy) resolveInto(windows []FrequencyWindow, kind *string,
 	return nil
 }
 
-func (sg *ServiceGraph) applyBoardingWait(policy BoardingWaitPolicy, windows []FrequencyWindow) error {
+func applyBoardingWait(sg *ServiceGraph, policy BoardingWaitPolicy, windows []FrequencyWindow) error {
 	return policy.resolveInto(windows, &sg.WaitPolicy, &sg.WaitSecs)
 }
 

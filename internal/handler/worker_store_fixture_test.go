@@ -13,19 +13,20 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/andrewcgraves/sparks-effect-contract/store"
 )
 
 // workerStoreEnvelope is the HTTP contract SPA-273 left without a fixture:
-// the cache lookup/put wrappers and the job-transition bodies. The two
-// repositories share no Go code, so the JSON tags on these types are the
-// contract — a renamed field decodes as its zero value and every cache
-// lookup silently misses.
+// the cache lookup/put wrappers and the job-transition bodies. The JSON
+// tags live on the contract store types; a renamed field decodes as its
+// zero value and every cache lookup silently misses.
 type workerStoreEnvelope struct {
-	CacheLookupRequest  cacheLookupRequest  `json:"cache_lookup_request"`
-	CacheLookupResponse cacheLookupResponse `json:"cache_lookup_response"`
-	CachePutRequest     cachePutRequest     `json:"cache_put_request"`
-	JobSucceeded        jobSucceededBody    `json:"job_succeeded"`
-	JobFailed           jobFailedBody       `json:"job_failed"`
+	CacheLookupRequest  store.CacheLookupRequest  `json:"cache_lookup_request"`
+	CacheLookupResponse store.CacheLookupResponse `json:"cache_lookup_response"`
+	CachePutRequest     store.CachePutRequest     `json:"cache_put_request"`
+	JobSucceeded        store.JobSucceededBody    `json:"job_succeeded"`
+	JobFailed           store.JobFailedBody       `json:"job_failed"`
 }
 
 func goldenIsochroneKey() IsochroneKey {

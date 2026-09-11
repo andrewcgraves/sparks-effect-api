@@ -488,7 +488,7 @@ func TestIsochrone_contentType(t *testing.T) {
 }
 
 func TestIsochrone_publishesTheGoldenFixtureMessage(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "routing", "testdata", "message.golden.json"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "contract", "routing", "testdata", "message.golden.json"))
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}

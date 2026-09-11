@@ -5,8 +5,10 @@ doc comment on the speed constants in `internal/geo/geo.go`.*
 
 ## Status
 
-Accepted. SPA-280 proposes to revise the premise, not to discover that this
-was never decided.
+Superseded in part by [ADR-0003](0003-shared-contract-module.md). The routing
+message, the transit-graph types that travel inside it, and the worker-store
+HTTP envelope now live in `github.com/andrewcgraves/sparks-effect-contract`.
+`geo`, `config`, and `logger` remain duplicated, as this decision recorded.
 
 ## Context
 
@@ -29,17 +31,16 @@ tuning knobs anyone has a reason to turn.
 
 ## Consequences
 
-- The queue message is a contract the compiler cannot check. It is pinned by
-  a golden fixture both repositories assert (`internal/routing/testdata/message.golden.json`).
-  SPA-273 added a second: the worker-store HTTP envelope
-  (`internal/handler/testdata/worker-store.golden.json`). `make check-contract`
-  diffs both.
+- The queue message is now a type in the contract module *and* still pinned
+  by the cross-repo golden diff until the worker migrates. The fixtures live
+  at `internal/routing/testdata/message.golden.json` and
+  `internal/handler/testdata/worker-store.golden.json` as well as in the
+  contract module, because the worker still curls those paths.
+  `make check-contract` diffs both.
 - Speed constants, logger field names, and config env-vars are duplicated
-  and can drift; they have.
+  and can drift; they have. ADR-0003 left them duplicated.
 - SPA-273 retired the shared schema. The worker talks HTTP
   (`/api/internal/...`) instead of Postgres, so one of the two crossings
-  this decision named is gone. What still crosses is the message, the
-  worker-store envelope, the geo constants, config, and logger field names.
-- SPA-280 revisits the premise. A versioned Go module is not a third
-  hand-maintained copy; it is a dependency the compiler checks. That work
-  is a deliberate revision of this decision.
+  this decision named is gone.
+- SPA-280 / ADR-0003 is the deliberate revision of this decision for the
+  types that cross the wire.

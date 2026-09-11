@@ -128,7 +128,7 @@ func TestCheckOriginReach_unanswerableWhenThereIsNothingToMeasureAgainst(t *test
 }
 
 func TestCheckOriginReach_coversEveryValidMode(t *testing.T) {
-	for _, mode := range travelModes {
+	for _, mode := range TravelModes() {
 		if !mode.Valid() {
 			t.Fatalf("%q is not a valid mode; fix the test, not the code", mode)
 		}

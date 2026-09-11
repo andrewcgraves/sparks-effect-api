@@ -56,25 +56,27 @@ re-derives `min(headway)/2` itself.
 
 ### The queue contract
 
-The message is a contract between two repositories with no compiler checking
-it ([ADR-0001](docs/adr/0001-api-and-worker-share-no-go-code.md)), so it is
-pinned by a golden fixture — `internal/routing/testdata/message.golden.json` —
-which this repo asserts it produces and the worker repo asserts it consumes.
+The message types live in the nested
+[`sparks-effect-contract`](contract/) module (`routing`, `transit`, `store`) —
+see [ADR-0003](docs/adr/0003-shared-contract-module.md). The queue-message
+golden lives in the contract module and at
+`internal/routing/testdata/message.golden.json` so the worker's
+`check-contract` keeps working.
 
 The worker-store HTTP envelope is a second contract of the same kind:
 `IsochroneKey`, `CachedIsochrone`, and the request/response wrappers the
 worker posts to `/api/internal/...`. A renamed JSON tag decodes as its
 zero value — every cache lookup misses, the response is still `200 OK`,
 and there is no error anywhere to find it by. That envelope is pinned by
+`contract/store/testdata/worker-store.golden.json` and
 `internal/handler/testdata/worker-store.golden.json`. `departs_on` is
 `omitempty` on the wire; the fixture keeps it non-empty so the SPA-269
 field cannot hide.
 
-`make check-contract` (and a CI job of the same name) fetches the worker's
-copies on `main` and diffs both fixtures, so a field added on either
-side turns the other side's pipeline red. It is not part of
-`make dev-workflow`: it needs the network. Those files are the on-the-wire
-shape; a prose copy of them is a third copy and goes stale.
+`make check-contract` (and a CI job of the same name) still fetches the
+worker's copies on `main` and diffs both fixtures; it is not part of
+`make dev-workflow` because it needs the network. A prose copy of a
+fixture is a third copy and goes stale.
 
 The graph travels inline — 2,894 bytes for CA HSR, roughly 30 KB for a large
 authored scenario — so the worker needs no database of its own. Publisher
@@ -494,6 +496,7 @@ docker run -p 8080:8080 sparks-effect-api
 
 ```
 cmd/api/                     entrypoint (main.go)
+contract/                    shared API↔worker wire types (nested module)
 internal/config/             environment-based configuration
 internal/server/             HTTP server and route registration
 internal/handler/            HTTP handlers
@@ -502,17 +505,18 @@ internal/ids/                UUID generation for runtime-created rows
 internal/compile/            in-process compile-job runner (not the routing worker)
 internal/transit/            domain types, TransitGraph compile, seed
 internal/persistence/postgres/  Postgres repository + goose migrations
-internal/routing/            queue message contract + confirm-mode AMQP publisher
+internal/routing/            confirm-mode AMQP publisher (message types live in contract/)
 ```
 
 ## CI
 
 GitHub Actions runs `test`, `vet`, and `lint` on every pull request and on
-pushes to `main`, diffs the golden fixtures against the worker as its own
-job (`make check-contract`), then builds the binary and uploads it as a
-workflow artifact. The contract job needs `GH_CONTRACT_TOKEN` — a PAT
-that can read `sparks-effect-routing-worker` — because that repo is private.
-A push to `main` also builds the Docker image and publishes it to the GitHub
+pushes to `main` (the nested contract module included), diffs the golden
+fixtures against the worker as its own job (`make check-contract`), then
+builds the binary and uploads it as a workflow artifact. The contract job
+needs `GH_CONTRACT_TOKEN` — a PAT that can read
+`sparks-effect-routing-worker` — because that repo is private. A push to
+`main` also builds the Docker image and publishes it to the GitHub
 Container Registry at `ghcr.io/andrewcgraves/sparks-effect-api`, tagged
 `sha-<commit>` (immutable) and `staging` (moving).
 

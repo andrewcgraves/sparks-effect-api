@@ -41,6 +41,10 @@ jobs:
         with:
           version: v2.12.2
 
+      - name: Lint contract
+        run: golangci-lint run ./...
+        working-directory: contract
+
   # The golden fixtures are duplicated in the routing-worker repo. Drift is a
   # contract break, not a test failure — keep this job separate so a red
   # light reads as "the contract moved" rather than "a test broke".
