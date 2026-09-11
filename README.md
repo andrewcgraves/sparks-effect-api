@@ -76,7 +76,7 @@ side turns the other side's pipeline red. It is not part of
 `make dev-workflow`: it needs the network. Those files are the on-the-wire
 shape; a prose copy of them is a third copy and goes stale.
 
-The graph travels inline — ~7 KB for CA HSR, roughly 30 KB for a large
+The graph travels inline — a few kilobytes for CA HSR, roughly 30 KB for a large
 authored scenario — so the worker needs no database of its own. Publisher
 confirms are required: without them the API could insert a routing job, fail to
 publish, and strand it in `queued` while a client polls work no worker will ever
@@ -147,8 +147,9 @@ Until the editor exists, these YAML files are the authoring interface.
 
 `segment_run_times.yaml` holds **run time** only (`run_seconds`; train in
 motion). Dwell is resolved separately at compile time from vehicle × platform
-height (or a per-stop override) and folded into `Edge.Seconds`. See **Run
-time** in [`CONTEXT.md`](CONTEXT.md).
+height (or a per-stop override) and folded into `Edge.Seconds`. `DwellS` is
+the dwell *part* of `Seconds`, not an extra addend. See **Dwell** (and **Run
+time** for the seed-field semantics) in [`CONTEXT.md`](CONTEXT.md).
 
 ### Provenance tiers
 

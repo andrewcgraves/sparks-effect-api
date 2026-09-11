@@ -461,9 +461,11 @@ func TestTravelTimeBetween_brightlineWestRemainsSymmetric(t *testing.T) {
 }
 
 func TestCAHSRTransitGraph_inlinePayloadStaysSmallEnoughThatWorkerNeedsNoDatabase(t *testing.T) {
-	// The queue message carries the TransitGraph inline so the worker needs
-	// no database. A payload that ballooned past this ceiling would want one;
-	// an empty graph would fail the floor.
+	// Ceiling on the compiled TransitGraph JSON — the object that travels
+	// inline on routing.Message.Graph — so the worker needs no database.
+	// Not a pin of a README kilobyte figure, and not a marshal of the
+	// wrapping Message envelope. The floor is "not an empty/missing
+	// graph", not "the full service set is present".
 	store := mustNewStore(t)
 	g, ok := store.Graph("ca-hsr")
 	if !ok {
