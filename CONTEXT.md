@@ -125,7 +125,8 @@ everyday one.
 - **Frequency window** — a `start_time`/`end_time` pair with a headway. A
   service carries a list of them.
 - **Run time** — time in motion, dwell excluded. The intended semantics of a
-  `travel_times.yaml` segment, and what `SegmentTime.RunSeconds` holds.
+  `segment_run_times.yaml` segment (`run_seconds`, and `reverse_run_seconds`
+  when present), and what `SegmentTime.RunSeconds` holds.
 
 ### Interchange
 

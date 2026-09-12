@@ -2,6 +2,7 @@ package transit
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -456,6 +457,31 @@ func TestTravelTimeBetween_brightlineWestRemainsSymmetric(t *testing.T) {
 		if fwd != rev {
 			t.Errorf("%s↔%s: Brightline West should stay symmetric, got %d and %d", p[0], p[1], fwd, rev)
 		}
+	}
+}
+
+func TestCAHSRTransitGraph_inlinePayloadStaysSmallEnoughThatWorkerNeedsNoDatabase(t *testing.T) {
+	// Ceiling on the compiled TransitGraph JSON — the object that travels
+	// inline on routing.Message.Graph — so the worker needs no database.
+	// Not a pin of a README kilobyte figure, and not a marshal of the
+	// wrapping Message envelope. The floor is "not an empty/missing
+	// graph", not "the full service set is present".
+	store := mustNewStore(t)
+	g, ok := store.Graph("ca-hsr")
+	if !ok {
+		t.Fatal("ca-hsr TransitGraph not found")
+	}
+	b, err := json.Marshal(g)
+	if err != nil {
+		t.Fatalf("marshal CA HSR TransitGraph: %v", err)
+	}
+	const (
+		floor   = 4_000
+		ceiling = 16 * 1024
+	)
+	if n := len(b); n < floor || n > ceiling {
+		t.Errorf("CA HSR TransitGraph marshals to %d bytes; want %d–%d so the inline queue payload stays small enough that the worker needs no database",
+			n, floor, ceiling)
 	}
 }
 
