@@ -194,10 +194,10 @@ $(GOLANGCI_LINT):
 tidy:
 	go mod tidy
 
-# check-contract diffs this copy of the routing-message golden fixture
-# against the worker's copy on main. The two repositories share no Go
-# code by design; this file is the contract. A human remembering to copy
-# a file across repositories is not an invariant.
+# check-contract diffs this copy of the two golden fixtures against the
+# worker's copies on main. The two repositories share no Go code by design;
+# these files are the contract. A human remembering to copy a file
+# across repositories is not an invariant.
 #
 # Fetching unpinned `main` is deliberate: what has to hold is agreement
 # with what the other side publishes *now*. A green PR can go red on
@@ -208,9 +208,11 @@ tidy:
 # The worker repo is private, so raw.githubusercontent.com 404s without
 # credentials. When GH_TOKEN (or GITHUB_TOKEN) can read that repo, it is
 # sent as a Bearer token; CI supplies secrets.GH_CONTRACT_TOKEN. Override
-# WORKER_GOLDEN_URL to point at a local file:// copy when testing the
-# diff itself.
-WORKER_GOLDEN_URL ?= https://api.github.com/repos/andrewcgraves/sparks-effect-routing-worker/contents/internal/routing/testdata/message.golden.json?ref=main
+# WORKER_GOLDEN_URL / WORKER_STORE_GOLDEN_URL to point at a local file://
+# copy when testing the diff itself.
+WORKER_REPO := andrewcgraves/sparks-effect-routing-worker
+WORKER_GOLDEN_URL ?= https://api.github.com/repos/$(WORKER_REPO)/contents/internal/routing/testdata/message.golden.json?ref=main
+WORKER_STORE_GOLDEN_URL ?= https://api.github.com/repos/$(WORKER_REPO)/contents/internal/store/testdata/worker-store.golden.json?ref=main
 
 check-contract:
 	@curl -fsSL \
@@ -219,10 +221,20 @@ check-contract:
 		-H "X-GitHub-Api-Version: 2022-11-28" \
 		-o /tmp/worker-message.golden.json \
 		"$(WORKER_GOLDEN_URL)" \
-		|| { echo "failed to fetch the worker's golden fixture from $(WORKER_GOLDEN_URL)" >&2; \
+		|| { echo "failed to fetch the worker's queue-message fixture from $(WORKER_GOLDEN_URL)" >&2; \
 		     echo "if that repo is private, set GH_TOKEN to a token that can read it" >&2; \
 		     exit 1; }
 	diff -u /tmp/worker-message.golden.json internal/routing/testdata/message.golden.json
+	@curl -fsSL \
+		$(if $(or $(GH_TOKEN),$(GITHUB_TOKEN)),-H "Authorization: Bearer $(or $(GH_TOKEN),$(GITHUB_TOKEN))") \
+		-H "Accept: application/vnd.github.raw" \
+		-H "X-GitHub-Api-Version: 2022-11-28" \
+		-o /tmp/worker-store.golden.json \
+		"$(WORKER_STORE_GOLDEN_URL)" \
+		|| { echo "failed to fetch the worker's worker-store fixture from $(WORKER_STORE_GOLDEN_URL)" >&2; \
+		     echo "if that repo is private, set GH_TOKEN to a token that can read it" >&2; \
+		     exit 1; }
+	diff -u /tmp/worker-store.golden.json internal/handler/testdata/worker-store.golden.json
 
 clean:
 	rm -rf $(BUILD_DIR)

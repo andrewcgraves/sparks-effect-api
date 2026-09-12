@@ -41,19 +41,19 @@ jobs:
         with:
           version: v2.12.2
 
-  # The golden fixture is duplicated in the routing-worker repo. Drift is a
+  # The golden fixtures are duplicated in the routing-worker repo. Drift is a
   # contract break, not a test failure — keep this job separate so a red
   # light reads as "the contract moved" rather than "a test broke".
   # A human remembering to copy a file across repositories is not an invariant.
   contract:
-    name: Queue-message contract
+    name: API↔worker contract
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v4
 
-      - name: Diff golden fixture against the worker
+      - name: Diff golden fixtures against the worker
         env:
           GH_TOKEN: ${{ secrets.GH_CONTRACT_TOKEN }}
         run: |
