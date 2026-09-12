@@ -320,25 +320,43 @@ bcrypt-hashed. Sessions expire after `SESSION_TTL_HOURS` (default 24).
 Authentication requires `DATABASE_URL`; with the read-only embedded store the
 auth endpoints answer `503` rather than pretending to work.
 
-### Endpoints
+### Two scenario models
+
+*Scenario* and *service* each name two models: the seeded world model
+(`Scenario`, `Service`) and the authored counterparts (`UserScenario`,
+`UserService`). `/api/me` is the owner-scoped view of the seeded types, not
+the authored ones. The authored surface is `/api/user-scenarios` and
+`/api/services`. `/api/me/services` returns **Services**; `/api/services`
+returns **UserServices**. Both collections are owner-scoped; the model is
+different. The `/api/me` prefix is not the split. See
+[CONTEXT.md](CONTEXT.md#the-one-that-catches-everyone-two-scenarios-two-services)
+for the map.
+
+### Authenticated endpoints
+
+This is the owner-scoped and admin-gated surface, plus login and the
+OptionalAuth snap-stops row — not a full route list, and not the public
+scenario/route reads or `/api/internal/*`.
 
 | Endpoint | Access | Purpose |
 | --- | --- | --- |
 | `POST /api/auth/login` | public | Exchange email + password for a token |
 | `POST /api/auth/logout` | authenticated | Revoke the presented token |
 | `GET /api/auth/me` | authenticated | The caller's identity and admin flag |
-| `GET /api/me/scenarios` | authenticated | Scenarios the caller owns |
-| `GET /api/me/services` | authenticated | Services the caller owns |
+| `GET /api/me/scenarios` | authenticated | Seeded Scenarios the caller owns |
+| `GET /api/me/services` | authenticated | Seeded Services the caller owns, not UserServices |
 | `POST /api/me/routes` | authenticated | Author an alignment of your own |
 | `GET`/`PUT`/`DELETE /api/me/routes/{slug}` | authenticated | Read, edit, or remove one |
-| `POST /api/me/scenarios` | authenticated | Author a scenario of your own |
+| `POST /api/routes/{slug}/snap-stops` | optional | Project stop coordinates onto a route's alignment; public for curated routes, owner-scoped for owned drafts |
+| `POST /api/me/scenarios` | authenticated | Author a seeded scenario of your own |
 | `GET`/`PUT`/`DELETE /api/me/scenarios/{slug}` | authenticated | Read, edit, or remove one |
 | `GET`/`POST /api/me/scenarios/{slug}/stations` | authenticated | Its stations |
 | `PUT`/`DELETE /api/me/scenarios/{slug}/stations/{stationSlug}` | authenticated | Edit or remove one |
 | `GET`/`PUT /api/me/scenarios/{slug}/travel-times` | authenticated | Its segment run times, read and replaced whole |
-| `POST /api/me/services` | authenticated | Author a service inside a scenario you own |
+| `POST /api/me/services` | authenticated | Author a seeded service inside a scenario you own |
 | `GET`/`PUT`/`DELETE /api/me/services/{id}` | authenticated | Read, edit, or remove one |
 | `POST /api/admin/users` | admin | Provision an account |
+| `POST /api/admin/routes` | admin | Ingest a curated alignment |
 | `POST /api/scenarios/{slug}/prerendered-isochrones` | admin | Curate a ready-to-display isochrone for a scenario |
 
 ### Owning the seeded models
@@ -348,10 +366,12 @@ owner means **curated**: the seeded ca-hsr baseline and the admin-ingested
 alignments, served by the public reads and writable only by an admin. An owner
 means someone authored it, and it is theirs.
 
-Authoring works through `/api/me`, and an owned scenario is a real one — give it
-routes, stations, and segment run times and it compiles through the same path
-the baseline does, via `POST /api/scenarios/{slug}/compile`. It just never
-appears on a public surface.
+Authoring the **seeded** models works through `/api/me`, and an owned scenario
+is a real one — give it routes, stations, and segment run times and it compiles
+through the same path the baseline does, via
+`POST /api/scenarios/{slug}/compile`. It just never appears on a public
+surface. The authored `UserScenario` / `UserService` surface is a different
+model; see [Two scenario models](#two-scenario-models).
 
 One invariant holds that together: **a scenario and all of its children share
 one owner** ([CONTEXT.md](CONTEXT.md#seeded--curated--authored--owned)). The
