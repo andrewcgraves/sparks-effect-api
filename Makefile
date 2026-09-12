@@ -58,9 +58,10 @@ build: deps
 run: build
 	$(BUILD_DIR)/$(BINARY_NAME)
 
-# test runs the full suite. The Postgres and RabbitMQ integration tests skip
-# themselves unless TEST_DATABASE_URL / TEST_AMQP_URL are set, so this stays
-# green with neither service running.
+# test runs the full suite, including the nested contract module (`go test`
+# does not recurse into nested modules on its own). The Postgres and RabbitMQ
+# integration tests skip themselves unless TEST_DATABASE_URL / TEST_AMQP_URL
+# are set, so this stays green with neither service running.
 #
 # Deliberately not raced: the detector costs roughly a second of process
 # overhead per test binary and slows the Go code inside them severalfold, which
@@ -68,12 +69,14 @@ run: build
 # It is not skipped, only moved — `make test-race` below, and CI, still run it.
 test: deps
 	go test ./... -cover
+	go test -C contract ./... -cover
 
 # test-race is `test` with the race detector, for when a change touches
 # concurrency (internal/compile and internal/routing above all) and for CI. Run
 # it before pushing anything that adds a goroutine, a channel, or shared state.
 test-race: deps
 	go test ./... -race -cover
+	go test -C contract ./... -race -cover
 
 # test-integration runs the full suite with both backing services' URLs
 # exported, so the integration tests actually execute. Point it at any Postgres
@@ -91,6 +94,7 @@ test-race: deps
 test-integration: deps
 	TEST_DATABASE_URL="$(TEST_DATABASE_URL)" TEST_AMQP_URL="$(TEST_AMQP_URL)" \
 		go test ./... -race -cover
+	go test -C contract ./... -race -cover
 
 # itest brings up a throwaway Postgres and RabbitMQ, runs the integration suite,
 # and tears them down again — the one-command local equivalent of the CI job.
@@ -184,15 +188,18 @@ mq-down:
 
 vet: deps
 	go vet ./...
+	go vet -C contract ./...
 
 lint: $(GOLANGCI_LINT)
 	$(GOLANGCI_LINT) run ./...
+	cd contract && $(GOLANGCI_LINT) run ./...
 
 $(GOLANGCI_LINT):
 	GOBIN=$(GOBIN) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 
 tidy:
 	go mod tidy
+	go mod tidy -C contract
 
 # check-contract diffs this copy of the two golden fixtures against the
 # worker's copies on main. The two repositories share no Go code by design;
@@ -210,6 +217,9 @@ tidy:
 # sent as a Bearer token; CI supplies secrets.GH_CONTRACT_TOKEN. Override
 # WORKER_GOLDEN_URL / WORKER_STORE_GOLDEN_URL to point at a local file://
 # copy when testing the diff itself.
+#
+# Keep the fixtures at these internal/ paths (as well as in contract/) until
+# the worker consumes a tagged module — its check-contract still curls them.
 WORKER_REPO := andrewcgraves/sparks-effect-routing-worker
 WORKER_GOLDEN_URL ?= https://api.github.com/repos/$(WORKER_REPO)/contents/internal/routing/testdata/message.golden.json?ref=main
 WORKER_STORE_GOLDEN_URL ?= https://api.github.com/repos/$(WORKER_REPO)/contents/internal/store/testdata/worker-store.golden.json?ref=main

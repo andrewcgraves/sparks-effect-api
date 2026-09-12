@@ -5,43 +5,11 @@ import (
 	"sort"
 )
 
-type Edge struct {
-	FromSlug      string  `json:"from_slug"`
-	ToSlug        string  `json:"to_slug"`
-	Seconds       int     `json:"seconds"`
-	DwellS        int     `json:"dwell_s,omitempty"`
-	RouteID       string  `json:"route_id,omitempty"`
-	FromChainageM float64 `json:"from_chainage_m,omitempty"`
-	ToChainageM   float64 `json:"to_chainage_m,omitempty"`
-}
-
-func (e Edge) placedOn(routeID string, fromChainageM, toChainageM float64) Edge {
+func placeEdge(e Edge, routeID string, fromChainageM, toChainageM float64) Edge {
 	e.RouteID = routeID
 	e.FromChainageM = fromChainageM
 	e.ToChainageM = toChainageM
 	return e
-}
-
-type ServiceGraph struct {
-	ServiceID  string `json:"service_id"`
-	Edges      []Edge `json:"edges"`
-	WaitSecs   int    `json:"wait_secs"`
-	WaitPolicy string `json:"wait_policy,omitempty"`
-}
-
-type GraphNode struct {
-	Slug       string   `json:"slug"`
-	Lat        float64  `json:"lat"`
-	Lng        float64  `json:"lng"`
-	RoutingLat *float64 `json:"routing_lat,omitempty"`
-	RoutingLng *float64 `json:"routing_lng,omitempty"`
-	Names      []string `json:"names"`
-}
-
-type TransitGraph struct {
-	Services []ServiceGraph `json:"services"`
-	Merge    MergeReport    `json:"merge,omitempty"`
-	Nodes    []GraphNode    `json:"nodes,omitempty"`
 }
 
 func Compile(
@@ -113,7 +81,7 @@ func Compile(
 		if err != nil {
 			return nil, fmt.Errorf("compile: service %q: %w", svc.ID, err)
 		}
-		if err := sg.applyBoardingWait(policy, svc.FrequencyWindows); err != nil {
+		if err := applyBoardingWait(&sg, policy, svc.FrequencyWindows); err != nil {
 			return nil, fmt.Errorf("compile: service %q: %w", svc.ID, err)
 		}
 		for i := 0; i+1 < len(slugs); i++ {
@@ -137,8 +105,8 @@ func Compile(
 			// same two chainages swapped — descending, which nothing that reads
 			// them treats as a special case.
 			if routeID, fromChainageM, toChainageM, placed := placer.place(path); placed {
-				fwd = fwd.placedOn(routeID, fromChainageM, toChainageM)
-				rev = rev.placedOn(routeID, toChainageM, fromChainageM)
+				fwd = placeEdge(fwd, routeID, fromChainageM, toChainageM)
+				rev = placeEdge(rev, routeID, toChainageM, fromChainageM)
 			}
 			sg.Edges = append(sg.Edges, fwd, rev)
 		}

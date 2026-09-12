@@ -3,6 +3,7 @@ module github.com/andrewcgraves/sparks-effect-api
 go 1.25.7
 
 require (
+	github.com/andrewcgraves/sparks-effect-contract v0.0.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/joho/godotenv v1.5.1
 	github.com/pressly/goose/v3 v3.27.2
@@ -23,3 +24,5 @@ require (
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
 )
+
+replace github.com/andrewcgraves/sparks-effect-contract => ./contract

@@ -4,21 +4,12 @@ import (
 	"context"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
+	secontract "github.com/andrewcgraves/sparks-effect-contract/routing"
 )
 
-const SchemaVersion = 1
+type Message = secontract.Message
 
-type Message struct {
-	SchemaVersion int                   `json:"schema_version"`
-	RoutingJobID  string                `json:"routing_job_id"`
-	CompileJobID  string                `json:"compile_job_id"`
-	Graph         *transit.TransitGraph `json:"graph"`
-	Lat           float64               `json:"lat"`
-	Lng           float64               `json:"lng"`
-	BudgetMins    int                   `json:"budget_mins"`
-	Mode          transit.TravelMode    `json:"mode"`
-	TraceID       string                `json:"trace_id"`
-}
+const SchemaVersion = secontract.SchemaVersion
 
 func MessageFor(job transit.RoutingJob, graph *transit.TransitGraph, traceID string) Message {
 	return Message{

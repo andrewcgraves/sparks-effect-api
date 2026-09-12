@@ -20,29 +20,6 @@ func effectiveMergeRadius(offsetA, offsetB float64) float64 {
 
 const NearMissRadiusM = 5 * MergeRadiusM
 
-type StopRef struct {
-	ServiceID string `json:"service_id"`
-	Slug      string `json:"slug"`
-	Name      string `json:"name"`
-}
-
-type StopCluster struct {
-	Key     string    `json:"key"`
-	Names   []string  `json:"names"`
-	Members []StopRef `json:"members"`
-}
-
-type NearMiss struct {
-	A         StopRef `json:"a"`
-	B         StopRef `json:"b"`
-	DistanceM float64 `json:"distance_m"`
-}
-
-type MergeReport struct {
-	Clusters   []StopCluster `json:"clusters,omitempty"`
-	NearMisses []NearMiss    `json:"near_misses,omitempty"`
-}
-
 func MergeColocatedStops(svcs []CompilableService, pairs []InterchangePair) ([]CompilableService, MergeReport, []GraphNode) {
 	stops := flattenStops(svcs)
 	clusters, clusterOf := clusterStops(stops)

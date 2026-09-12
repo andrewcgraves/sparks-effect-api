@@ -5,24 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"time"
+
+	"github.com/andrewcgraves/sparks-effect-contract/store"
 )
 
 var ErrJobNotFound = errors.New("routing job not found")
 
-type IsochroneKey struct {
-	CompileJobID string `json:"compile_job_id"`
-	StationSlug  string `json:"station_slug"`
-	Mode         string `json:"mode"`
-	ContourMins  int    `json:"contour_mins"`
-	DepartsOn    string `json:"departs_on,omitempty"`
-}
-
-type CachedIsochrone struct {
-	Key       IsochroneKey    `json:"key"`
-	Geometry  json.RawMessage `json:"geometry"`
-	TilesetAt time.Time       `json:"tileset_at,omitempty"`
-}
+type IsochroneKey = store.IsochroneKey
+type CachedIsochrone = store.CachedIsochrone
 
 type WorkerStore interface {
 	MarkRoutingJobRunning(ctx context.Context, id string) error
@@ -38,9 +28,9 @@ func WorkerReady() http.HandlerFunc {
 	}
 }
 
-func WorkerMarkRunning(store WorkerStore) http.HandlerFunc {
+func WorkerMarkRunning(ws WorkerStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if err := store.MarkRoutingJobRunning(r.Context(), r.PathValue("id")); err != nil {
+		if err := ws.MarkRoutingJobRunning(r.Context(), r.PathValue("id")); err != nil {
 			writeWorkerStoreError(r, w, "marking routing job running", err)
 			return
 		}
@@ -48,18 +38,14 @@ func WorkerMarkRunning(store WorkerStore) http.HandlerFunc {
 	}
 }
 
-type jobSucceededBody struct {
-	Result json.RawMessage `json:"result"`
-}
-
-func WorkerMarkSucceeded(store WorkerStore) http.HandlerFunc {
+func WorkerMarkSucceeded(ws WorkerStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var body jobSucceededBody
+		var body store.JobSucceededBody
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			writeError(w, http.StatusBadRequest, "malformed request body")
 			return
 		}
-		if err := store.SucceedRoutingJob(r.Context(), r.PathValue("id"), body.Result); err != nil {
+		if err := ws.SucceedRoutingJob(r.Context(), r.PathValue("id"), body.Result); err != nil {
 			writeWorkerStoreError(r, w, "marking routing job succeeded", err)
 			return
 		}
@@ -67,18 +53,14 @@ func WorkerMarkSucceeded(store WorkerStore) http.HandlerFunc {
 	}
 }
 
-type jobFailedBody struct {
-	Error string `json:"error"`
-}
-
-func WorkerMarkFailed(store WorkerStore) http.HandlerFunc {
+func WorkerMarkFailed(ws WorkerStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var body jobFailedBody
+		var body store.JobFailedBody
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			writeError(w, http.StatusBadRequest, "malformed request body")
 			return
 		}
-		if err := store.FailRoutingJob(r.Context(), r.PathValue("id"), body.Error); err != nil {
+		if err := ws.FailRoutingJob(r.Context(), r.PathValue("id"), body.Error); err != nil {
 			writeWorkerStoreError(r, w, "marking routing job failed", err)
 			return
 		}
@@ -86,53 +68,36 @@ func WorkerMarkFailed(store WorkerStore) http.HandlerFunc {
 	}
 }
 
-type cacheLookupRequest struct {
-	Keys []IsochroneKey `json:"keys"`
-}
-
-type cacheLookupEntry struct {
-	Key      IsochroneKey    `json:"key"`
-	Geometry json.RawMessage `json:"geometry"`
-}
-
-type cacheLookupResponse struct {
-	Entries []cacheLookupEntry `json:"entries"`
-}
-
-func WorkerCacheLookup(store WorkerStore) http.HandlerFunc {
+func WorkerCacheLookup(ws WorkerStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var body cacheLookupRequest
+		var body store.CacheLookupRequest
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			writeError(w, http.StatusBadRequest, "malformed request body")
 			return
 		}
-		found, err := store.GetIsochroneCache(r.Context(), body.Keys)
+		found, err := ws.GetIsochroneCache(r.Context(), body.Keys)
 		if err != nil {
 			writeInternalError(r.Context(), w, "reading isochrone cache", err)
 			return
 		}
-		out := cacheLookupResponse{Entries: []cacheLookupEntry{}}
+		out := store.CacheLookupResponse{Entries: []store.CacheLookupEntry{}}
 		for _, k := range body.Keys {
 			if geom, ok := found[k]; ok {
-				out.Entries = append(out.Entries, cacheLookupEntry{Key: k, Geometry: geom})
+				out.Entries = append(out.Entries, store.CacheLookupEntry{Key: k, Geometry: geom})
 			}
 		}
 		writeJSON(w, http.StatusOK, out)
 	}
 }
 
-type cachePutRequest struct {
-	Entries []CachedIsochrone `json:"entries"`
-}
-
-func WorkerCachePut(store WorkerStore) http.HandlerFunc {
+func WorkerCachePut(ws WorkerStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var body cachePutRequest
+		var body store.CachePutRequest
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			writeError(w, http.StatusBadRequest, "malformed request body")
 			return
 		}
-		if err := store.PutIsochroneCache(r.Context(), body.Entries); err != nil {
+		if err := ws.PutIsochroneCache(r.Context(), body.Entries); err != nil {
 			writeInternalError(r.Context(), w, "writing isochrone cache", err)
 			return
 		}

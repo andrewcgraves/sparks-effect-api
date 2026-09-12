@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -48,6 +49,19 @@ func testQueue(t *testing.T, url string) string {
 	return name
 }
 
+func goldenMessage(t *testing.T) routing.Message {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "..", "contract", "routing", "testdata", "message.golden.json"))
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	var msg routing.Message
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		t.Fatalf("unmarshal fixture: %v", err)
+	}
+	return msg
+}
+
 func consumeOne(t *testing.T, url, queue string) []byte {
 	t.Helper()
 	conn, err := amqp.Dial(url)
@@ -81,7 +95,7 @@ func TestIntegration_PublishedMessageMatchesTheFixture(t *testing.T) {
 	pub := routing.NewAMQPPublisher(url, queue, logger.Discard())
 	defer pub.Close()
 
-	if err := pub.Publish(context.Background(), goldenMessage()); err != nil {
+	if err := pub.Publish(context.Background(), goldenMessage(t)); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 
@@ -90,7 +104,7 @@ func TestIntegration_PublishedMessageMatchesTheFixture(t *testing.T) {
 		t.Fatalf("unmarshal delivered body: %v", err)
 	}
 
-	want, err := json.Marshal(goldenMessage())
+	want, err := json.Marshal(goldenMessage(t))
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
@@ -108,7 +122,7 @@ func TestIntegration_PublishFailsWhenTheBrokerIsUnreachable(t *testing.T) {
 	pub := routing.NewAMQPPublisher("amqp://guest:guest@127.0.0.1:1/", "unused", logger.Discard())
 	defer pub.Close()
 
-	err := pub.Publish(context.Background(), goldenMessage())
+	err := pub.Publish(context.Background(), goldenMessage(t))
 	if err == nil {
 		t.Fatal("Publish reported success with no broker to publish to")
 	}
@@ -121,14 +135,14 @@ func TestIntegration_PublisherReconnectsAfterItsConnectionDrops(t *testing.T) {
 	pub := routing.NewAMQPPublisher(url, queue, logger.Discard())
 	defer pub.Close()
 
-	if err := pub.Publish(context.Background(), goldenMessage()); err != nil {
+	if err := pub.Publish(context.Background(), goldenMessage(t)); err != nil {
 		t.Fatalf("first Publish: %v", err)
 	}
 	// Close drops the underlying connection exactly as a broker restart would,
 	// leaving the publisher holding a dead channel.
 	pub.Close()
 
-	if err := pub.Publish(context.Background(), goldenMessage()); err != nil {
+	if err := pub.Publish(context.Background(), goldenMessage(t)); err != nil {
 		t.Fatalf("Publish after the connection dropped: %v", err)
 	}
 

@@ -13,19 +13,20 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/andrewcgraves/sparks-effect-contract/store"
 )
 
 // workerStoreEnvelope is the HTTP contract SPA-273 left without a fixture:
-// the cache lookup/put wrappers and the job-transition bodies. The two
-// repositories share no Go code, so the JSON tags on these types are the
-// contract — a renamed field decodes as its zero value and every cache
-// lookup silently misses.
+// the cache lookup/put wrappers and the job-transition bodies. The JSON
+// tags live on the contract store types; a renamed field decodes as its
+// zero value and every cache lookup silently misses.
 type workerStoreEnvelope struct {
-	CacheLookupRequest  cacheLookupRequest  `json:"cache_lookup_request"`
-	CacheLookupResponse cacheLookupResponse `json:"cache_lookup_response"`
-	CachePutRequest     cachePutRequest     `json:"cache_put_request"`
-	JobSucceeded        jobSucceededBody    `json:"job_succeeded"`
-	JobFailed           jobFailedBody       `json:"job_failed"`
+	CacheLookupRequest  store.CacheLookupRequest  `json:"cache_lookup_request"`
+	CacheLookupResponse store.CacheLookupResponse `json:"cache_lookup_response"`
+	CachePutRequest     store.CachePutRequest     `json:"cache_put_request"`
+	JobSucceeded        store.JobSucceededBody    `json:"job_succeeded"`
+	JobFailed           store.JobFailedBody       `json:"job_failed"`
 }
 
 func goldenIsochroneKey() IsochroneKey {
@@ -53,24 +54,38 @@ func goldenEnvelope() workerStoreEnvelope {
 	key := goldenIsochroneKey()
 	geom := goldenGeometry()
 	return workerStoreEnvelope{
-		CacheLookupRequest: cacheLookupRequest{Keys: []IsochroneKey{key}},
-		CacheLookupResponse: cacheLookupResponse{
-			Entries: []cacheLookupEntry{{Key: key, Geometry: geom}},
+		CacheLookupRequest: store.CacheLookupRequest{Keys: []IsochroneKey{key}},
+		CacheLookupResponse: store.CacheLookupResponse{
+			Entries: []store.CacheLookupEntry{{Key: key, Geometry: geom}},
 		},
-		CachePutRequest: cachePutRequest{
+		CachePutRequest: store.CachePutRequest{
 			Entries: []CachedIsochrone{{
 				Key:       key,
 				Geometry:  geom,
 				TilesetAt: goldenTilesetAt(),
 			}},
 		},
-		JobSucceeded: jobSucceededBody{Result: geom},
-		JobFailed:    jobFailedBody{Error: "valhalla unreachable"},
+		JobSucceeded: store.JobSucceededBody{Result: geom},
+		JobFailed:    store.JobFailedBody{Error: "valhalla unreachable"},
 	}
 }
 
 func workerStoreGoldenPath() string {
 	return filepath.Join("testdata", "worker-store.golden.json")
+}
+
+func TestWorkerStoreGolden_matchesContractModuleCopy(t *testing.T) {
+	local, err := os.ReadFile(workerStoreGoldenPath())
+	if err != nil {
+		t.Fatalf("read internal copy: %v", err)
+	}
+	canonical, err := os.ReadFile("../../contract/store/testdata/worker-store.golden.json")
+	if err != nil {
+		t.Fatalf("read contract copy: %v", err)
+	}
+	if !bytes.Equal(local, canonical) {
+		t.Error("internal/handler/testdata/worker-store.golden.json drifted from contract/store/testdata/worker-store.golden.json — check-contract curls the internal/ path")
+	}
 }
 
 func TestWorkerStoreEnvelope_matchesGoldenFixture(t *testing.T) {
@@ -228,7 +243,7 @@ func TestWorkerJobTransitions_acceptTheGoldenEnvelope(t *testing.T) {
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("succeeded status = %d, want 204; body %s", rec.Code, rec.Body.String())
 	}
-	if !bytes.Equal(store.result, env.JobSucceeded.Result) {
+	if !bytes.Equal(compactJSON(t, store.result), compactJSON(t, env.JobSucceeded.Result)) {
 		t.Errorf("result = %s, want %s", store.result, env.JobSucceeded.Result)
 	}
 

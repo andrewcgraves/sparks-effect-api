@@ -1,17 +1,17 @@
 package transit
 
-import "container/heap"
+import (
+	"container/heap"
+
+	segraph "github.com/andrewcgraves/sparks-effect-contract/transit"
+)
 
 // Test-only surface. These types and adapters used to be the package's public
 // isochrone API; production stopped computing isochrones in SPA-182. They
 // remain so the equivalence test can compare the embedded store against a
 // compiled graph. go doc of this package does not include this file.
 
-type Node struct {
-	Slug string
-	Lat  float64
-	Lng  float64
-}
+type Node = segraph.Node
 
 type IsochroneData interface {
 	Nodes(scenarioSlug string) ([]Node, bool)
