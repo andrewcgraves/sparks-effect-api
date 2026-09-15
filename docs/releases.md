@@ -105,20 +105,30 @@ shape is two pipelines:
 | API staging | `main` publishes `sha-<commit>` + `:staging` | short SHA |
 | API production | a `vMAJOR.MINOR.PATCH` tag promotes that image as `:prd` | the git tag |
 
-The action scans commits since the last release in **that** pipeline, pulls
-`SPA-123` identifiers out of subjects and squash messages (`SPA-258: … (#69)`),
-and attaches those issues to the new release. An issue that merged to `main`
-shows up on API staging immediately; it only appears on API production when a
-tag that contains it is promoted.
+The action pulls `SPA-123` identifiers out of subjects and squash messages
+(`SPA-258: … (#69)`) and attaches those issues to the new release. Staging
+scans commits since the last **Linear** release in the staging pipeline
+(every `main` publish). Production scans `<previous git tag>..<promoted tag>`:
+the exclusive lower bound is the previous `vMAJOR.MINOR.PATCH` tag reachable
+from the promoted commit, so a production release records every issue that
+landed since the last tag went to production — including when the Linear
+pipeline has no prior release of its own. The first production tag, with no
+previous git tag to bound from, still uses Linear's automatic baseline.
+
+An issue that merged to `main` shows up on API staging immediately; it only
+appears on API production when a tag that contains it is promoted.
 
 Create both pipelines in Linear (Settings → Releases), generate an access key
-per pipeline, and paste them into the secrets in the table above. The first
-sync in each pipeline only sees the current commit — there is no previous SHA
-to bound the range from.
+per pipeline, and paste them into the secrets in the table above.
 
-To backfill an already-promoted tag, re-run **Release** (*Run workflow*) with
-that tag and `base_ref` set to the previous release tag. Linear scans
-`<base_ref>..HEAD` exclusively, so `v0.2.0` with `base_ref=v0.1.0` attaches
-every `SPA-` issue in that range rather than only HEAD. A rollback
-(re-promoting an older tag) does not rewrite Linear history: the original
-production release stays as the one that first shipped those issues.
+To override the production scan range (for example to sweep from `v0.1.0`),
+re-run **Release** (*Run workflow*) with that tag and `base_ref` set. Linear
+scans `<base_ref>..HEAD` exclusively. Leave `base_ref` empty to use the
+previous git tag.
+
+To re-record Linear for an already-promoted tag without moving `:prd`, re-run
+**Release** with `linear_only` checked. Required reviewers on the GitHub
+`production` environment may still fire because the Linear key lives there.
+A rollback (re-promoting an older tag without `linear_only`) does not rewrite
+Linear history: the original production release stays as the one that first
+shipped those issues.
