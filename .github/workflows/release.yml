@@ -17,9 +17,14 @@ on:
         required: true
         type: string
       base_ref:
-        description: "Optional exclusive git ref for Linear's commit scan (e.g. v0.1.0). Leave empty to use the last Linear release in the production pipeline."
+        description: "Optional exclusive git ref for Linear's commit scan (e.g. v0.1.0). Leave empty to scan from the previous git tag."
         required: false
         type: string
+      linear_only:
+        description: "Skip image re-tag and Railway redeploy; only re-sync Linear for this tag."
+        required: false
+        type: boolean
+        default: false
 
 # Two promotions racing would leave `:prd` pointing at whichever re-tag landed
 # last rather than whichever was asked for last.
@@ -80,6 +85,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Log in to GitHub Container Registry
+        if: github.event.inputs.linear_only != 'true'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -87,6 +93,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Re-tag that commit's image as prd
+        if: github.event.inputs.linear_only != 'true'
         env:
           IMAGE: ghcr.io/${{ github.repository }}
           TAG: ${{ steps.target.outputs.tag }}
@@ -112,6 +119,7 @@ jobs:
       # with a notice when the credential is not set, rather than failing a
       # promotion that did in fact re-tag the image.
       - name: Redeploy the production Railway service
+        if: github.event.inputs.linear_only != 'true'
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           RAILWAY_SERVICE: ${{ vars.RAILWAY_SERVICE }}
@@ -160,8 +168,41 @@ jobs:
             echo "configured=true" >> "$GITHUB_OUTPUT"
           fi
 
+      # Operator base_ref wins. Otherwise the exclusive lower bound is the
+      # previous vMAJOR.MINOR.PATCH tag, so a production release records every
+      # issue since the last tag went to production — including when Linear
+      # has no prior release SHA of its own. See docs/releases.md.
+      #
+      # Two Linear steps because `base_ref` has no "unset" value once written
+      # — passing it empty would scan from nothing rather than letting Linear
+      # pick its automatic baseline (the true first tag, with no previous git
+      # tag to bound from).
+      - name: Resolve Linear scan base
+        id: scan
+        env:
+          OVERRIDE: ${{ github.event.inputs.base_ref }}
+          SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --tags --force origin
+
+          if [[ -n "${OVERRIDE:-}" ]]; then
+            echo "base_ref=${OVERRIDE}" >> "$GITHUB_OUTPUT"
+            echo "Using dispatch base_ref ${OVERRIDE}"
+            exit 0
+          fi
+
+          prev="$(git describe --tags --abbrev=0 --match 'v[0-9]*' "${SHA}^" 2>/dev/null || true)"
+          if [[ -n "$prev" ]]; then
+            echo "base_ref=${prev}" >> "$GITHUB_OUTPUT"
+            echo "Scanning from previous tag ${prev}"
+          else
+            echo "base_ref=" >> "$GITHUB_OUTPUT"
+            echo "No previous tag — Linear will use its automatic baseline"
+          fi
+
       - name: Sync Linear production release
-        if: steps.linear.outputs.configured == 'true' && (github.event_name != 'workflow_dispatch' || github.event.inputs.base_ref == '')
+        if: steps.linear.outputs.configured == 'true' && steps.scan.outputs.base_ref == ''
         uses: linear/linear-release-action@v0
         with:
           access_key: ${{ secrets.LINEAR_ACCESS_KEY_PRODUCTION }}
@@ -173,13 +214,13 @@ jobs:
             Image=https://github.com/${{ github.repository }}/pkgs/container/sparks-effect-api
 
       - name: Sync Linear production release with explicit scan base
-        if: steps.linear.outputs.configured == 'true' && github.event_name == 'workflow_dispatch' && github.event.inputs.base_ref != ''
+        if: steps.linear.outputs.configured == 'true' && steps.scan.outputs.base_ref != ''
         uses: linear/linear-release-action@v0
         with:
           access_key: ${{ secrets.LINEAR_ACCESS_KEY_PRODUCTION }}
           name: ${{ steps.target.outputs.tag }}
           version: ${{ steps.target.outputs.tag }}
-          base_ref: ${{ github.event.inputs.base_ref }}
+          base_ref: ${{ steps.scan.outputs.base_ref }}
           links: |
             Commit=${{ github.server_url }}/${{ github.repository }}/commit/${{ steps.target.outputs.sha }}
             CI run=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -191,11 +232,25 @@ jobs:
           TAG: ${{ steps.target.outputs.tag }}
           SHA: ${{ steps.target.outputs.sha }}
           SHORT: ${{ steps.target.outputs.short }}
+          LINEAR_ONLY: ${{ github.event.inputs.linear_only }}
+          BASE_REF: ${{ steps.scan.outputs.base_ref }}
         run: |
           {
-            echo "### Promoted \`$TAG\` to production"
-            echo
-            echo "- commit: \`$SHA\`"
-            echo "- image: \`$IMAGE:sha-$SHORT\`"
-            echo "- now also tagged: \`:prd\`, \`:$TAG\`"
+            if [[ "${LINEAR_ONLY:-}" == "true" ]]; then
+              echo "### Recorded \`$TAG\` in Linear"
+              echo
+              echo "- commit: \`$SHA\`"
+              echo "- image left alone: \`$IMAGE:sha-$SHORT\` (\`:prd\` not moved)"
+            else
+              echo "### Promoted \`$TAG\` to production"
+              echo
+              echo "- commit: \`$SHA\`"
+              echo "- image: \`$IMAGE:sha-$SHORT\`"
+              echo "- now also tagged: \`:prd\`, \`:$TAG\`"
+            fi
+            if [[ -n "${BASE_REF:-}" ]]; then
+              echo "- Linear scan: \`${BASE_REF}..HEAD\`"
+            else
+              echo "- Linear scan: automatic baseline (no previous git tag)"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
