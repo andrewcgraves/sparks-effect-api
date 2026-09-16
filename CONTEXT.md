@@ -228,6 +228,12 @@ three it covers only the access and egress legs — how a rider reaches and leav
 an authored station. The ride along the authored line is physics-compiled in this
 repository and never routed, so no mode applies to it.
 
+What the resulting surface *claims*, and what the time reported against it
+means, is settled in
+[ADR-0004](docs/adr/0004-transit-isochrone-claim-and-reported-time.md): a
+representative weekday morning, and door-to-door elapsed time with the wait to
+board included.
+
 ## Machine contract
 
 Codes and statuses that clients and the worker match on literally. Changing one
