@@ -2,6 +2,8 @@ module github.com/andrewcgraves/sparks-effect-api
 
 go 1.25.7
 
+toolchain go1.25.14
+
 require (
 	github.com/andrewcgraves/sparks-effect-contract v0.0.0
 	github.com/jackc/pgx/v5 v5.10.0
