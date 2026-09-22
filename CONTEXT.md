@@ -49,8 +49,22 @@ One more overload, on the same models. Every seeded-model row (`scenarios`,
   admin. **Seeded** is the narrower word for the subset that ships embedded in
   the binary under `internal/transit/data/scenarios/`.
 - **Owned** / **authored** — `owner_id` set. Someone made it; it is theirs; it
-  never appears on a public surface. The two words are interchangeable, and
-  "authored" is preferred in prose.
+  never appears on a public surface unless it is published. The two words are
+  interchangeable, and "authored" is preferred in prose.
+- **Published** — an authored `UserService` that has a **publication**: a frozen
+  snapshot of a specific succeeded compile job plus copies of its name,
+  `subtext`, description and route geometry, taken when the owner published it.
+  Public reads of it serve the publication and never the **draft** — the live,
+  editable row the owner keeps working on — so an edit stays invisible until it
+  is republished. **Unpublishing** deletes the publication. Only a `UserService`
+  can be published today; a curated row is public without being published, and
+  `scenarios.status` is dead data unrelated to any of this. Not to be confused
+  with the routing worker's *publication* of a queue message — the same idea one
+  level down, and in this repository spelled *enqueue*. See
+  [ADR-0005](docs/adr/0005-publishing-an-authored-service.md).
+
+**Public** is the adjective for what anyone may read: curated rows, and
+publications.
 
 **A scenario and all of its children share one owner.** A curated scenario has
 curated children; an owned scenario's routes, stations, services and segments
@@ -196,7 +210,9 @@ through a node both of them touch.
   is, and is what the map, the route geometry and the record show.
 - **Slug** — the URL-safe identity a model is addressed by. Slugs are **globally
   unique across curated and owned rows**, which is why by-slug reads cannot
-  filter on ownership and check it themselves instead. Two minting functions
+  filter on ownership and check it themselves instead. A slug is minted once, at
+  create, and **never re-minted** — not on rename, not on publish — so a renamed
+  service's title and URL diverge on purpose. Two minting functions
   exist and are not interchangeable: `route.Slugify` and `transit.Slugify`, the
   latter truncating at 80 characters and therefore not idempotent at the margin —
   re-slugifying an already-suffixed slug can cut off the suffix that made it
@@ -248,8 +264,8 @@ Returned as the `code` field of an error body.
 | `origin_out_of_range` | 422 | The origin cannot reach any station within the budget, by straight-line [reach](#reach-and-routing). Detail carries `nearest_station_slug`, `nearest_station_km`, `max_reach_km` |
 | `backlog_full` | 429 | `MAX_INFLIGHT_ISOCHRONES` routing jobs are already in flight. Carries `Retry-After` |
 | `stop_placement` | 422 | A stop is off-route or out of chainage order. Detail carries the fault kind, route slug, threshold and the offending stops |
-| `stale_graph` | 409 | The compiled graph no longer matches its inputs; recompile and retry |
-| `publish_failed` | 502 | The routing job row exists but could not be published to the queue, so it was marked failed immediately rather than being stranded in `queued` |
+| `stale_graph` | 409 | The compiled graph no longer matches its inputs; recompile and retry. Also the answer to publishing a service with no succeeded, non-stale compile |
+| `publish_failed` | 502 | The routing job row exists but could not be published to the queue, so it was marked failed immediately rather than being stranded in `queued`. The queue sense only — publishing a service never answers it |
 
 ### Job status
 
@@ -266,7 +282,7 @@ stops a late worker from reviving it.
 
 | Repository | Owns |
 | --- | --- |
-| [`sparks-effect-routing-worker`](https://github.com/andrewcgraves/sparks-effect-routing-worker/blob/main/CONTEXT.md) | Chain vocabulary: chaining, access and egress legs, starter station and starter walk, reached vs reachable, journey, leg, publication, the departure clock |
+| [`sparks-effect-routing-worker`](https://github.com/andrewcgraves/sparks-effect-routing-worker/blob/main/CONTEXT.md) | Chain vocabulary: chaining, access and egress legs, starter station and starter walk, reached vs reachable, journey, leg, publication (of a queue message — a service's publication is defined here), the departure clock |
 | [`sparks-effect-website`](https://github.com/andrewcgraves/sparks-effect-website/blob/trunk/CONTEXT.md) | The time-remaining graph: view, lane, through, fork |
 | [`kustomize-config`](https://github.com/andrewcgraves/kustomize-config/blob/main/CONTEXT.md) | Deployment vocabulary: overlay, pin, generation, cycling the map, tileset |
 
@@ -277,3 +293,5 @@ and is not to be re-litigated on the strength of a name.
 - [ADR-0001 — The API and worker share no Go code](docs/adr/0001-api-and-worker-share-no-go-code.md)
 - [ADR-0002 — Seeded rows reconcile from YAML at boot](docs/adr/0002-seed-reconciliation.md)
 - [ADR-0003 — Shared contract module for API↔worker wire types](docs/adr/0003-shared-contract-module.md)
+- [ADR-0004 — What a transit isochrone claims, and what a reported access time means](docs/adr/0004-transit-isochrone-claim-and-reported-time.md)
+- [ADR-0005 — What publishing an authored service means, and where it lives](docs/adr/0005-publishing-an-authored-service.md)
