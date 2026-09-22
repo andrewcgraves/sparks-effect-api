@@ -125,13 +125,23 @@ total work is what it is for. Per-caller fairness is a separate check, below.
 The expensive POST routes also carry an in-process token bucket (SPA-220),
 keyed by client IP and, when a session is present, user id. The client IP is
 taken from `X-Forwarded-For` by skipping `TRUSTED_PROXY_COUNT` hops from the
-right and treating `RemoteAddr` as the last hop, so a spoofed leftmost entry
-cannot pick the bucket. Railway sits behind one reverse-proxy hop; the
-production default is therefore 1. `0` ignores the header and uses `RemoteAddr`
-only — the right setting for a process that is not behind a proxy.
+right of every `X-Forwarded-For` value plus `RemoteAddr` (the TCP peer). A
+spoofed leftmost entry cannot pick the bucket; too high a count walks into
+those spoofed values — if buckets look shared across users, try 2, do not
+keep raising. Do not switch to leftmost `X-Forwarded-For`: Railway's hop
+count has drifted (a CDN/Fastly hop may appear; `X-Real-IP` is documented
+but has been the Fastly POP), and leftmost is client-controlled.
+
+Railway sits behind one reverse-proxy hop; the production `Load()` default
+is therefore 1. `0` ignores the header and uses `RemoteAddr` only — the
+right setting for a process that is not behind a proxy (set
+`TRUSTED_PROXY_COUNT=0` locally). When the count is at least 1 and
+`X-Forwarded-For` is empty, a valid `X-Real-IP` is used as a single hop; it
+is ignored when `X-Forwarded-For` is present.
 
 A refused request answers `429` with the `rate_limited` code and `Retry-After`.
-The four policies, overridable by env and disabled at 0, are:
+The four policies, overridable by env, are disabled only by `PER_MIN=0`
+(a zero burst is ignored and keeps the default burst):
 
 | Policy | Routes | Default |
 | --- | --- | --- |

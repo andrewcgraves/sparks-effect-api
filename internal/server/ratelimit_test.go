@@ -243,18 +243,47 @@ func TestRateLimitSpoofedXFFSharesTheRealClientBucket(t *testing.T) {
 }
 
 func TestAuthoredIsochronesStill401BeforeTheRateLimit(t *testing.T) {
-	h := newRateLimitedServer(t, newStubDeps(), config.Config{
-		RateLimitIsochrone: tinyPolicy(),
-	})
-
 	for _, path := range []string{
 		"/api/services/some-slug/isochrone",
 		"/api/user-scenarios/some-slug/isochrone",
 	} {
 		t.Run(path, func(t *testing.T) {
-			rec := request(t, h, http.MethodPost, path, "", isochroneBody)
-			if rec.Code != http.StatusUnauthorized {
-				t.Errorf("status = %d, want 401; body %s", rec.Code, rec.Body.String())
+			h := newRateLimitedServer(t, newStubDeps(), config.Config{
+				RateLimitIsochrone: tinyPolicy(),
+			})
+			for i := 0; i < 5; i++ {
+				rec := request(t, h, http.MethodPost, path, "", isochroneBody)
+				if rec.Code != http.StatusUnauthorized {
+					t.Fatalf("anonymous %d: status = %d, want 401; body %s", i, rec.Code, rec.Body.String())
+				}
+			}
+			authed := request(t, h, http.MethodPost, path, userToken, isochroneBody)
+			if authed.Code == http.StatusTooManyRequests {
+				t.Errorf("authenticated request was 429 after anonymous 401s; 401 must not consume the IP bucket")
+			}
+		})
+	}
+}
+
+func TestAuthoredCompilesStill401BeforeTheRateLimit(t *testing.T) {
+	for _, path := range []string{
+		"/api/scenarios/ca-hsr/compile",
+		"/api/services/some-slug/compile",
+		"/api/user-scenarios/some-slug/compile",
+	} {
+		t.Run(path, func(t *testing.T) {
+			h := newRateLimitedServer(t, newStubDeps(), config.Config{
+				RateLimitCompile: tinyPolicy(),
+			})
+			for i := 0; i < 5; i++ {
+				rec := request(t, h, http.MethodPost, path, "", "")
+				if rec.Code != http.StatusUnauthorized {
+					t.Fatalf("anonymous %d: status = %d, want 401; body %s", i, rec.Code, rec.Body.String())
+				}
+			}
+			authed := request(t, h, http.MethodPost, path, userToken, "")
+			if authed.Code == http.StatusTooManyRequests {
+				t.Errorf("authenticated request was 429 after anonymous 401s; 401 must not consume the IP bucket")
 			}
 		})
 	}

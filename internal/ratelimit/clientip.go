@@ -20,17 +20,42 @@ func FromRequest(r *http.Request, trustedProxyCount int) string {
 		trustedProxyCount = 0
 	}
 	remote := hostFromRemoteAddr(r.RemoteAddr)
-	// The chain is X-Forwarded-For (left = original client, right = most
-	// recent proxy) followed by RemoteAddr, which is the TCP peer that
-	// actually connected to us. We do not read X-Real-IP: it is a single
-	// spoofable value with no hop list to walk.
+	if trustedProxyCount == 0 {
+		// Zero ignores forwarded headers: the only spoof-proof setting when
+		// nothing trusted sits in front of us. Local .env.example uses 0;
+		// production Load() defaults to 1 for Railway's reverse proxy.
+		if remote != "" {
+			return remote
+		}
+		return "unknown"
+	}
+
+	// The chain is every X-Forwarded-For value (RFC 7230 concatenates
+	// duplicate header lines into one comma list; Header.Get would keep
+	// only the first, which a client can spoof) followed by RemoteAddr,
+	// the TCP peer that actually connected to us. Left is the original
+	// client, right is the most recent hop.
 	//
-	// TRUSTED_PROXY_COUNT is how many addresses to skip from the right.
-	// Railway terminates TLS at one reverse proxy, so production Load()
-	// defaults the count to 1: the client is one hop left of RemoteAddr.
-	// Zero means ignore X-Forwarded-For entirely — the only spoof-proof
-	// setting when nothing trusted sits in front of us.
-	chain := parseXFF(r.Header.Get("X-Forwarded-For"))
+	// We skip N hops from the right. Railway's hop count has drifted: a
+	// CDN/Fastly layer may add a hop, and X-Real-IP is documented but has
+	// been the Fastly POP. Too high an N walks into spoofed leftmost
+	// values — if buckets look shared across users, try 2, do not keep
+	// raising. Leftmost-XFF is not the selector: a client-controlled
+	// leftmost entry must not pick the bucket.
+	//
+	// When N is larger than the chain, fall back to RemoteAddr rather
+	// than clamping onto chain[0]. A single XFF entry at count=1 is
+	// still the client: chain=[xff, remote], idx=0, XFF replaces the
+	// proxy. That is computed 0, not a clamp.
+	chain := parseXFF(strings.Join(r.Header.Values("X-Forwarded-For"), ","))
+	if len(chain) == 0 {
+		// Railway's documented single-value header, overwritten at the
+		// edge. Used only when XFF is empty so a Fastly-bugged X-Real-IP
+		// cannot override a correct XFF walk.
+		if ip := parseSingleIP(r.Header.Get("X-Real-IP")); ip != "" {
+			chain = append(chain, ip)
+		}
+	}
 	if remote != "" {
 		chain = append(chain, remote)
 	}
@@ -39,7 +64,10 @@ func FromRequest(r *http.Request, trustedProxyCount int) string {
 	}
 	idx := len(chain) - 1 - trustedProxyCount
 	if idx < 0 {
-		idx = 0
+		if remote != "" {
+			return remote
+		}
+		return "unknown"
 	}
 	return chain[idx]
 }
@@ -50,20 +78,27 @@ func parseXFF(header string) []string {
 	}
 	var out []string
 	for _, part := range strings.Split(header, ",") {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
+		if ip := parseSingleIP(part); ip != "" {
+			out = append(out, ip)
 		}
-		if host, _, err := net.SplitHostPort(part); err == nil {
-			part = host
-		}
-		part = strings.Trim(part, "[]")
-		if net.ParseIP(part) == nil {
-			continue
-		}
-		out = append(out, part)
 	}
 	return out
+}
+
+func parseSingleIP(part string) string {
+	part = strings.TrimSpace(part)
+	if part == "" {
+		return ""
+	}
+	if host, _, err := net.SplitHostPort(part); err == nil {
+		part = host
+	}
+	part = strings.Trim(part, "[]")
+	ip := net.ParseIP(part)
+	if ip == nil {
+		return ""
+	}
+	return ip.String()
 }
 
 func hostFromRemoteAddr(remote string) string {
@@ -71,7 +106,7 @@ func hostFromRemoteAddr(remote string) string {
 		return ""
 	}
 	if host, _, err := net.SplitHostPort(remote); err == nil {
-		return host
+		return parseSingleIP(host)
 	}
-	return strings.Trim(remote, "[]")
+	return parseSingleIP(strings.Trim(remote, "[]"))
 }

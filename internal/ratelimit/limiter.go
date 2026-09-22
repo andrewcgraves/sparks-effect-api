@@ -27,8 +27,11 @@ type tracked struct {
 }
 
 func New(tokensPerMin, burst int) *Limiter {
-	if tokensPerMin <= 0 || burst <= 0 {
+	if tokensPerMin <= 0 {
 		return nil
+	}
+	if burst <= 0 {
+		burst = 1
 	}
 	return &Limiter{
 		limit:   rate.Limit(float64(tokensPerMin) / 60.0),
@@ -43,7 +46,14 @@ func New(tokensPerMin, burst int) *Limiter {
 }
 
 func (l *Limiter) Allow(key string) (retryAfter time.Duration, ok bool) {
+	return l.AllowAll(key)
+}
+
+func (l *Limiter) AllowAll(keys ...string) (retryAfter time.Duration, ok bool) {
 	if l == nil {
+		return 0, true
+	}
+	if len(keys) == 0 {
 		return 0, true
 	}
 	now := l.now()
@@ -52,18 +62,26 @@ func (l *Limiter) Allow(key string) (retryAfter time.Duration, ok bool) {
 	defer l.mu.Unlock()
 
 	l.evictIdle(now)
-	b := l.bucket(key, now)
-	b.lastSeen = now
 
-	res := b.lim.ReserveN(now, 1)
-	if delay := res.DelayFrom(now); delay > 0 {
-		// ReserveN consumed a future token; give it back so a denied
-		// request does not push the next legitimate one further out.
-		res.CancelAt(now)
-		if delay < time.Second {
-			delay = time.Second
+	reservations := make([]*rate.Reservation, 0, len(keys))
+	var maxDelay time.Duration
+	for _, key := range keys {
+		b := l.bucket(key, now)
+		b.lastSeen = now
+		res := b.lim.ReserveN(now, 1)
+		reservations = append(reservations, res)
+		if delay := res.DelayFrom(now); delay > maxDelay {
+			maxDelay = delay
 		}
-		return delay, false
+	}
+	if maxDelay > 0 {
+		for _, res := range reservations {
+			res.CancelAt(now)
+		}
+		if maxDelay < time.Second {
+			maxDelay = time.Second
+		}
+		return maxDelay, false
 	}
 	return 0, true
 }

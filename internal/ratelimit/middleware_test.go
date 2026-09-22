@@ -161,6 +161,24 @@ func TestLimitExhaustedUserDoesNotBlockAnotherUserOnAFreshIP(t *testing.T) {
 	}
 }
 
+func TestLimitSharedIPDenialDoesNotSpendUserToken(t *testing.T) {
+	lim := New(1, 1)
+	inner := Limit(lim, ClientIP(0))(okHandler())
+	alice := withUser("alice", inner)
+	bob := withUser("bob", inner)
+	shared := "192.0.2.10:1"
+
+	if rec := do(alice, shared); rec.Code != http.StatusAccepted {
+		t.Fatalf("alice first = %d, want 202", rec.Code)
+	}
+	if rec := do(bob, shared); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("bob on alice's IP = %d, want 429 (IP exhausted)", rec.Code)
+	}
+	if rec := do(bob, "192.0.2.99:1"); rec.Code != http.StatusAccepted {
+		t.Fatalf("bob on a fresh IP = %d, want 202 (user token must not have been spent on the shared-IP 429)", rec.Code)
+	}
+}
+
 func TestLimitDisabledNever429s(t *testing.T) {
 	h := Limit(New(0, 1), ClientIP(0))(okHandler())
 	for i := 0; i < 20; i++ {

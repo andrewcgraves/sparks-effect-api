@@ -143,7 +143,7 @@ func loadTrustedProxyCount() int {
 func loadRateLimit(name string, fallback RateLimitPolicy) RateLimitPolicy {
 	return RateLimitPolicy{
 		RatePerMinute: loadNonNegativeEnv("RATE_LIMIT_"+name+"_PER_MIN", fallback.RatePerMinute),
-		Burst:         loadNonNegativeEnv("RATE_LIMIT_"+name+"_BURST", fallback.Burst),
+		Burst:         loadBurstEnv("RATE_LIMIT_"+name+"_BURST", fallback.Burst),
 	}
 }
 
@@ -154,6 +154,22 @@ func loadNonNegativeEnv(key string, fallback int) int {
 	}
 	n, err := strconv.Atoi(v)
 	if err != nil || n < 0 {
+		slog.Warn("config: "+key+" ignored, keeping the default",
+			"value", v, "default", fallback)
+		return fallback
+	}
+	return n
+}
+
+func loadBurstEnv(key string, fallback int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(v)
+	// Only RATE_LIMIT_*_PER_MIN=0 disables a limiter. A zero burst is ignored
+	// like a malformed value so RATE_LIMIT_LOGIN_BURST=0 cannot fail-open.
+	if err != nil || n <= 0 {
 		slog.Warn("config: "+key+" ignored, keeping the default",
 			"value", v, "default", fallback)
 		return fallback

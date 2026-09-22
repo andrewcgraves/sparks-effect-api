@@ -30,17 +30,16 @@ func Limit(n *Limiter, clientIP func(*http.Request) string) func(http.Handler) h
 			}
 			// User is the primary key when a session is on the context; IP is
 			// always checked as well (and is the only key for anonymous
-			// callers). Checking the user bucket first means an exhausted
-			// user does not spend a shared IP token on the way to a 429.
-			// Different policies are different Limiter instances and never
-			// share maps.
+			// callers). Both keys are reserved in one AllowAll so a 429 on
+			// either rolls the other back — an exhausted user does not spend
+			// a shared IP token, and a shared-IP 429 does not spend the user
+			// bucket. Different policies are different Limiter instances and
+			// never share maps.
+			keys := []string{"ip:" + ip}
 			if user, ok := auth.UserFrom(r.Context()); ok && user.ID != "" {
-				if retryAfter, ok := n.Allow("user:" + user.ID); !ok {
-					writeRateLimited(w, retryAfter)
-					return
-				}
+				keys = append([]string{"user:" + user.ID}, keys...)
 			}
-			if retryAfter, ok := n.Allow("ip:" + ip); !ok {
+			if retryAfter, ok := n.AllowAll(keys...); !ok {
 				writeRateLimited(w, retryAfter)
 				return
 			}

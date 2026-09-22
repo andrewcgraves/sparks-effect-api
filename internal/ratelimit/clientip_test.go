@@ -34,13 +34,47 @@ func TestFromRequest_countOneSingleXFFEntryIsTheClient(t *testing.T) {
 	req.Header.Set("X-Forwarded-For", "9.9.9.9")
 
 	// chain = [9.9.9.9, 10.0.0.1]; index = len-1-count = 0, so the single
-	// XFF entry wins. A replacing proxy (Railway writing only the client IP)
-	// and a client spoofing XFF without a proxy that appends look identical
-	// at count=1; spoof-resistance tests must send "spoofed, real" with
-	// RemoteAddr set to the proxy.
+	// XFF entry wins. That is a computed 0, not a clamp onto chain[0].
+	// A replacing proxy (Railway writing only the client IP) and a client
+	// spoofing XFF without a proxy that appends look identical at count=1;
+	// spoof-resistance tests must send "spoofed, real" with RemoteAddr set
+	// to the proxy.
 	got := FromRequest(req, 1)
 	if got != "9.9.9.9" {
 		t.Errorf("count=1 with a single XFF entry: got %q, want 9.9.9.9", got)
+	}
+}
+
+func TestFromRequest_joinsDuplicateXFFHeaders(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "10.0.0.1:443"
+	req.Header.Add("X-Forwarded-For", "9.9.9.9")
+	req.Header.Add("X-Forwarded-For", "203.0.113.50")
+
+	got := FromRequest(req, 1)
+	if got != "203.0.113.50" {
+		t.Errorf("duplicate XFF lines: got %q, want 203.0.113.50", got)
+	}
+}
+
+func TestFromRequest_tooHighCountFallsBackToRemoteAddr(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "10.0.0.1:443"
+	req.Header.Set("X-Forwarded-For", "9.9.9.9")
+
+	got := FromRequest(req, 2)
+	if got != "10.0.0.1" {
+		t.Errorf("count=2 with a single XFF entry: got %q, want RemoteAddr 10.0.0.1 (not leftmost 9.9.9.9)", got)
+	}
+}
+
+func TestFromRequest_canonicalizesIPv4MappedRemoteAddr(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "[::ffff:192.0.2.1]:1"
+
+	got := FromRequest(req, 0)
+	if got != "192.0.2.1" {
+		t.Errorf("IPv4-mapped RemoteAddr: got %q, want 192.0.2.1", got)
 	}
 }
 
@@ -108,13 +142,36 @@ func TestFromRequest_emptyRemoteAddrFallsBackToUnknown(t *testing.T) {
 	}
 }
 
-func TestFromRequest_doesNotUseXRealIP(t *testing.T) {
+func TestFromRequest_countZeroIgnoresXRealIP(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "192.0.2.1:1234"
 	req.Header.Set("X-Real-IP", "9.9.9.9")
 
-	got := FromRequest(req, 1)
+	got := FromRequest(req, 0)
 	if got != "192.0.2.1" {
-		t.Errorf("X-Real-IP must not select the bucket: got %q, want 192.0.2.1", got)
+		t.Errorf("count=0: got %q, want RemoteAddr host 192.0.2.1 (X-Real-IP ignored)", got)
+	}
+}
+
+func TestFromRequest_countOneEmptyXFFUsesXRealIP(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "10.0.0.1:443"
+	req.Header.Set("X-Real-IP", "203.0.113.50")
+
+	got := FromRequest(req, 1)
+	if got != "203.0.113.50" {
+		t.Errorf("count=1 empty XFF: got %q, want X-Real-IP 203.0.113.50", got)
+	}
+}
+
+func TestFromRequest_xffWalkIgnoresXRealIP(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "10.0.0.1:443"
+	req.Header.Set("X-Forwarded-For", "9.9.9.9, 203.0.113.50")
+	req.Header.Set("X-Real-IP", "198.51.100.1")
+
+	got := FromRequest(req, 1)
+	if got != "203.0.113.50" {
+		t.Errorf("XFF present: got %q, want 203.0.113.50 from the XFF walk (not X-Real-IP)", got)
 	}
 }

@@ -283,18 +283,29 @@ func TestLoad_rateLimits_fromEnv(t *testing.T) {
 	assertPolicy(t, "Compile", cfg.RateLimitCompile, RateLimitPolicy{RatePerMinute: 9, Burst: 6})
 }
 
-func TestLoad_rateLimits_zeroDisables(t *testing.T) {
+func TestLoad_rateLimits_zeroPerMinDisables(t *testing.T) {
 	t.Setenv("RATE_LIMIT_ISOCHRONE_PER_MIN", "0")
 	t.Setenv("RATE_LIMIT_ISOCHRONE_BURST", "0")
 	t.Setenv("RATE_LIMIT_LOGIN_PER_MIN", "0")
 
 	cfg := Load()
-	if cfg.RateLimitIsochrone.RatePerMinute != 0 || cfg.RateLimitIsochrone.Burst != 0 {
-		t.Errorf("Isochrone: want zero policy, got %+v", cfg.RateLimitIsochrone)
+	if cfg.RateLimitIsochrone.RatePerMinute != 0 {
+		t.Errorf("Isochrone.RatePerMinute: want 0, got %d", cfg.RateLimitIsochrone.RatePerMinute)
+	}
+	if cfg.RateLimitIsochrone.Burst != defaultRateLimitIsochrone.Burst {
+		t.Errorf("Isochrone.Burst: want default %d (zero burst ignored), got %d",
+			defaultRateLimitIsochrone.Burst, cfg.RateLimitIsochrone.Burst)
 	}
 	if cfg.RateLimitLogin.RatePerMinute != 0 {
 		t.Errorf("Login.RatePerMinute: want 0, got %d", cfg.RateLimitLogin.RatePerMinute)
 	}
+}
+
+func TestLoad_rateLimits_zeroBurstKeepsTheDefault(t *testing.T) {
+	t.Setenv("RATE_LIMIT_LOGIN_BURST", "0")
+
+	cfg := Load()
+	assertPolicy(t, "Login zero burst", cfg.RateLimitLogin, defaultRateLimitLogin)
 }
 
 func TestLoad_rateLimits_malformedKeepsTheDefault(t *testing.T) {

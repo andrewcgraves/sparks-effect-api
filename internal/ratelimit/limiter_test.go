@@ -51,12 +51,38 @@ func TestLimiterSameKeySharesBucket(t *testing.T) {
 }
 
 func TestLimiterNilAndZeroArePassThrough(t *testing.T) {
-	for _, l := range []*Limiter{nil, New(0, 5), New(10, 0), New(-1, 5)} {
+	for _, l := range []*Limiter{nil, New(0, 5), New(-1, 5)} {
 		for i := 0; i < 20; i++ {
 			if _, ok := l.Allow("ip:1.1.1.1"); !ok {
 				t.Fatalf("disabled limiter %v denied request %d", l, i)
 			}
 		}
+	}
+}
+
+func TestLimiterZeroBurstIsBurstOne(t *testing.T) {
+	l := New(10, 0)
+	if l == nil {
+		t.Fatal("New(10, 0) disabled the limiter; zero burst must be treated as 1")
+	}
+	if _, ok := l.Allow("k"); !ok {
+		t.Fatal("first request denied")
+	}
+	if _, ok := l.Allow("k"); ok {
+		t.Fatal("second request allowed, burst should be 1")
+	}
+}
+
+func TestLimiterAllowAllRollsBackWhenAnyKeyIsDenied(t *testing.T) {
+	l := New(1, 1)
+	if _, ok := l.AllowAll("ip:1.1.1.1"); !ok {
+		t.Fatal("seed IP denied")
+	}
+	if _, ok := l.AllowAll("user:bob", "ip:1.1.1.1"); ok {
+		t.Fatal("expected deny when IP is exhausted")
+	}
+	if _, ok := l.AllowAll("user:bob", "ip:2.2.2.2"); !ok {
+		t.Fatal("bob's user token was spent on the shared-IP 429")
 	}
 }
 
