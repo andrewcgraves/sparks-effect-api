@@ -13,6 +13,7 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/persistence/postgres"
+	"github.com/andrewcgraves/sparks-effect-api/internal/ratelimit"
 	"github.com/andrewcgraves/sparks-effect-api/internal/routing"
 	"github.com/andrewcgraves/sparks-effect-api/internal/traceid"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
@@ -68,10 +69,16 @@ func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routi
 		capBacklog = handler.CapIsochroneBacklog(deps, cfg.MaxInFlightIsochrones, lg)
 	}
 
-	registerRouteRoutes(mux, deps)
-	registerCompileRoutes(mux, deps, publisher, capBacklog, lg)
+	clientIP := ratelimit.ClientIP(cfg.TrustedProxyCount)
+	limitIso := ratelimit.Limit(ratelimit.New(cfg.RateLimitIsochrone.RatePerMinute, cfg.RateLimitIsochrone.Burst), clientIP)
+	limitSnap := ratelimit.Limit(ratelimit.New(cfg.RateLimitSnapStops.RatePerMinute, cfg.RateLimitSnapStops.Burst), clientIP)
+	limitLogin := ratelimit.Limit(ratelimit.New(cfg.RateLimitLogin.RatePerMinute, cfg.RateLimitLogin.Burst), clientIP)
+	limitCompile := ratelimit.Limit(ratelimit.New(cfg.RateLimitCompile.RatePerMinute, cfg.RateLimitCompile.Burst), clientIP)
+
+	registerRouteRoutes(mux, deps, limitSnap)
+	registerCompileRoutes(mux, deps, publisher, capBacklog, limitIso, lg)
 	registerPrerenderedRoutes(mux, deps)
-	registerAuthRoutes(mux, cfg, deps, publisher, capBacklog, lg)
+	registerAuthRoutes(mux, cfg, deps, publisher, capBacklog, limitLogin, limitIso, limitCompile, lg)
 	registerWorkerRoutes(mux, cfg, deps)
 
 	h := cors(mux, cfg.AllowLocalhostCORS)
@@ -86,7 +93,7 @@ func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routi
 	}
 }
 
-func registerRouteRoutes(mux *http.ServeMux, deps AuthDeps) {
+func registerRouteRoutes(mux *http.ServeMux, deps AuthDeps, limitSnap func(http.Handler) http.Handler) {
 	if deps == nil {
 		// The collection needs its own entry alongside the subtree: /api/routes/
 		// does not serve /api/routes, it makes the mux answer that path with a
@@ -109,11 +116,11 @@ func registerRouteRoutes(mux *http.ServeMux, deps AuthDeps) {
 	// owner-scoped for an owned one.
 	optional := auth.OptionalAuth(deps.GetSessionUser)
 	mux.Handle("GET /api/routes/{slug}", optional(handler.RouteBySlug(deps)))
-	mux.Handle("POST /api/routes/{slug}/snap-stops", optional(handler.SnapStops(deps)))
+	mux.Handle("POST /api/routes/{slug}/snap-stops", optional(limitSnap(handler.SnapStops(deps))))
 }
 
 func registerCompileRoutes(mux *http.ServeMux, deps AuthDeps, publisher routing.Publisher,
-	capBacklog func(http.Handler) http.Handler, lg *slog.Logger) {
+	capBacklog, limitIso func(http.Handler) http.Handler, lg *slog.Logger) {
 	if deps == nil {
 		mux.HandleFunc("GET /api/scenarios/{slug}/graph", noDatabase("compiled graph storage is unavailable"))
 		mux.HandleFunc("POST /api/isochrone", noDatabase("compiled graph storage is unavailable"))
@@ -127,8 +134,13 @@ func registerCompileRoutes(mux *http.ServeMux, deps AuthDeps, publisher routing.
 	// omitting it would hand an owner's compiled graph to anyone with the slug.
 	optional := auth.OptionalAuth(deps.GetSessionUser)
 	mux.Handle("GET /api/scenarios/{slug}/graph", optional(handler.ScenarioGraph(deps)))
+	// Limit sits after OptionalAuth (so a session, when present, keys a
+	// user bucket) and before the backlog cap (cheap in-memory check
+	// before a DB count). The same limiter instance is shared with the
+	// authored isochrone POSTs; SPA-357's anonymous published-service
+	// isochrone inherits it by wrapping with this same limitIso.
 	mux.Handle("POST /api/isochrone",
-		optional(requirePublisher(publisher, capBacklog(handler.Isochrone(deps, publisher, lg)))))
+		optional(limitIso(requirePublisher(publisher, capBacklog(handler.Isochrone(deps, publisher, lg))))))
 	mux.Handle("GET /api/routing-jobs/{id}", optional(handler.RoutingJobStatus(deps)))
 }
 
@@ -153,7 +165,7 @@ func requirePublisher(publisher routing.Publisher, h http.Handler) http.Handler 
 }
 
 func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, publisher routing.Publisher,
-	capBacklog func(http.Handler) http.Handler, lg *slog.Logger) {
+	capBacklog, limitLogin, limitIso, limitCompile func(http.Handler) http.Handler, lg *slog.Logger) {
 	if deps == nil {
 		for _, pattern := range []string{
 			"/api/auth/login", "/api/auth/logout", "/api/auth/me",
@@ -187,7 +199,7 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 
 	// Public: the only unauthenticated auth route. There is deliberately no
 	// registration endpoint — accounts come from POST /api/admin/users.
-	mux.HandleFunc("POST /api/auth/login", handler.Login(deps, cfg.SessionTTL, hasher))
+	mux.Handle("POST /api/auth/login", limitLogin(handler.Login(deps, cfg.SessionTTL, hasher)))
 
 	// Authenticated.
 	mux.Handle("POST /api/auth/logout", authenticated(handler.Logout(deps)))
@@ -197,7 +209,7 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 	// Async compile jobs: any authenticated caller may trigger a compile or
 	// poll a job. JobStatus enforces ownership itself (see its doc comment),
 	// since "not found" there means something different from "not admin".
-	mux.Handle("POST /api/scenarios/{slug}/compile", authenticated(handler.CompileScenario(deps, cfg.BoardingWait)))
+	mux.Handle("POST /api/scenarios/{slug}/compile", authenticated(limitCompile(handler.CompileScenario(deps, cfg.BoardingWait))))
 	mux.Handle("GET /api/jobs/{id}", authenticated(handler.JobStatus(deps)))
 
 	// Owner-scoped CRUD over the seeded route model. Distinct from the public
@@ -267,15 +279,15 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 	mux.Handle("DELETE /api/services/{slug}", authenticated(handler.DeleteService(deps)))
 	// Compiling a single service is the degenerate scenario compile; owner-scoped
 	// like the rest of the authored surface.
-	mux.Handle("POST /api/services/{slug}/compile", authenticated(handler.CompileUserService(deps, cfg.BoardingWait)))
+	mux.Handle("POST /api/services/{slug}/compile", authenticated(limitCompile(handler.CompileUserService(deps, cfg.BoardingWait))))
 	// Read that compile back, and plot over it, without wrapping the service in
 	// a scenario first (SPA-140). Twins of the /api/user-scenarios pair below,
 	// owner-scoped identically. The database-less 503 list above needs no entry
 	// for either: "/api/services/" is a subtree pattern and already covers them.
 	mux.Handle("GET /api/services/{slug}/graph", authenticated(handler.UserServiceGraph(deps)))
 	mux.Handle("POST /api/services/{slug}/isochrone",
-		authenticated(requirePublisher(publisher,
-			capBacklog(handler.UserServiceIsochrone(deps, publisher, lg, cfg.BoardingWait)))))
+		authenticated(limitIso(requirePublisher(publisher,
+			capBacklog(handler.UserServiceIsochrone(deps, publisher, lg, cfg.BoardingWait))))))
 
 	// User-owned scenarios: owner-scoped CRUD over a curated set of UserService
 	// ids. Named /api/user-scenarios, distinct from the public /api/scenarios
@@ -288,14 +300,14 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 	mux.Handle("DELETE /api/user-scenarios/{slug}", authenticated(handler.DeleteUserScenario(deps)))
 	// Compile a user scenario's curated members into one graph, then read it back
 	// by slug. Both owner-scoped, unlike the public seeded /api/scenarios/{slug}/graph.
-	mux.Handle("POST /api/user-scenarios/{slug}/compile", authenticated(handler.CompileUserScenario(deps, cfg.BoardingWait)))
+	mux.Handle("POST /api/user-scenarios/{slug}/compile", authenticated(limitCompile(handler.CompileUserScenario(deps, cfg.BoardingWait))))
 	mux.Handle("GET /api/user-scenarios/{slug}/graph", authenticated(handler.UserScenarioGraph(deps)))
 	// The user-authored counterpart to POST /api/isochrone (SPA-83): computes
 	// over the scenario's compiled graph rather than the seeded store, and
 	// answers 409 with a distinct code when that graph is stale (SPA-116).
 	mux.Handle("POST /api/user-scenarios/{slug}/isochrone",
-		authenticated(requirePublisher(publisher,
-			capBacklog(handler.UserScenarioIsochrone(deps, publisher, lg, cfg.BoardingWait)))))
+		authenticated(limitIso(requirePublisher(publisher,
+			capBacklog(handler.UserScenarioIsochrone(deps, publisher, lg, cfg.BoardingWait))))))
 
 	// Admin-only.
 	mux.Handle("POST /api/admin/users", adminOnly(handler.CreateUser(deps, hasher)))
