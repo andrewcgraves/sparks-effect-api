@@ -56,7 +56,7 @@ func userServiceFixture(t *testing.T) (*postgres.Repo, context.Context, string) 
 func sampleUserService() transit.UserService {
 	svc := transit.UserService{
 		ID: usServiceID, Slug: "bay-area-express", RouteID: usRouteID, OwnerID: usOwnerID,
-		Name: "Bay Area Express", Description: "Peak express",
+		Name: "Bay Area Express", Subtext: "Electrified · Express", Description: "Peak express",
 		Vehicle: transit.VehicleParams{
 			MaxSpeedKMH: 320, AccelerationMS2: 1.1, DecelerationMS2: 1.3, DwellS: 45,
 		},
@@ -87,7 +87,8 @@ func TestUserServiceRoundTrip(t *testing.T) {
 		t.Fatalf("GetUserServiceBySlug: found=%v err=%v", found, err)
 	}
 
-	if got.ID != want.ID || got.Name != want.Name || got.Description != want.Description {
+	if got.ID != want.ID || got.Name != want.Name || got.Subtext != want.Subtext ||
+		got.Description != want.Description {
 		t.Errorf("scalars: got %+v", got)
 	}
 	if got.RouteID != want.RouteID || got.OwnerID != want.OwnerID {
@@ -154,6 +155,8 @@ func TestUpdateUserServiceReplacesAggregate(t *testing.T) {
 
 	updated := sampleUserService()
 	updated.Name = "Renamed"
+	updated.Subtext = "Diesel · Local"
+	updated.Description = "Rewritten"
 	updated.RouteID = usRouteID2
 	updated.Vehicle.MaxSpeedKMH = 250
 	updated.Vehicle.DwellS = 60
@@ -169,7 +172,8 @@ func TestUpdateUserServiceReplacesAggregate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetUserServiceByID: %v", err)
 	}
-	if got.Name != "Renamed" || got.RouteID != usRouteID2 {
+	if got.Name != "Renamed" || got.Subtext != "Diesel · Local" ||
+		got.Description != "Rewritten" || got.RouteID != usRouteID2 {
 		t.Errorf("scalars not updated: %+v", got)
 	}
 	if got.Vehicle.MaxSpeedKMH != 250 || got.Vehicle.DwellS != 60 {

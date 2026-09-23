@@ -11,6 +11,7 @@ import (
 
 func rewindIsochroneCacheDepartsOnMigration(t *testing.T, url string) {
 	t.Helper()
+	rewindUserServiceSubtextMigration(t, url)
 	exec(t, url, `
 		DO $rewind$
 		BEGIN

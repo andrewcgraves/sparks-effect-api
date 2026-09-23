@@ -30,6 +30,7 @@ const maxServiceBodyBytes = 1 << 20
 type serviceRequest struct {
 	RouteSlug        string                     `json:"route_slug"`
 	Name             string                     `json:"name"`
+	Subtext          string                     `json:"subtext"`
 	Description      string                     `json:"description"`
 	Vehicle          transit.VehicleParams      `json:"vehicle"`
 	Stops            []transit.ServiceStopPoint `json:"stops"`
@@ -39,6 +40,7 @@ type serviceRequest struct {
 
 func (req serviceRequest) applyTo(svc *transit.UserService) {
 	svc.Name = req.Name
+	svc.Subtext = req.Subtext
 	svc.Description = req.Description
 	svc.Vehicle = req.Vehicle
 	svc.Stops = req.Stops

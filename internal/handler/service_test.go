@@ -232,6 +232,93 @@ func TestCreateAndReadBack(t *testing.T) {
 	}
 }
 
+func TestProseSurvivesCreateReadUpdateRead(t *testing.T) {
+	store := newFakeServiceStore()
+	create := strings.Replace(createPayload, `"name": "Bay Area Express",`,
+		`"name": "Bay Area Express", "subtext": "Electrified · High-speed rail",
+		"description": "Peak-hour express between the two downtowns.",`, 1)
+
+	rec := serveAs(t, store, svcOwner, http.MethodPost, "/api/services", create)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: got %d, want %d (body %s)", rec.Code, http.StatusCreated, rec.Body)
+	}
+	created := decodeService(t, rec)
+	if created.Subtext != "Electrified · High-speed rail" ||
+		created.Description != "Peak-hour express between the two downtowns." {
+		t.Fatalf("create response prose = %q / %q", created.Subtext, created.Description)
+	}
+
+	rec = serveAs(t, store, svcOwner, http.MethodGet, "/api/services/"+created.Slug, "")
+	if got := decodeService(t, rec); got.Subtext != created.Subtext || got.Description != created.Description {
+		t.Fatalf("read after create: prose = %q / %q", got.Subtext, got.Description)
+	}
+
+	update := strings.Replace(createPayload, `"name": "Bay Area Express",`,
+		`"name": "Bay Area Express", "subtext": "Diesel · Regional",
+		"description": "Rewritten.",`, 1)
+	rec = serveAs(t, store, svcOwner, http.MethodPut, "/api/services/"+created.Slug, update)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update: got %d, want %d (body %s)", rec.Code, http.StatusOK, rec.Body)
+	}
+
+	rec = serveAs(t, store, svcOwner, http.MethodGet, "/api/services/"+created.Slug, "")
+	if got := decodeService(t, rec); got.Subtext != "Diesel · Regional" || got.Description != "Rewritten." {
+		t.Fatalf("read after update: prose = %q / %q", got.Subtext, got.Description)
+	}
+}
+
+func TestUpdateOmittingProseClearsIt(t *testing.T) {
+	// PUT replaces the whole service, prose included, exactly as it replaces
+	// stops and windows: a client that edits the stops must send the prose back.
+	store := newFakeServiceStore()
+	svc := seedService(store, "svc-1", "seeded", svcOwner.ID)
+	svc.Subtext, svc.Description = "Old subtext", "Old description"
+	store.services["svc-1"] = svc
+
+	rec := serveAs(t, store, svcOwner, http.MethodPut, "/api/services/seeded", createPayload)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update: got %d, want %d (body %s)", rec.Code, http.StatusOK, rec.Body)
+	}
+	if got := store.services["svc-1"]; got.Subtext != "" || got.Description != "" {
+		t.Errorf("prose after a PUT without it = %q / %q, want both cleared", got.Subtext, got.Description)
+	}
+}
+
+func TestOverlongProseIsATypedFault(t *testing.T) {
+	for _, field := range []struct {
+		name  string
+		limit int
+	}{
+		{"subtext", transit.MaxSubtextChars},
+		{"description", transit.MaxDescriptionChars},
+	} {
+		t.Run(field.name, func(t *testing.T) {
+			body := strings.Replace(createPayload, `"name": "Bay Area Express",`,
+				`"name": "Bay Area Express", "`+field.name+`": "`+strings.Repeat("x", field.limit+1)+`",`, 1)
+
+			for _, tc := range []struct{ method, target string }{
+				{http.MethodPost, "/api/services"},
+				{http.MethodPut, "/api/services/seeded"},
+			} {
+				store := newFakeServiceStore()
+				seedService(store, "svc-1", "seeded", svcOwner.ID)
+				got := decodeValidationFault(t, serveAs(t, store, svcOwner, tc.method, tc.target, body))
+				if got.Code != handler.ValidationErrorCode {
+					t.Errorf("%s: code = %q, want %q", tc.method, got.Code, handler.ValidationErrorCode)
+				}
+				if len(got.Detail.Faults) != 1 || got.Detail.Faults[0].Field != field.name ||
+					got.Detail.Faults[0].Rule != "max_length" || got.Detail.Faults[0].Index != nil {
+					t.Errorf("%s: faults = %+v, want one whole-field max_length on %s",
+						tc.method, got.Detail.Faults, field.name)
+				}
+				if tc.method == http.MethodPut && store.services["svc-1"].Name != "Seeded" {
+					t.Errorf("a rejected update was written: %+v", store.services["svc-1"])
+				}
+			}
+		})
+	}
+}
+
 // --- Embedded ordering + params persist (AC 2) ---
 
 func TestStopsAndParamsPersist(t *testing.T) {

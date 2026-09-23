@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/fault"
 )
@@ -15,6 +16,7 @@ type UserService struct {
 	RouteID            string                `json:"route_id"`
 	OwnerID            string                `json:"owner_id"`
 	Name               string                `json:"name"`
+	Subtext            string                `json:"subtext,omitempty"`
 	Description        string                `json:"description,omitempty"`
 	Vehicle            VehicleParams         `json:"vehicle"`
 	Stops              []ServiceStopPoint    `json:"stops"`
@@ -56,10 +58,28 @@ type ServiceStopPoint struct {
 	OffsetM   float64 `json:"offset_m"`
 }
 
+const (
+	MaxSubtextChars     = 140
+	MaxDescriptionChars = 4000
+)
+
 func (s UserService) Validate() error {
 	var faults fault.ValidationFaults
 	if strings.TrimSpace(s.Name) == "" {
 		faults = append(faults, fault.Whole("name", fault.RuleRequired, "name is required"))
+	}
+	// Prose is bounded in characters rather than bytes, because characters are
+	// what an author sees counted in the form. Both limits are generous for
+	// their shape — a one-line descriptor, a few paragraphs — and exist so the
+	// 1 MiB request cap is not the only thing between a public page and a
+	// megabyte of text.
+	if utf8.RuneCountInString(s.Subtext) > MaxSubtextChars {
+		faults = append(faults, fault.Whole("subtext", fault.RuleMaxLength,
+			fmt.Sprintf("subtext must be at most %d characters", MaxSubtextChars)))
+	}
+	if utf8.RuneCountInString(s.Description) > MaxDescriptionChars {
+		faults = append(faults, fault.Whole("description", fault.RuleMaxLength,
+			fmt.Sprintf("description must be at most %d characters", MaxDescriptionChars)))
 	}
 	if strings.TrimSpace(s.RouteID) == "" {
 		faults = append(faults, fault.Whole("route_id", fault.RuleRequired, "route_id is required"))

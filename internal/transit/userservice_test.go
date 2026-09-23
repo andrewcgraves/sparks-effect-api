@@ -62,6 +62,12 @@ func TestValidateRejectsBadServices(t *testing.T) {
 		{"blank window time", func(s *transit.UserService) {
 			s.FrequencyWindows[0].StartTime = ""
 		}, "start_time", "frequency_windows.start_time", fault.RuleRequired, fault.Index(0)},
+		{"long subtext", func(s *transit.UserService) {
+			s.Subtext = strings.Repeat("x", transit.MaxSubtextChars+1)
+		}, "subtext", "subtext", fault.RuleMaxLength, nil},
+		{"long description", func(s *transit.UserService) {
+			s.Description = strings.Repeat("x", transit.MaxDescriptionChars+1)
+		}, "description", "description", fault.RuleMaxLength, nil},
 	}
 
 	for _, tc := range tests {
@@ -81,6 +87,26 @@ func TestValidateRejectsBadServices(t *testing.T) {
 			}
 			assertFault(t, got[0], tc.field, tc.rule, tc.index)
 		})
+	}
+}
+
+func TestValidateAcceptsProseAtItsLimit(t *testing.T) {
+	svc := validUserService()
+	svc.Subtext = strings.Repeat("x", transit.MaxSubtextChars)
+	svc.Description = strings.Repeat("x", transit.MaxDescriptionChars)
+	if err := svc.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}
+
+func TestValidateCountsProseInCharactersNotBytes(t *testing.T) {
+	// "·" is two bytes in UTF-8, so a subtext of these at the limit is twice
+	// the limit in bytes. The author sees characters; so does the rule.
+	svc := validUserService()
+	svc.Subtext = strings.Repeat("·", transit.MaxSubtextChars)
+	svc.Description = strings.Repeat("é", transit.MaxDescriptionChars)
+	if err := svc.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
 	}
 }
 
