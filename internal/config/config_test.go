@@ -14,6 +14,7 @@ func TestLoad_defaults(t *testing.T) {
 	t.Setenv("BOARDING_WAIT_POLICY", "")
 	t.Setenv("BOARDING_WAIT_FIXED_SECS", "")
 	t.Setenv("WORKER_TOKEN", "")
+	clearRateLimitEnv(t)
 
 	cfg := Load()
 	if cfg.Port != "8080" {
@@ -33,6 +34,13 @@ func TestLoad_defaults(t *testing.T) {
 	if cfg.WorkerToken != "" {
 		t.Errorf("WorkerToken: want empty, got %q", cfg.WorkerToken)
 	}
+	if cfg.TrustedProxyCount != defaultTrustedProxyCount {
+		t.Errorf("TrustedProxyCount: want %d, got %d", defaultTrustedProxyCount, cfg.TrustedProxyCount)
+	}
+	assertPolicy(t, "Isochrone", cfg.RateLimitIsochrone, defaultRateLimitIsochrone)
+	assertPolicy(t, "SnapStops", cfg.RateLimitSnapStops, defaultRateLimitSnapStops)
+	assertPolicy(t, "Login", cfg.RateLimitLogin, defaultRateLimitLogin)
+	assertPolicy(t, "Compile", cfg.RateLimitCompile, defaultRateLimitCompile)
 }
 
 func TestLoad_fromEnv(t *testing.T) {
@@ -221,5 +229,111 @@ func TestLoad_maxInFlightIsochrones_malformedKeepsTheDefault(t *testing.T) {
 		if got := Load().MaxInFlightIsochrones; got != defaultMaxInFlightIsochrones {
 			t.Errorf("MAX_INFLIGHT_ISOCHRONES=%q: want %d, got %d", v, defaultMaxInFlightIsochrones, got)
 		}
+	}
+}
+
+func TestLoad_trustedProxyCount_defaultsToOne(t *testing.T) {
+	t.Setenv("TRUSTED_PROXY_COUNT", "")
+
+	if got := Load().TrustedProxyCount; got != defaultTrustedProxyCount {
+		t.Errorf("TrustedProxyCount: want %d, got %d", defaultTrustedProxyCount, got)
+	}
+}
+
+func TestLoad_trustedProxyCount_fromEnv(t *testing.T) {
+	t.Setenv("TRUSTED_PROXY_COUNT", "2")
+
+	if got := Load().TrustedProxyCount; got != 2 {
+		t.Errorf("TrustedProxyCount: want 2, got %d", got)
+	}
+}
+
+func TestLoad_trustedProxyCount_zeroIsAccepted(t *testing.T) {
+	t.Setenv("TRUSTED_PROXY_COUNT", "0")
+
+	if got := Load().TrustedProxyCount; got != 0 {
+		t.Errorf("TrustedProxyCount: want 0, got %d", got)
+	}
+}
+
+func TestLoad_trustedProxyCount_malformedKeepsTheDefault(t *testing.T) {
+	for _, v := range []string{"lots", "-1", "3.5"} {
+		t.Setenv("TRUSTED_PROXY_COUNT", v)
+
+		if got := Load().TrustedProxyCount; got != defaultTrustedProxyCount {
+			t.Errorf("TRUSTED_PROXY_COUNT=%q: want %d, got %d", v, defaultTrustedProxyCount, got)
+		}
+	}
+}
+
+func TestLoad_rateLimits_fromEnv(t *testing.T) {
+	t.Setenv("RATE_LIMIT_ISOCHRONE_PER_MIN", "7")
+	t.Setenv("RATE_LIMIT_ISOCHRONE_BURST", "2")
+	t.Setenv("RATE_LIMIT_SNAP_STOPS_PER_MIN", "11")
+	t.Setenv("RATE_LIMIT_SNAP_STOPS_BURST", "4")
+	t.Setenv("RATE_LIMIT_LOGIN_PER_MIN", "3")
+	t.Setenv("RATE_LIMIT_LOGIN_BURST", "1")
+	t.Setenv("RATE_LIMIT_COMPILE_PER_MIN", "9")
+	t.Setenv("RATE_LIMIT_COMPILE_BURST", "6")
+
+	cfg := Load()
+	assertPolicy(t, "Isochrone", cfg.RateLimitIsochrone, RateLimitPolicy{RatePerMinute: 7, Burst: 2})
+	assertPolicy(t, "SnapStops", cfg.RateLimitSnapStops, RateLimitPolicy{RatePerMinute: 11, Burst: 4})
+	assertPolicy(t, "Login", cfg.RateLimitLogin, RateLimitPolicy{RatePerMinute: 3, Burst: 1})
+	assertPolicy(t, "Compile", cfg.RateLimitCompile, RateLimitPolicy{RatePerMinute: 9, Burst: 6})
+}
+
+func TestLoad_rateLimits_zeroPerMinDisables(t *testing.T) {
+	t.Setenv("RATE_LIMIT_ISOCHRONE_PER_MIN", "0")
+	t.Setenv("RATE_LIMIT_ISOCHRONE_BURST", "0")
+	t.Setenv("RATE_LIMIT_LOGIN_PER_MIN", "0")
+
+	cfg := Load()
+	if cfg.RateLimitIsochrone.RatePerMinute != 0 {
+		t.Errorf("Isochrone.RatePerMinute: want 0, got %d", cfg.RateLimitIsochrone.RatePerMinute)
+	}
+	if cfg.RateLimitIsochrone.Burst != defaultRateLimitIsochrone.Burst {
+		t.Errorf("Isochrone.Burst: want default %d (zero burst ignored), got %d",
+			defaultRateLimitIsochrone.Burst, cfg.RateLimitIsochrone.Burst)
+	}
+	if cfg.RateLimitLogin.RatePerMinute != 0 {
+		t.Errorf("Login.RatePerMinute: want 0, got %d", cfg.RateLimitLogin.RatePerMinute)
+	}
+}
+
+func TestLoad_rateLimits_zeroBurstKeepsTheDefault(t *testing.T) {
+	t.Setenv("RATE_LIMIT_LOGIN_BURST", "0")
+
+	cfg := Load()
+	assertPolicy(t, "Login zero burst", cfg.RateLimitLogin, defaultRateLimitLogin)
+}
+
+func TestLoad_rateLimits_malformedKeepsTheDefault(t *testing.T) {
+	for _, v := range []string{"lots", "-1", "3.5"} {
+		t.Setenv("RATE_LIMIT_ISOCHRONE_PER_MIN", v)
+		t.Setenv("RATE_LIMIT_ISOCHRONE_BURST", v)
+
+		cfg := Load()
+		assertPolicy(t, "Isochrone malformed "+v, cfg.RateLimitIsochrone, defaultRateLimitIsochrone)
+	}
+}
+
+func clearRateLimitEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{
+		"TRUSTED_PROXY_COUNT",
+		"RATE_LIMIT_ISOCHRONE_PER_MIN", "RATE_LIMIT_ISOCHRONE_BURST",
+		"RATE_LIMIT_SNAP_STOPS_PER_MIN", "RATE_LIMIT_SNAP_STOPS_BURST",
+		"RATE_LIMIT_LOGIN_PER_MIN", "RATE_LIMIT_LOGIN_BURST",
+		"RATE_LIMIT_COMPILE_PER_MIN", "RATE_LIMIT_COMPILE_BURST",
+	} {
+		t.Setenv(key, "")
+	}
+}
+
+func assertPolicy(t *testing.T, name string, got, want RateLimitPolicy) {
+	t.Helper()
+	if got != want {
+		t.Errorf("%s: want %+v, got %+v", name, want, got)
 	}
 }

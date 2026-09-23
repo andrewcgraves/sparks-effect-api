@@ -18,7 +18,7 @@ Use the Makefile for all build/test tasks (Go project).
 
 [`CONTEXT.md`](CONTEXT.md) is the canonical glossary for the whole project —
 scenario, service, station, stop, node, edge, chainage, offset, dwell, boarding
-wait, interchange, staleness, reach, routing anchor, mode vs costing, the five
+wait, interchange, staleness, reach, routing anchor, mode vs costing, the six
 error codes and the four job statuses. Read it before naming a new type,
 endpoint, column or seam, and use its words rather than minting synonyms. The
 other three repositories keep a `CONTEXT.md` of their own for terms only they

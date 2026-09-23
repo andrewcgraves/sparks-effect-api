@@ -10,6 +10,11 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
+type RateLimitPolicy struct {
+	RatePerMinute int
+	Burst         int
+}
+
 type Config struct {
 	Port                   string
 	AMQPURL                string
@@ -22,6 +27,11 @@ type Config struct {
 	BootstrapAdminEmail    string
 	BootstrapAdminPassword string
 	MaxInFlightIsochrones  int
+	TrustedProxyCount      int
+	RateLimitIsochrone     RateLimitPolicy
+	RateLimitSnapStops     RateLimitPolicy
+	RateLimitLogin         RateLimitPolicy
+	RateLimitCompile       RateLimitPolicy
 	BoardingWait           transit.BoardingWaitPolicy
 	WorkerToken            string
 	PasswordHashCost       int
@@ -32,6 +42,15 @@ const defaultSessionTTL = 24 * time.Hour
 const defaultRoutingQueue = "routing.jobs"
 
 const defaultMaxInFlightIsochrones = 20
+
+const defaultTrustedProxyCount = 1
+
+var (
+	defaultRateLimitIsochrone = RateLimitPolicy{RatePerMinute: 10, Burst: 5}
+	defaultRateLimitSnapStops = RateLimitPolicy{RatePerMinute: 30, Burst: 10}
+	defaultRateLimitLogin     = RateLimitPolicy{RatePerMinute: 5, Burst: 5}
+	defaultRateLimitCompile   = RateLimitPolicy{RatePerMinute: 10, Burst: 3}
+)
 
 func Load() Config {
 	maxConns := 0
@@ -64,6 +83,11 @@ func Load() Config {
 		BootstrapAdminEmail:    os.Getenv("BOOTSTRAP_ADMIN_EMAIL"),
 		BootstrapAdminPassword: os.Getenv("BOOTSTRAP_ADMIN_PASSWORD"),
 		MaxInFlightIsochrones:  loadMaxInFlightIsochrones(),
+		TrustedProxyCount:      loadTrustedProxyCount(),
+		RateLimitIsochrone:     loadRateLimit("ISOCHRONE", defaultRateLimitIsochrone),
+		RateLimitSnapStops:     loadRateLimit("SNAP_STOPS", defaultRateLimitSnapStops),
+		RateLimitLogin:         loadRateLimit("LOGIN", defaultRateLimitLogin),
+		RateLimitCompile:       loadRateLimit("COMPILE", defaultRateLimitCompile),
 		BoardingWait:           loadBoardingWait(),
 		WorkerToken:            os.Getenv("WORKER_TOKEN"),
 	}
@@ -98,6 +122,57 @@ func loadMaxInFlightIsochrones() int {
 		slog.Warn("config: MAX_INFLIGHT_ISOCHRONES ignored, keeping the default cap",
 			"max_inflight_isochrones", v, "default", defaultMaxInFlightIsochrones)
 		return defaultMaxInFlightIsochrones
+	}
+	return n
+}
+
+func loadTrustedProxyCount() int {
+	v := os.Getenv("TRUSTED_PROXY_COUNT")
+	if v == "" {
+		return defaultTrustedProxyCount
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		slog.Warn("config: TRUSTED_PROXY_COUNT ignored, keeping the default",
+			"trusted_proxy_count", v, "default", defaultTrustedProxyCount)
+		return defaultTrustedProxyCount
+	}
+	return n
+}
+
+func loadRateLimit(name string, fallback RateLimitPolicy) RateLimitPolicy {
+	return RateLimitPolicy{
+		RatePerMinute: loadNonNegativeEnv("RATE_LIMIT_"+name+"_PER_MIN", fallback.RatePerMinute),
+		Burst:         loadBurstEnv("RATE_LIMIT_"+name+"_BURST", fallback.Burst),
+	}
+}
+
+func loadNonNegativeEnv(key string, fallback int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		slog.Warn("config: "+key+" ignored, keeping the default",
+			"value", v, "default", fallback)
+		return fallback
+	}
+	return n
+}
+
+func loadBurstEnv(key string, fallback int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(v)
+	// Only RATE_LIMIT_*_PER_MIN=0 disables a limiter. A zero burst is ignored
+	// like a malformed value so RATE_LIMIT_LOGIN_BURST=0 cannot fail-open.
+	if err != nil || n <= 0 {
+		slog.Warn("config: "+key+" ignored, keeping the default",
+			"value", v, "default", fallback)
+		return fallback
 	}
 	return n
 }

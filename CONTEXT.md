@@ -179,6 +179,8 @@ through a node both of them touch.
   what stops a dead worker's abandoned rows wedging the cap shut forever. The
   backlog is the count of them. At `MAX_INFLIGHT_ISOCHRONES` an enqueue is
   refused with 429 and `backlog_full`. The cap is per deployment, not per caller.
+  Per-caller floods of the expensive POSTs are refused separately with 429 and
+  `rate_limited`.
 - **Park** / **parked** — `Service.Active = false`. A parked service stays in the
   seed and in the database, documented, but is skipped by the compiler. It is how
   a stopping pattern is retired without deleting it. (CA HSR's HSR Express is the
@@ -263,6 +265,7 @@ Returned as the `code` field of an error body.
 | --- | --- | --- |
 | `origin_out_of_range` | 422 | The origin cannot reach any station within the budget, by straight-line [reach](#reach-and-routing). Detail carries `nearest_station_slug`, `nearest_station_km`, `max_reach_km` |
 | `backlog_full` | 429 | `MAX_INFLIGHT_ISOCHRONES` routing jobs are already in flight. Carries `Retry-After` |
+| `rate_limited` | 429 | The per-caller limiter refused the request. Carries `Retry-After` |
 | `stop_placement` | 422 | A stop is off-route or out of chainage order. Detail carries the fault kind, route slug, threshold and the offending stops |
 | `stale_graph` | 409 | The compiled graph no longer matches its inputs; recompile and retry. Also the answer to publishing a service with no succeeded, non-stale compile |
 | `publish_failed` | 502 | The routing job row exists but could not be published to the queue, so it was marked failed immediately rather than being stranded in `queued`. The queue sense only — publishing a service never answers it |

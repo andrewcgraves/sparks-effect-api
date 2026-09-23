@@ -118,8 +118,40 @@ worker's abandoned rows from wedging the cap shut forever — and is why recover
 needs nothing: the count falls as the worker drains, or as jobs age out.
 
 The ceiling is per deployment, not per caller. That is deliberate: bounding
-total work is what it is for, and per-caller fairness needs a per-caller key,
-which is a separate piece of work.
+total work is what it is for. Per-caller fairness is a separate check, below.
+
+### Per-caller rate limits
+
+The expensive POST routes also carry an in-process token bucket (SPA-220),
+keyed by client IP and, when a session is present, user id. The client IP is
+taken from `X-Forwarded-For` by skipping `TRUSTED_PROXY_COUNT` hops from the
+right of every `X-Forwarded-For` value plus `RemoteAddr` (the TCP peer). A
+spoofed leftmost entry cannot pick the bucket; too high a count walks into
+those spoofed values — if buckets look shared across users, try 2, do not
+keep raising. Do not switch to leftmost `X-Forwarded-For`: Railway's hop
+count has drifted (a CDN/Fastly hop may appear; `X-Real-IP` is documented
+but has been the Fastly POP), and leftmost is client-controlled.
+
+Railway sits behind one reverse-proxy hop; the production `Load()` default
+is therefore 1. `0` ignores the header and uses `RemoteAddr` only — the
+right setting for a process that is not behind a proxy (set
+`TRUSTED_PROXY_COUNT=0` locally). When the count is at least 1 and
+`X-Forwarded-For` is empty, a valid `X-Real-IP` is used as a single hop; it
+is ignored when `X-Forwarded-For` is present.
+
+A refused request answers `429` with the `rate_limited` code and `Retry-After`.
+The four policies, overridable by env, are disabled only by `PER_MIN=0`
+(a zero burst is ignored and keeps the default burst):
+
+| Policy | Routes | Default |
+| --- | --- | --- |
+| Isochrone | All `POST .../isochrone` (one shared limiter) | 10/min, burst 5 |
+| Snap-stops | `POST /api/routes/{slug}/snap-stops` | 30/min, burst 10 |
+| Login | `POST /api/auth/login` | 5/min, burst 5 |
+| Compile | All three compile POSTs (one shared limiter) | 10/min, burst 3 |
+
+Ordinary CRUD, routing-job polling, public scenario/graph reads, `/healthz`,
+and `/api/internal/*` are not limited here.
 
 ### Polling a routing job
 
