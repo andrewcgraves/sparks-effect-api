@@ -16,6 +16,7 @@ const (
 	RuleZeroLength  = "zero_length"
 	RuleSameService = "same_service"
 	RuleNotMember   = "not_member"
+	RuleMaxLength   = "max_length"
 )
 
 type ValidationFault struct {

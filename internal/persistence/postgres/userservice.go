@@ -12,7 +12,7 @@ import (
 
 // --- User services (embedded stops, inline vehicle params) ---
 
-const userServiceColumns = `id, slug, route_id, owner_id, name, description,
+const userServiceColumns = `id, slug, route_id, owner_id, name, subtext, description,
 	vehicle, stops, boarding_wait_policy, boarding_wait_fixed_secs, created_at, updated_at`
 
 func (r *Repo) CreateUserService(ctx context.Context, svc transit.UserService) error {
@@ -30,10 +30,10 @@ func (r *Repo) CreateUserService(ctx context.Context, svc transit.UserService) e
 	kind, secs := boardingWaitArgs(svc.BoardingWait)
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO user_services
-		   (id, slug, route_id, owner_id, name, description, vehicle, stops,
+		   (id, slug, route_id, owner_id, name, subtext, description, vehicle, stops,
 		    boarding_wait_policy, boarding_wait_fixed_secs)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-		svc.ID, svc.Slug, svc.RouteID, svc.OwnerID, svc.Name, svc.Description,
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+		svc.ID, svc.Slug, svc.RouteID, svc.OwnerID, svc.Name, svc.Subtext, svc.Description,
 		vehicle, stops, kind, secs); err != nil {
 		return wrap("CreateUserService", err)
 	}
@@ -59,11 +59,11 @@ func (r *Repo) UpdateUserService(ctx context.Context, svc transit.UserService) e
 	kind, secs := boardingWaitArgs(svc.BoardingWait)
 	tag, err := tx.Exec(ctx,
 		`UPDATE user_services
-		    SET route_id = $2, name = $3, description = $4, vehicle = $5,
-		        stops = $6, boarding_wait_policy = $7, boarding_wait_fixed_secs = $8,
+		    SET route_id = $2, name = $3, subtext = $4, description = $5, vehicle = $6,
+		        stops = $7, boarding_wait_policy = $8, boarding_wait_fixed_secs = $9,
 		        updated_at = now()
 		  WHERE id = $1`,
-		svc.ID, svc.RouteID, svc.Name, svc.Description, vehicle, stops, kind, secs)
+		svc.ID, svc.RouteID, svc.Name, svc.Subtext, svc.Description, vehicle, stops, kind, secs)
 	if err != nil {
 		return wrap("UpdateUserService", err)
 	}
@@ -232,7 +232,7 @@ func scanUserService(row pgx.Row) (transit.UserService, error) {
 		secs           *int
 	)
 	if err := row.Scan(&svc.ID, &svc.Slug, &svc.RouteID, &svc.OwnerID, &svc.Name,
-		&svc.Description, &vehicle, &stops, &kind, &secs, &svc.CreatedAt, &svc.UpdatedAt); err != nil {
+		&svc.Subtext, &svc.Description, &vehicle, &stops, &kind, &secs, &svc.CreatedAt, &svc.UpdatedAt); err != nil {
 		return transit.UserService{}, err
 	}
 	svc.BoardingWait = scanBoardingWait(kind, secs)
