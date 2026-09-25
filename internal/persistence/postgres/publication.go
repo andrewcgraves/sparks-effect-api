@@ -94,6 +94,25 @@ func (r *Repo) GetServicePublication(ctx context.Context, serviceID string) (tra
 	return pub, true, nil
 }
 
+// GetServicePublicationBySlug is the public read. It joins user_services only
+// to turn the slug into an id and selects nothing from the draft row, so what
+// it returns cannot carry an unpublished edit (ADR-0005). An unpublished slug
+// and an unknown one both come back as not found.
+func (r *Repo) GetServicePublicationBySlug(ctx context.Context, slug string) (transit.ServicePublication, bool, error) {
+	pub, err := scanPublication(r.pool.QueryRow(ctx,
+		`SELECT p.user_service_id, p.compile_job_id, p.name, p.subtext, p.description, p.routes, p.published_at
+		   FROM service_publications p
+		   JOIN user_services s ON s.id = p.user_service_id
+		  WHERE s.slug = $1`, slug))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return transit.ServicePublication{}, false, nil
+	}
+	if err != nil {
+		return transit.ServicePublication{}, false, wrap("GetServicePublicationBySlug", err)
+	}
+	return pub, true, nil
+}
+
 func (r *Repo) GetSucceededCompileJob(ctx context.Context, id string) (transit.Job, bool, error) {
 	row := r.pool.QueryRow(ctx,
 		`SELECT `+jobColumns+` FROM jobs

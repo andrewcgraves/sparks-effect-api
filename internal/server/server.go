@@ -37,6 +37,7 @@ type AuthDeps interface {
 	handler.RoutingBacklogStore
 	handler.PrerenderedStore
 	handler.PublicationStore
+	handler.PublishedServiceStore
 	GetSessionUser(ctx context.Context, tokenHash string) (account.User, bool, error)
 }
 
@@ -290,10 +291,15 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 		authenticated(limitIso(requirePublisher(publisher,
 			capBacklog(handler.UserServiceIsochrone(deps, publisher, lg, cfg.BoardingWait))))))
 	// Publish pins the owner's latest non-stale compile and freezes the
-	// snapshot. Unpublish deletes it. There is no GET: a public read of the
-	// publication is its own resource (ADR-0005).
+	// snapshot. Unpublish deletes it.
 	mux.Handle("PUT /api/services/{slug}/publication", authenticated(handler.PublishService(deps, cfg.BoardingWait)))
 	mux.Handle("DELETE /api/services/{slug}/publication", authenticated(handler.UnpublishService(deps)))
+	// The public read of that snapshot, and the only route under
+	// /api/services that takes no identity — not even OptionalAuth, because
+	// its answer must not depend on who asks (ADR-0005). The draft reads and
+	// the compile above stay authenticated: publishing opens this resource,
+	// not those. The database-less 503 comes from the "/api/services/" entry.
+	mux.Handle("GET /api/services/{slug}/publication", handler.GetServicePublication(deps))
 
 	// User-owned scenarios: owner-scoped CRUD over a curated set of UserService
 	// ids. Named /api/user-scenarios, distinct from the public /api/scenarios

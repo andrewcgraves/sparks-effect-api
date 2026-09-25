@@ -443,7 +443,7 @@ Everyone else is then provisioned through `POST /api/admin/users`.
 
 ### Authorization
 
-Two rules, both enforced server-side:
+Four rules, all enforced server-side:
 
 - **Admin gating** — `RequireAdmin` protects account provisioning and is the
   gate route-write endpoints register behind.
@@ -457,6 +457,16 @@ Two rules, both enforced server-side:
   block anyone may point a service at, but admin-only to *mutate*. So
   referencing a route uses `CanReference`; authoring into a scenario uses
   `CanAccess`, because adding to a scenario is changing it.
+- **Publication** — the one public read of an authored service.
+  `GET /api/services/{slug}/publication` has no auth middleware at all and
+  reads only the snapshot in `service_publications` — the draft row is joined
+  for its slug and nothing else — so it answers everyone alike, owner included,
+  and never carries the draft. An unpublished slug gets the same 404
+  as an unknown one, both before the first publish and after an unpublish.
+  Publishing opens nothing else: the draft read, its graph, compile and every
+  write keep `CanAccess`, so a signed-in stranger still gets 404 there and an
+  anonymous caller 401. See
+  [ADR-0005](docs/adr/0005-publishing-an-authored-service.md).
 
 ### Database integration tests
 
