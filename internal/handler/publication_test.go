@@ -363,13 +363,206 @@ func TestPublishServiceHidesMissingAndStrangers(t *testing.T) {
 	}
 }
 
+var publicationReaders = []struct {
+	name string
+	user account.User
+}{
+	{"anonymous", account.User{}},
+	{"stranger", svcStranger},
+	{"owner", svcOwner},
+	{"admin", svcAdmin},
+}
+
+type publicationBody struct {
+	transit.ServicePublication
+	transit.TransitGraph
+}
+
+func TestGetServicePublicationServesTheSnapshotToEveryCaller(t *testing.T) {
+	store := newFakePublicationStore()
+	at := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	svc := seedPublicationService(store, "svc-1", "line-a", svcOwner.ID, at)
+	svc.Name = "Published name"
+	svc.Subtext = "Published subtext"
+	svc.Description = "Published description"
+	store.services[svc.ID] = svc
+	store.jobs = []transit.Job{succeededCompile(svc.ID, "job-1", at, []transit.Edge{
+		{FromSlug: "a", ToSlug: "b", Seconds: 60, RouteID: pubEdgeRoute},
+	})}
+	if rec := publishAs(t, store, transit.DefaultBoardingWaitPolicy(), svcOwner, svc.Slug); rec.Code != http.StatusOK {
+		t.Fatalf("publish: status = %d; body %s", rec.Code, rec.Body.String())
+	}
+
+	// The draft moves on after publishing: new prose, another alignment, and a
+	// newer compile with a different graph. None of it may reach the read.
+	svc.Name = "Draft name"
+	svc.Subtext = "Draft subtext"
+	svc.RouteID = pubOtherRoute
+	svc.UpdatedAt = at.Add(time.Hour)
+	store.services[svc.ID] = svc
+	store.jobs = append(store.jobs, succeededCompile(svc.ID, "job-2", at.Add(2*time.Hour), []transit.Edge{
+		{FromSlug: "x", ToSlug: "y", Seconds: 90, RouteID: pubOtherRoute},
+	}))
+
+	var first string
+	for _, reader := range publicationReaders {
+		rec := readPublicationAs(t, store, reader.user, svc.Slug)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: status = %d, want 200; body %s", reader.name, rec.Code, rec.Body.String())
+		}
+		if first == "" {
+			first = rec.Body.String()
+			continue
+		}
+		if rec.Body.String() != first {
+			t.Fatalf("%s read a different body than anonymous:\n got %s\nwant %s", reader.name, rec.Body.String(), first)
+		}
+	}
+
+	var got publicationBody
+	if err := json.Unmarshal([]byte(first), &got); err != nil {
+		t.Fatalf("decode: %v; body %s", err, first)
+	}
+	if got.UserServiceID != svc.ID || got.CompileJobID != "job-1" {
+		t.Fatalf("pin = service %q job %q, want %q / job-1", got.UserServiceID, got.CompileJobID, svc.ID)
+	}
+	if got.Name != "Published name" || got.Subtext != "Published subtext" || got.Description != "Published description" {
+		t.Fatalf("prose = %q / %q / %q, want the snapshot", got.Name, got.Subtext, got.Description)
+	}
+	if got.PublishedAt.IsZero() {
+		t.Fatal("published_at is zero")
+	}
+	if len(got.Services) != 1 || len(got.Services[0].Edges) != 1 || got.Services[0].Edges[0].FromSlug != "a" {
+		t.Fatalf("graph = %+v, want job-1's", got.Services)
+	}
+	if len(got.Routes) != 1 || got.Routes[0].ID != pubEdgeRoute {
+		t.Fatalf("routes = %+v, want the snapshot's %s", got.Routes, pubEdgeRoute)
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(first), &raw); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for _, key := range []string{"services", "routes", "published_at", "compile_job_id"} {
+		if _, ok := raw[key]; !ok {
+			t.Errorf("body has no %q key: %s", key, first)
+		}
+	}
+	for _, key := range []string{"owner_id", "route_id", "slug", "vehicle", "stops"} {
+		if _, ok := raw[key]; ok {
+			t.Errorf("body carries the draft's %q: %s", key, first)
+		}
+	}
+}
+
+func TestGetServicePublicationAnswersUnpublishedAsUnknown(t *testing.T) {
+	store := newFakePublicationStore()
+	at := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	svc := seedPublicationService(store, "svc-1", "line-a", svcOwner.ID, at)
+	store.jobs = []transit.Job{succeededCompile(svc.ID, "job-1", at, nil)}
+
+	unknown := readPublicationAs(t, store, account.User{}, "no-such-service")
+	if unknown.Code != http.StatusNotFound {
+		t.Fatalf("unknown slug: status = %d, want 404; body %s", unknown.Code, unknown.Body.String())
+	}
+	want := unknown.Body.String()
+
+	// Owner and admin included: the publication resource holds nothing until
+	// the service is published, whoever asks. The draft is a different URL.
+	assertHidden := func(stage string) {
+		t.Helper()
+		for _, reader := range publicationReaders {
+			rec := readPublicationAs(t, store, reader.user, svc.Slug)
+			if rec.Code != http.StatusNotFound || rec.Body.String() != want {
+				t.Fatalf("%s, %s: status %d body %s; want 404 %s", stage, reader.name, rec.Code, rec.Body.String(), want)
+			}
+		}
+	}
+
+	assertHidden("never published")
+
+	if rec := publishAs(t, store, transit.DefaultBoardingWaitPolicy(), svcOwner, svc.Slug); rec.Code != http.StatusOK {
+		t.Fatalf("publish: status = %d; body %s", rec.Code, rec.Body.String())
+	}
+	if rec := readPublicationAs(t, store, account.User{}, svc.Slug); rec.Code != http.StatusOK {
+		t.Fatalf("published read: status = %d; body %s", rec.Code, rec.Body.String())
+	}
+	if rec := unpublishAs(t, store, svcOwner, svc.Slug); rec.Code != http.StatusNoContent {
+		t.Fatalf("unpublish: status = %d; body %s", rec.Code, rec.Body.String())
+	}
+
+	assertHidden("unpublished")
+}
+
+func TestGetServicePublicationWithoutItsPinnedJob(t *testing.T) {
+	at := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	pinnedToNothing := func() *fakePublicationStore {
+		store := newFakePublicationStore()
+		svc := seedPublicationService(store, "svc-1", "line-a", svcOwner.ID, at)
+		store.pubs[svc.ID] = transit.ServicePublication{
+			UserServiceID: svc.ID, CompileJobID: "job-1", Name: "Published", Routes: []transit.Route{}, PublishedAt: at,
+		}
+		return store
+	}
+
+	t.Run("job gone", func(t *testing.T) {
+		store := pinnedToNothing()
+		want := readPublicationAs(t, store, account.User{}, "no-such-service").Body.String()
+		rec := readPublicationAs(t, store, account.User{}, "line-a")
+		if rec.Code != http.StatusNotFound || rec.Body.String() != want {
+			t.Fatalf("status %d body %s; want 404 %s", rec.Code, rec.Body.String(), want)
+		}
+	})
+
+	t.Run("job without a graph", func(t *testing.T) {
+		store := pinnedToNothing()
+		job := succeededCompile("svc-1", "job-1", at, nil)
+		job.Result = nil
+		store.jobs = []transit.Job{job}
+		rec := readPublicationAs(t, store, account.User{}, "line-a")
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("status = %d, want 500; body %s", rec.Code, rec.Body.String())
+		}
+		if strings.Contains(rec.Body.String(), "job-1") {
+			t.Fatalf("500 body leaks the job id: %s", rec.Body.String())
+		}
+	})
+}
+
+func TestGetServicePublicationStoreFailures(t *testing.T) {
+	at := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	for _, tt := range []struct {
+		name string
+		fail func(*fakePublicationStore)
+	}{
+		{"publication read", func(f *fakePublicationStore) { f.pubReadErr = context.DeadlineExceeded }},
+		{"pinned job read", func(f *fakePublicationStore) { f.jobReadErr = context.DeadlineExceeded }},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			store := newFakePublicationStore()
+			svc := seedPublicationService(store, "svc-1", "line-a", svcOwner.ID, at)
+			store.jobs = []transit.Job{succeededCompile(svc.ID, "job-1", at, nil)}
+			if rec := publishAs(t, store, transit.DefaultBoardingWaitPolicy(), svcOwner, svc.Slug); rec.Code != http.StatusOK {
+				t.Fatalf("publish: status = %d; body %s", rec.Code, rec.Body.String())
+			}
+			tt.fail(store)
+			rec := readPublicationAs(t, store, account.User{}, svc.Slug)
+			if rec.Code != http.StatusInternalServerError {
+				t.Fatalf("status = %d, want 500; body %s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
 type fakePublicationStore struct {
-	services map[string]transit.UserService
-	jobs     []transit.Job
-	routes   map[string]transit.Route
-	pubs     map[string]transit.ServicePublication
-	writes   int
-	now      time.Time
+	services   map[string]transit.UserService
+	jobs       []transit.Job
+	routes     map[string]transit.Route
+	pubs       map[string]transit.ServicePublication
+	writes     int
+	now        time.Time
+	pubReadErr error
+	jobReadErr error
 }
 
 func newFakePublicationStore() *fakePublicationStore {
@@ -425,6 +618,31 @@ func (f *fakePublicationStore) PublishUserService(ctx context.Context, id string
 func (f *fakePublicationStore) UnpublishUserService(_ context.Context, id string) error {
 	delete(f.pubs, id)
 	return nil
+}
+
+func (f *fakePublicationStore) GetServicePublicationBySlug(_ context.Context, slug string) (transit.ServicePublication, bool, error) {
+	if f.pubReadErr != nil {
+		return transit.ServicePublication{}, false, f.pubReadErr
+	}
+	for _, svc := range f.services {
+		if svc.Slug == slug {
+			pub, ok := f.pubs[svc.ID]
+			return pub, ok, nil
+		}
+	}
+	return transit.ServicePublication{}, false, nil
+}
+
+func (f *fakePublicationStore) GetSucceededCompileJob(_ context.Context, id string) (transit.Job, bool, error) {
+	if f.jobReadErr != nil {
+		return transit.Job{}, false, f.jobReadErr
+	}
+	for _, j := range f.jobs {
+		if j.ID == id && j.Kind == transit.JobKindCompileUserService && j.Status == transit.JobStatusSucceeded {
+			return j, true, nil
+		}
+	}
+	return transit.Job{}, false, nil
 }
 
 func (f *fakePublicationStore) LatestSucceededCompileJob(_ context.Context, serviceID string) (transit.Job, bool, error) {
@@ -485,6 +703,13 @@ func publicationMux(store handler.PublicationStore, policy transit.BoardingWaitP
 	mux.HandleFunc("PUT /api/services/{slug}/publication", handler.PublishService(store, policy))
 	mux.HandleFunc("DELETE /api/services/{slug}/publication", handler.UnpublishService(store))
 	return mux
+}
+
+func readPublicationAs(t *testing.T, store handler.PublishedServiceStore, user account.User, slug string) *httptest.ResponseRecorder {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/services/{slug}/publication", handler.GetServicePublication(store))
+	return publicationRequest(t, mux, http.MethodGet, "/api/services/"+slug+"/publication", user)
 }
 
 func publishAs(t *testing.T, store handler.PublicationStore, policy transit.BoardingWaitPolicy, user account.User, slug string) *httptest.ResponseRecorder {

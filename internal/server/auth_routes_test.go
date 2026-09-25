@@ -156,6 +156,12 @@ func (s *stubAuthDeps) PublishUserService(context.Context, string, handler.Publi
 	return transit.ServicePublication{}, nil
 }
 func (s *stubAuthDeps) UnpublishUserService(context.Context, string) error { return nil }
+func (s *stubAuthDeps) GetServicePublicationBySlug(context.Context, string) (transit.ServicePublication, bool, error) {
+	return transit.ServicePublication{}, false, nil
+}
+func (s *stubAuthDeps) GetSucceededCompileJob(context.Context, string) (transit.Job, bool, error) {
+	return transit.Job{}, false, nil
+}
 func (s *stubAuthDeps) ListUserServicesByIDs(context.Context, []string) ([]transit.UserService, error) {
 	return nil, nil
 }
@@ -258,6 +264,13 @@ func TestProtectedRoutesRejectAnonymousCallers(t *testing.T) {
 		{http.MethodPost, "/api/admin/routes"},
 		{http.MethodPost, "/api/scenarios/ca-hsr/compile"},
 		{http.MethodGet, "/api/jobs/some-id"},
+		// The authored draft surface. GET .../publication is the one public
+		// route under /api/services; everything else here stays behind the gate.
+		{http.MethodPost, "/api/services"},
+		{http.MethodGet, "/api/services"},
+		{http.MethodGet, "/api/services/some-slug"},
+		{http.MethodPut, "/api/services/some-slug"},
+		{http.MethodDelete, "/api/services/some-slug"},
 		{http.MethodPost, "/api/services/some-slug/compile"},
 		{http.MethodGet, "/api/services/some-slug/graph"},
 		{http.MethodPost, "/api/services/some-slug/isochrone"},
@@ -480,6 +493,7 @@ func TestAuthRoutesReportUnavailableWithoutADatabase(t *testing.T) {
 		{http.MethodPost, "/api/services/some-slug/isochrone"},
 		{http.MethodPut, "/api/services/some-slug/publication"},
 		{http.MethodDelete, "/api/services/some-slug/publication"},
+		{http.MethodGet, "/api/services/some-slug/publication"},
 		{http.MethodGet, "/api/internal/worker"},
 	} {
 		t.Run(p.method+" "+p.path, func(t *testing.T) {

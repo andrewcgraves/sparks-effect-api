@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -22,6 +23,57 @@ type PublicationStore interface {
 	GetUserServiceBySlug(ctx context.Context, slug string) (transit.UserService, bool, error)
 	PublishUserService(ctx context.Context, serviceID string, decide PublicationDecide) (transit.ServicePublication, error)
 	UnpublishUserService(ctx context.Context, serviceID string) error
+}
+
+type PublishedServiceStore interface {
+	GetServicePublicationBySlug(ctx context.Context, slug string) (transit.ServicePublication, bool, error)
+	GetSucceededCompileJob(ctx context.Context, id string) (transit.Job, bool, error)
+}
+
+// The graph is embedded flat, as compiledGraphResponse embeds it, so a client
+// that draws GET /api/services/{slug}/graph can draw a publication unchanged.
+type publicationResponse struct {
+	transit.ServicePublication
+	*transit.TransitGraph
+}
+
+func GetServicePublication(store PublishedServiceStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// No identity is read, so the response depends on the slug alone: the
+		// owner sees what everyone sees, and a shared cache cannot mix a draft
+		// into it. The draft stays at GET /api/services/{slug} (ADR-0005).
+		pub, found, err := store.GetServicePublicationBySlug(r.Context(), r.PathValue("slug"))
+		if err != nil {
+			writeInternalError(r.Context(), w, "loading publication", err)
+			return
+		}
+		// Unpublished answers exactly as unknown does, before a first publish
+		// and after an unpublish alike. Anything else confirms to a stranger
+		// that a draft exists behind a guessed slug.
+		if !found {
+			writeError(w, http.StatusNotFound, "service not found")
+			return
+		}
+
+		job, found, err := store.GetSucceededCompileJob(r.Context(), pub.CompileJobID)
+		if err != nil {
+			writeInternalError(r.Context(), w, "loading published graph", err)
+			return
+		}
+		// The pin's foreign key holds the job for as long as it is pinned, so a
+		// miss means the publication just read was removed in between — most
+		// plausibly the service being deleted.
+		if !found {
+			writeError(w, http.StatusNotFound, "service not found")
+			return
+		}
+		if job.Result == nil {
+			writeInternalError(r.Context(), w, "loading published graph",
+				fmt.Errorf("pinned compile job %s has no graph", job.ID))
+			return
+		}
+		writeJSON(w, http.StatusOK, publicationResponse{ServicePublication: pub, TransitGraph: job.Result})
+	}
 }
 
 func PublishService(store PublicationStore, boardingWait transit.BoardingWaitPolicy) http.HandlerFunc {
