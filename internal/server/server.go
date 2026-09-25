@@ -36,6 +36,7 @@ type AuthDeps interface {
 	handler.WorkerStore
 	handler.RoutingBacklogStore
 	handler.PrerenderedStore
+	handler.PublicationStore
 	GetSessionUser(ctx context.Context, tokenHash string) (account.User, bool, error)
 }
 
@@ -288,6 +289,11 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 	mux.Handle("POST /api/services/{slug}/isochrone",
 		authenticated(limitIso(requirePublisher(publisher,
 			capBacklog(handler.UserServiceIsochrone(deps, publisher, lg, cfg.BoardingWait))))))
+	// Publish pins the owner's latest non-stale compile and freezes the
+	// snapshot. Unpublish deletes it. There is no GET: a public read of the
+	// publication is its own resource (ADR-0005).
+	mux.Handle("PUT /api/services/{slug}/publication", authenticated(handler.PublishService(deps, cfg.BoardingWait)))
+	mux.Handle("DELETE /api/services/{slug}/publication", authenticated(handler.UnpublishService(deps)))
 
 	// User-owned scenarios: owner-scoped CRUD over a curated set of UserService
 	// ids. Named /api/user-scenarios, distinct from the public /api/scenarios
