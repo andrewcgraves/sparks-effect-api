@@ -19,8 +19,9 @@ import (
 )
 
 type stubAuthDeps struct {
-	sessions map[string]account.User
-	inFlight int
+	sessions  map[string]account.User
+	inFlight  int
+	published []transit.PublishedServiceSummary
 }
 
 func (s *stubAuthDeps) GetSessionUser(_ context.Context, tokenHash string) (account.User, bool, error) {
@@ -161,6 +162,9 @@ func (s *stubAuthDeps) GetServicePublicationBySlug(context.Context, string) (tra
 }
 func (s *stubAuthDeps) GetSucceededCompileJob(context.Context, string) (transit.Job, bool, error) {
 	return transit.Job{}, false, nil
+}
+func (s *stubAuthDeps) ListPublishedServiceSummaries(context.Context) ([]transit.PublishedServiceSummary, error) {
+	return s.published, nil
 }
 func (s *stubAuthDeps) ListUserServicesByIDs(context.Context, []string) ([]transit.UserService, error) {
 	return nil, nil
@@ -532,6 +536,12 @@ func TestAuthRoutesReportUnavailableWithoutADatabase(t *testing.T) {
 	// above.
 	if rec := request(t, h, http.MethodGet, "/api/scenarios/ca-hsr/graph", ""); rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("graph read status = %d, want 503 with no database configured", rec.Code)
+	}
+
+	// Publications live only in Postgres, and the index is public, so it is
+	// checked anonymously here rather than in the auth-gated loop above.
+	if rec := request(t, h, http.MethodGet, "/api/published-services", ""); rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("published index status = %d, want 503 with no database configured", rec.Code)
 	}
 
 	// Prerendered isochrones live only in Postgres. Their database-less

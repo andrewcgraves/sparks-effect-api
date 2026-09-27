@@ -705,7 +705,7 @@ func publicationMux(store handler.PublicationStore, policy transit.BoardingWaitP
 	return mux
 }
 
-func readPublicationAs(t *testing.T, store handler.PublishedServiceStore, user account.User, slug string) *httptest.ResponseRecorder {
+func readPublicationAs(t *testing.T, store handler.ServicePublicationStore, user account.User, slug string) *httptest.ResponseRecorder {
 	t.Helper()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/services/{slug}/publication", handler.GetServicePublication(store))

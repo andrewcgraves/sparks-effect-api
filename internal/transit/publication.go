@@ -11,3 +11,10 @@ type ServicePublication struct {
 	Routes        []Route   `json:"routes"`
 	PublishedAt   time.Time `json:"published_at"`
 }
+
+type PublishedServiceSummary struct {
+	Slug        string `json:"slug"`
+	Name        string `json:"name"`
+	Subtext     string `json:"subtext,omitempty"`
+	Description string `json:"description,omitempty"`
+}

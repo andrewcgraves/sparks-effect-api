@@ -25,7 +25,7 @@ type PublicationStore interface {
 	UnpublishUserService(ctx context.Context, serviceID string) error
 }
 
-type PublishedServiceStore interface {
+type ServicePublicationStore interface {
 	GetServicePublicationBySlug(ctx context.Context, slug string) (transit.ServicePublication, bool, error)
 	GetSucceededCompileJob(ctx context.Context, id string) (transit.Job, bool, error)
 }
@@ -37,7 +37,7 @@ type publicationResponse struct {
 	*transit.TransitGraph
 }
 
-func GetServicePublication(store PublishedServiceStore) http.HandlerFunc {
+func GetServicePublication(store ServicePublicationStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// No identity is read, so the response depends on the slug alone: the
 		// owner sees what everyone sees, and a shared cache cannot mix a draft
