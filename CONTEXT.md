@@ -28,7 +28,7 @@ holding.
 | **Scenario** | `transit.Scenario` | `/api/scenarios` (public), `/api/me/scenarios` (owner-scoped) | The seeded world model: metadata plus routes, stations, services and segment times hanging off it |
 | **UserScenario** | `transit.UserScenario` | `/api/user-scenarios` | **A different model entirely** — a named set of `UserService` ids, plus declared interchange pairs and a boarding-wait override. No stations, no routes, no segment times of its own |
 | **Service** | `transit.Service` | `/api/scenarios/{slug}/services` (public), `/api/me/services` (owner-scoped) | A stopping pattern over a `Route`, calling at `Station` rows, driven by a `VehicleType` row |
-| **UserService** | `transit.UserService` | `/api/services` — *not* `/api/me/services` | The authored counterpart: carries its own stops (name + coordinate, snapped to a route) and inline `VehicleParams` instead of pointing at rows |
+| **UserService** | `transit.UserService` | `/api/services` — *not* `/api/me/services`. Its publication, once published, is public at `/api/services/{slug}/publication` | The authored counterpart: carries its own stops (name + coordinate, snapped to a route) and inline `VehicleParams` instead of pointing at rows |
 
 Two traps worth stating out loud:
 

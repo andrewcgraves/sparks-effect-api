@@ -571,6 +571,54 @@ func TestUnpublishMissingServiceIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestGetServicePublicationBySlug(t *testing.T) {
+	repo, ctx, _ := userServiceFixture(t)
+	svc := sampleUserService()
+	if err := repo.CreateUserService(ctx, svc); err != nil {
+		t.Fatalf("CreateUserService: %v", err)
+	}
+	succeedUserServiceCompile(t, repo, ctx, svc.ID, pubJobID, nil)
+
+	// Compiled is not published.
+	if _, found, err := repo.GetServicePublicationBySlug(ctx, svc.Slug); err != nil || found {
+		t.Fatalf("unpublished slug: found=%v err=%v, want not found", found, err)
+	}
+	if _, found, err := repo.GetServicePublicationBySlug(ctx, "no-such-service"); err != nil || found {
+		t.Fatalf("unknown slug: found=%v err=%v, want not found", found, err)
+	}
+
+	want, err := publishUserService(ctx, repo, svc.ID)
+	if err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	// An edit after publishing must not reach the read: it selects nothing
+	// from the draft row it joins through.
+	stored, _, err := repo.GetUserServiceByID(ctx, svc.ID)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	stored.Name = "Edited after publish"
+	stored.Subtext = "Edited subtext"
+	stored.RouteID = usRouteID2
+	if err := repo.UpdateUserService(ctx, stored); err != nil {
+		t.Fatalf("UpdateUserService: %v", err)
+	}
+
+	got, found, err := repo.GetServicePublicationBySlug(ctx, svc.Slug)
+	if err != nil || !found {
+		t.Fatalf("published slug: found=%v err=%v", found, err)
+	}
+	samePublication(t, got, want)
+
+	if err := repo.UnpublishUserService(ctx, svc.ID); err != nil {
+		t.Fatalf("unpublish: %v", err)
+	}
+	if _, found, err := repo.GetServicePublicationBySlug(ctx, svc.Slug); err != nil || found {
+		t.Fatalf("unpublished again: found=%v err=%v, want not found", found, err)
+	}
+}
+
 func TestGetSucceededCompileJob(t *testing.T) {
 	repo, ctx, _ := userServiceFixture(t)
 	svc := sampleUserService()

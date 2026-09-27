@@ -140,13 +140,19 @@ func TestIntegration_PublishFreezesSnapshotAndDraftReadStaysLive(t *testing.T) {
 		t.Fatalf("frozen geometry = %+v, want %v", frozen.Routes, geomB)
 	}
 
-	rec = request(t, h, http.MethodGet, "/api/services/"+created.Slug+"/publication", owner)
-	if rec.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("GET publication: status %d, want 405; body %s", rec.Code, rec.Body.String())
+	rec = request(t, h, http.MethodGet, "/api/services/"+created.Slug+"/publication", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET publication: status %d, want 200; body %s", rec.Code, rec.Body.String())
 	}
-	if strings.Contains(rec.Header().Get("Content-Type"), "application/json") ||
-		strings.Contains(rec.Body.String(), "compile_job_id") {
-		t.Fatalf("GET publication returned a handler body: %s", rec.Body.String())
+	var public transit.ServicePublication
+	if err := json.Unmarshal(rec.Body.Bytes(), &public); err != nil {
+		t.Fatalf("decode public read: %v", err)
+	}
+	if public.Name != "Published Line" || public.Subtext != "Electrified · Express" || public.Description != "The draft." {
+		t.Fatalf("public read prose = %q / %q / %q, want the snapshot", public.Name, public.Subtext, public.Description)
+	}
+	if len(public.Routes) != 1 || !floatCoordsEqual(public.Routes[0].Geometry.Coordinates, geomB) {
+		t.Fatalf("public read geometry = %+v, want the frozen %v", public.Routes, geomB)
 	}
 
 	rec = request(t, h, http.MethodPut, "/api/services/"+created.Slug+"/publication", owner)
