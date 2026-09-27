@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
@@ -98,6 +99,17 @@ func (r *Repo) PutIsochroneCache(ctx context.Context, entries []handler.CachedIs
 		return nil
 	}
 
+	// A conflicting row is replaced only by a usable polygon, and only when
+	// the stored one is unusable or was cut from an older or unknown tileset
+	// (SPA-328). Under DO NOTHING a row the worker rejects on read was
+	// recomputed and then dropped, on every request, forever; an unconditional
+	// DO UPDATE would let a synthetic or stale-tileset worker overwrite a good
+	// row instead. A conflict that fails the guard is a no-op, not an error, so
+	// it still cannot fail a job.
+	//
+	// DO UPDATE can deadlock two concurrent batches touching the same keys in
+	// different orders, which DO NOTHING could not. One worker replica at
+	// prefetch 1 means there is only ever one writer.
 	batch := &pgx.Batch{}
 	for _, e := range entries {
 		var tilesetAt *time.Time
@@ -105,11 +117,7 @@ func (r *Repo) PutIsochroneCache(ctx context.Context, entries []handler.CachedIs
 			at := e.TilesetAt
 			tilesetAt = &at
 		}
-		batch.Queue(
-			`INSERT INTO isochrone_cache
-			     (compile_job_id, station_slug, mode, contour_mins, geometry, tileset_at, departs_on)
-			  VALUES ($1::uuid, $2, $3, $4, $5, $6, NULLIF($7, '')::date)
-			  ON CONFLICT ON CONSTRAINT isochrone_cache_key DO NOTHING`,
+		batch.Queue(putIsochroneCacheSQL,
 			e.Key.CompileJobID, e.Key.StationSlug, e.Key.Mode, e.Key.ContourMins,
 			[]byte(e.Geometry), tilesetAt, e.Key.DepartsOn)
 	}
@@ -118,4 +126,29 @@ func (r *Repo) PutIsochroneCache(ctx context.Context, entries []handler.CachedIs
 		return wrap("PutIsochroneCache", err)
 	}
 	return nil
+}
+
+var putIsochroneCacheSQL = `INSERT INTO isochrone_cache
+     (compile_job_id, station_slug, mode, contour_mins, geometry, tileset_at, departs_on)
+  VALUES ($1::uuid, $2, $3, $4, $5, $6, NULLIF($7, '')::date)
+  ON CONFLICT ON CONSTRAINT isochrone_cache_key DO UPDATE
+     SET geometry = excluded.geometry, tileset_at = excluded.tileset_at
+   WHERE ` + usableGeometrySQL("excluded.geometry") + `
+     AND (NOT ` + usableGeometrySQL("isochrone_cache.geometry") + `
+          OR (excluded.tileset_at IS NOT NULL
+              AND (isochrone_cache.tileset_at IS NULL
+                   OR excluded.tileset_at > isochrone_cache.tileset_at)))`
+
+func usableGeometrySQL(col string) string {
+	// The worker's own test for a row it will serve: the geometry unmarshals
+	// into valhalla.IsochroneResponse ({type string, features
+	// []json.RawMessage}) and isochrone.usable finds at least one feature.
+	// Nothing fails if the two drift, so change both together. Every term is
+	// NULL-safe so that NOT of it is never NULL: a missing key must read as
+	// unusable, not unknown. encoding/json matches keys case-insensitively and
+	// this does not, which only errs toward replacing a row.
+	return strings.NewReplacer("$g", col).Replace(
+		`(COALESCE(jsonb_typeof($g->'features'), '') = 'array'
+		  AND $g->'features' <> '[]'::jsonb
+		  AND COALESCE(jsonb_typeof($g->'type'), 'null') IN ('string', 'null'))`)
 }

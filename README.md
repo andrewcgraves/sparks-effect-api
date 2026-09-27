@@ -92,6 +92,15 @@ rather than being left unauthenticated. Deploy this side before the worker:
 its startup ping is `GET /api/internal/worker`. Transit cache rows also carry
 `departs_on` (SPA-269); walk/bike/drive omit it.
 
+A cache write that collides with an existing row replaces it only when the
+incoming polygon is usable and either the stored one is not (the worker
+discards it on read) or the incoming `tileset_at` is newer — a NULL stamp loses
+to a real one (SPA-328). Otherwise the conflict is a silent no-op, so a
+synthetic or stale-tileset worker cannot overwrite a good row, and a bad row is
+no longer recomputed and dropped on every request. The "usable" test is the
+worker's `isochrone.usable` re-expressed as jsonb in
+`internal/persistence/postgres/worker.go`; nothing fails if the two drift.
+
 Travel mode is stored in the domain's own vocabulary — `walk` / `bike` /
 `drive` / `transit` ([CONTEXT.md](CONTEXT.md#travel-mode-vs-costing)). "Costing"
 is Valhalla's word for the same concept and stays at the worker's client
