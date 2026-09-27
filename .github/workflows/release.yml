@@ -168,6 +168,19 @@ jobs:
             echo "configured=true" >> "$GITHUB_OUTPUT"
           fi
 
+      # install.sh inside linear-release-action downloads its CLI with a bare
+      # curl and no retry, so a single connection reset from github.com fails
+      # the job (curl exit 35). curl reads $CURL_HOME/.curlrc before its own
+      # arguments, and the action's composite steps inherit $GITHUB_ENV, so
+      # this makes every curl in the action retry without forking it.
+      - name: Retry the Linear CLI download on transient network errors
+        if: steps.linear.outputs.configured == 'true'
+        run: |
+          set -euo pipefail
+          printf '%s\n' 'retry = 5' 'retry-all-errors' 'retry-delay = 3' 'retry-max-time = 120' \
+            > "$RUNNER_TEMP/.curlrc"
+          echo "CURL_HOME=$RUNNER_TEMP" >> "$GITHUB_ENV"
+
       # Operator base_ref wins. Otherwise the exclusive lower bound is the
       # previous vMAJOR.MINOR.PATCH tag, so a production release records every
       # issue since the last tag went to production — including when Linear
