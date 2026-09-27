@@ -15,9 +15,9 @@ import (
 func (r *Repo) UpdateScenario(ctx context.Context, sc transit.Scenario) error {
 	tag, err := r.pool.Exec(ctx,
 		`UPDATE scenarios
-		    SET name = $2, description = $3, status = $4, updated_at = now()
+		    SET name = $2, description = $3, updated_at = now()
 		  WHERE id = $1`,
-		sc.ID, sc.Name, sc.Description, sc.Status)
+		sc.ID, sc.Name, sc.Description)
 	if err != nil {
 		return wrap("UpdateScenario", err)
 	}

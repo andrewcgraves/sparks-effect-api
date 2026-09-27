@@ -76,8 +76,8 @@ func (f *fakeOwnedScenarioStore) CountUnownedScenarioChildren(_ context.Context,
 	return f.curated[id], nil
 }
 
-func scenarioBody(name, description, status string) string {
-	return `{"name":"` + name + `","description":"` + description + `","status":"` + status + `"}`
+func scenarioBody(name, description string) string {
+	return `{"name":"` + name + `","description":"` + description + `"}`
 }
 
 func asScenarioUser(t *testing.T, h http.HandlerFunc, user account.User, method, target, body string) *httptest.ResponseRecorder {
@@ -90,7 +90,7 @@ func TestCreateOwnedScenarioStampsTheCallerAsOwner(t *testing.T) {
 	store := newFakeOwnedScenarioStore()
 
 	rec := asScenarioUser(t, handler.CreateOwnedScenario(store), memberA,
-		http.MethodPost, "/api/me/scenarios", scenarioBody("Bay Area Rail", "my network", "draft"))
+		http.MethodPost, "/api/me/scenarios", scenarioBody("Bay Area Rail", "my network"))
 
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status: want 201, got %d (%s)", rec.Code, rec.Body)
@@ -105,8 +105,8 @@ func TestCreateOwnedScenarioStampsTheCallerAsOwner(t *testing.T) {
 	if got.Slug != "bay-area-rail" {
 		t.Errorf("slug: want bay-area-rail, got %q", got.Slug)
 	}
-	if got.Description != "my network" || got.Status != "draft" {
-		t.Errorf("description/status not carried: %+v", got)
+	if got.Description != "my network" {
+		t.Errorf("description not carried: %+v", got)
 	}
 	if loc := rec.Header().Get("Location"); loc != "/api/me/scenarios/bay-area-rail" {
 		t.Errorf("Location: want /api/me/scenarios/bay-area-rail, got %q", loc)
@@ -117,7 +117,7 @@ func TestCreateOwnedScenarioWorksAroundACollidingCuratedSlug(t *testing.T) {
 	store := newFakeOwnedScenarioStore()
 
 	rec := asScenarioUser(t, handler.CreateOwnedScenario(store), memberA,
-		http.MethodPost, "/api/me/scenarios", scenarioBody("CA HSR", "", ""))
+		http.MethodPost, "/api/me/scenarios", scenarioBody("CA HSR", ""))
 
 	var got transit.Scenario
 	_ = json.Unmarshal(rec.Body.Bytes(), &got)
@@ -130,7 +130,7 @@ func TestCreateOwnedScenarioRequiresAName(t *testing.T) {
 	store := newFakeOwnedScenarioStore()
 
 	rec := asScenarioUser(t, handler.CreateOwnedScenario(store), memberA,
-		http.MethodPost, "/api/me/scenarios", scenarioBody("   ", "", ""))
+		http.MethodPost, "/api/me/scenarios", scenarioBody("   ", ""))
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Errorf("status: want 422, got %d (%s)", rec.Code, rec.Body)
 	}
@@ -140,7 +140,7 @@ func TestCreateOwnedScenarioRejectsAnUnsluggableName(t *testing.T) {
 	store := newFakeOwnedScenarioStore()
 
 	rec := asScenarioUser(t, handler.CreateOwnedScenario(store), memberA,
-		http.MethodPost, "/api/me/scenarios", scenarioBody("!!!", "", ""))
+		http.MethodPost, "/api/me/scenarios", scenarioBody("!!!", ""))
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Errorf("status: want 422, got %d (%s)", rec.Code, rec.Body)
 	}
@@ -158,7 +158,7 @@ func TestCuratedScenarioIsNotEditableByANonAdmin(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			store := newFakeOwnedScenarioStore()
 			rec := asScenarioUser(t, handler.UpdateOwnedScenario(store), tc.user,
-				http.MethodPut, "/api/me/scenarios/ca-hsr", scenarioBody("Hijacked", "", ""))
+				http.MethodPut, "/api/me/scenarios/ca-hsr", scenarioBody("Hijacked", ""))
 			if rec.Code != tc.want {
 				t.Errorf("status: want %d, got %d (%s)", tc.want, rec.Code, rec.Body)
 			}
@@ -201,7 +201,7 @@ func TestUpdateOwnedScenarioKeepsTheSlugAndTheOwner(t *testing.T) {
 	}
 
 	rec := asScenarioUser(t, handler.UpdateOwnedScenario(store), memberA,
-		http.MethodPut, "/api/me/scenarios/a-draft", scenarioBody("Renamed", "new prose", "published"))
+		http.MethodPut, "/api/me/scenarios/a-draft", scenarioBody("Renamed", "new prose"))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status: want 200, got %d (%s)", rec.Code, rec.Body)
 	}
@@ -211,7 +211,7 @@ func TestUpdateOwnedScenarioKeepsTheSlugAndTheOwner(t *testing.T) {
 	if got.Slug != "a-draft" {
 		t.Errorf("slug: want it unchanged, got %q", got.Slug)
 	}
-	if got.Name != "Renamed" || got.Description != "new prose" || got.Status != "published" {
+	if got.Name != "Renamed" || got.Description != "new prose" {
 		t.Errorf("fields not updated: %+v", got)
 	}
 	if got.OwnerID == nil || *got.OwnerID != ownerAID {
@@ -283,7 +283,7 @@ func TestOwnedScenarioStorageFailureIsAnOpaque500(t *testing.T) {
 	store.failWith = fmt.Errorf("connection refused")
 
 	rec := asScenarioUser(t, handler.CreateOwnedScenario(store), memberA,
-		http.MethodPost, "/api/me/scenarios", scenarioBody("Mine", "", ""))
+		http.MethodPost, "/api/me/scenarios", scenarioBody("Mine", ""))
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status: want 500, got %d", rec.Code)
 	}

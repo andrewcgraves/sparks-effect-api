@@ -20,7 +20,6 @@ type Scenario struct {
 	Slug        string  `yaml:"slug"        json:"slug"`
 	Name        string  `yaml:"name"        json:"name"`
 	Description string  `yaml:"description" json:"description"`
-	Status      string  `yaml:"status"      json:"status"`
 	OwnerID     *string `yaml:"owner_id,omitempty" json:"owner_id,omitempty"`
 }
 

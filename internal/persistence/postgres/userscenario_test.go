@@ -33,7 +33,7 @@ func userScenarioFixture(t *testing.T) (*postgres.Repo, context.Context) {
 		}
 	}
 	if err := repo.CreateScenario(ctx, transit.Scenario{
-		ID: usnScenarioID, Slug: "usn-net", Name: "User Scenario Net", Status: "draft",
+		ID: usnScenarioID, Slug: "usn-net", Name: "User Scenario Net",
 	}); err != nil {
 		t.Fatalf("CreateScenario: %v", err)
 	}

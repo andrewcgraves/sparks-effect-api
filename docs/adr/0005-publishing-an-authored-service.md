@@ -234,8 +234,7 @@ It is **not** renamed into, or reused as, publication state. Curated scenarios
 are public by virtue of `owner_id IS NULL`, not by being published, and seeded
 scenarios are not published — they are curated. The column, the `status` field
 on `transit.Scenario` and the seed YAML, and the `status` key on
-`GET /api/scenarios` are removed in a follow-up ticket. Until then it is dead
-data and must not be read.
+`GET /api/scenarios` were removed by SPA-362 (migration 00028).
 
 ## Consequences
 

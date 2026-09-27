@@ -336,7 +336,7 @@ func TestWritableDomainRoundTrip(t *testing.T) {
 	)
 
 	if err := repo.CreateScenario(ctx, transit.Scenario{
-		ID: scenarioID, Slug: "test-net", Name: "Test Net", Status: "draft",
+		ID: scenarioID, Slug: "test-net", Name: "Test Net",
 	}); err != nil {
 		t.Fatalf("CreateScenario: %v", err)
 	}

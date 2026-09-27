@@ -92,9 +92,6 @@ func TestGetScenarioBySlug_found(t *testing.T) {
 	if sc.Name == "" {
 		t.Error("scenario name is empty")
 	}
-	if sc.Status != "published" {
-		t.Errorf("status: want published, got %s", sc.Status)
-	}
 }
 
 func TestGetScenarioBySlug_notFound(t *testing.T) {

@@ -44,8 +44,8 @@ func TestScenarios_list(t *testing.T) {
 			if sc["name"] == nil || sc["name"] == "" {
 				t.Error("ca-hsr scenario missing name")
 			}
-			if sc["status"] == nil || sc["status"] == "" {
-				t.Error("ca-hsr scenario missing status")
+			if _, ok := sc["status"]; ok {
+				t.Error("ca-hsr scenario still carries the retired status key")
 			}
 		}
 	}
