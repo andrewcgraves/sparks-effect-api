@@ -14,7 +14,7 @@ func ownedScenarioFixture(t *testing.T, h http.Handler, token string) string {
 	t.Helper()
 
 	rec := authedRequest(t, h, token, http.MethodPost, "/api/me/scenarios",
-		`{"name":"Bay Area Rail","description":"my network","status":"draft"}`)
+		`{"name":"Bay Area Rail","description":"my network"}`)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("creating scenario: status %d, body %s", rec.Code, rec.Body.String())
 	}

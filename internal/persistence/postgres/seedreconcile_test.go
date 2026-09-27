@@ -75,7 +75,7 @@ func TestReconcileSeedDoesNotClobberAnAuthoredScenario(t *testing.T) {
 	ownerID := owner.ID
 	sc := transit.Scenario{
 		ID: "00000000-0000-4001-8009-000000000001", Slug: "authored",
-		Name: "Mine", Status: "draft", OwnerID: &ownerID,
+		Name: "Mine", OwnerID: &ownerID,
 	}
 	if err := repo.CreateScenario(ctx, sc); err != nil {
 		t.Fatalf("CreateScenario: %v", err)

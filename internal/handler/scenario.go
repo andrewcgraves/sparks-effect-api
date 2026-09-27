@@ -11,7 +11,6 @@ type scenarioListItem struct {
 	Slug        string `json:"slug"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	Status      string `json:"status"`
 }
 
 type vehicleTypeSummary struct {
@@ -37,7 +36,6 @@ type scenarioDetail struct {
 	Slug        string            `json:"slug"`
 	Name        string            `json:"name"`
 	Description string            `json:"description"`
-	Status      string            `json:"status"`
 	Routes      []transit.Route   `json:"routes"`
 	Stations    []transit.Station `json:"stations"`
 	Services    []serviceSummary  `json:"services"`
@@ -53,7 +51,6 @@ func Scenarios(store *transit.Store) http.HandlerFunc {
 				Slug:        sc.Slug,
 				Name:        sc.Name,
 				Description: sc.Description,
-				Status:      sc.Status,
 			})
 		}
 		writeJSON(w, http.StatusOK, items)
@@ -98,7 +95,6 @@ func ScenarioBySlug(store *transit.Store) http.HandlerFunc {
 			Slug:        sc.Slug,
 			Name:        sc.Name,
 			Description: sc.Description,
-			Status:      sc.Status,
 			Routes:      routes,
 			Stations:    stations,
 			Services:    summaries,

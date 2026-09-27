@@ -27,13 +27,11 @@ const maxOwnedScenarioBodyBytes = 1 << 20
 type ownedScenarioRequest struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	Status      string `json:"status"`
 }
 
 func (req ownedScenarioRequest) applyTo(sc *transit.Scenario) {
 	sc.Name = strings.TrimSpace(req.Name)
 	sc.Description = req.Description
-	sc.Status = req.Status
 }
 
 func CreateOwnedScenario(store OwnedScenarioStore) http.HandlerFunc {
