@@ -27,3 +27,24 @@ func TestGetServicePublicationTakesNoIdentity(t *testing.T) {
 		}
 	}
 }
+
+func TestPublicationIsochroneTakesNoIdentity(t *testing.T) {
+	h := newTestServer(t, newStubDeps())
+
+	// The same shape as the read above: every caller, token or none, reaches
+	// the handler and gets its unknown-service 404, where the draft's own
+	// isochrone would answer an anonymous caller 401.
+	for _, token := range []string{"", userToken, adminToken, "not-a-session"} {
+		rec := request(t, h, http.MethodPost, "/api/services/some-slug/publication/isochrone", token, isochroneBody)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("token %q: status = %d, want 404 from the handler; body %s", token, rec.Code, rec.Body.String())
+		}
+		var body map[string]string
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("token %q: body is not the handler's JSON: %v; %s", token, err, rec.Body.String())
+		}
+		if body["error"] != "service not found" {
+			t.Fatalf("token %q: error = %q, want the unknown-service answer", token, body["error"])
+		}
+	}
+}

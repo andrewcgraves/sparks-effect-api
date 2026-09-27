@@ -29,6 +29,9 @@ var isochroneRoutes = []struct{ path, token string }{
 	{"/api/isochrone", ""},
 	{"/api/services/some-slug/isochrone", userToken},
 	{"/api/user-scenarios/some-slug/isochrone", userToken},
+	// Anonymous, and capped all the same: the cap is per deployment, so who
+	// may spend it changes nothing about whether it applies.
+	{"/api/services/some-slug/publication/isochrone", ""},
 }
 
 func TestIsochroneRoutesRefuseAFullBacklog(t *testing.T) {

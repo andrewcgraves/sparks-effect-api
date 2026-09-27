@@ -101,7 +101,7 @@ API would refuse is not storable either.
 
 ### Capping the backlog
 
-All three isochrone endpoints publish to one queue that one worker consumes
+Every isochrone endpoint enqueues onto one queue that one worker consumes
 serially, so nothing but a ceiling bounds how much work can be waiting. Since
 SPA-219 an enqueue is refused with `429` and the `backlog_full` code, plus a
 `Retry-After`, once `MAX_INFLIGHT_ISOCHRONES` routing jobs are already queued or
@@ -119,6 +119,10 @@ needs nothing: the count falls as the worker drains, or as jobs age out.
 
 The ceiling is per deployment, not per caller. That is deliberate: bounding
 total work is what it is for. Per-caller fairness is a separate check, below.
+Since SPA-357 anyone on the internet can spend it, through a publication's
+isochrone as well as `POST /api/isochrone`, so an anonymous flood fills the
+same backlog an owner's draft isochrone waits on; the per-IP limit below is
+what keeps one caller from doing that alone.
 
 ### Per-caller rate limits
 
@@ -156,7 +160,8 @@ and `/api/internal/*` are not limited here.
 ### Polling a routing job
 
 `GET /api/routing-jobs/{id}` returns the job's status and, once succeeded, its
-result. A job with **no owner** came from the public `POST /api/isochrone` and is
+result. A job with **no owner** came from the public `POST /api/isochrone` or from a
+publication's `POST /api/services/{slug}/publication/isochrone`, and is
 readable by anyone holding its id — a v4 UUID, unguessable. An **owned** job,
 from one of the authored isochrones, answers 404 to anyone but its owner or an
 admin, so a caller cannot probe which job ids exist.
@@ -479,9 +484,16 @@ Four rules, all enforced server-side:
   for its slug and nothing else — so it answers everyone alike, owner included,
   and never carries the draft. An unpublished slug gets the same 404
   as an unknown one, both before the first publish and after an unpublish.
-  Publishing opens nothing else: the draft read, its graph, compile and every
-  write keep `CanAccess`, so a signed-in stranger still gets 404 there and an
-  anonymous caller 401. See
+  `POST /api/services/{slug}/publication/isochrone` plots over it the same
+  way: no auth middleware, the same 404, and only the pinned compile job's
+  graph. It never checks staleness — a pin cannot stop matching itself — and
+  never compiles, and its routing job is **ownerless whoever asks**, owner
+  included, so the anonymous reader who enqueued it can poll it back. It sits
+  behind the shared isochrone rate limit and backlog cap like every other
+  isochrone. Publishing opens nothing else: the draft read, its graph, its
+  isochrone, compile and every write keep `CanAccess`, so a signed-in stranger
+  still gets 404 there and an anonymous caller 401. The draft isochrone keeps
+  plotting the owner's live graph and answering 409 `stale_graph`. See
   [ADR-0005](docs/adr/0005-publishing-an-authored-service.md).
 
 ### Database integration tests

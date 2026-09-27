@@ -105,10 +105,39 @@ func TestIsochroneEndpointsShareOneLimiter(t *testing.T) {
 		t.Fatalf("anonymous isochrone was 429; body %s", first.Body.String())
 	}
 
-	// Same limiter instance as POST /api/isochrone, so SPA-357 wrapping this
-	// route with OptionalAuth still inherits the anonymous isochrone policy.
+	// Same limiter instance as POST /api/isochrone: the IP bucket the
+	// anonymous seeded isochrone spent is the one the authored one checks.
 	second := request(t, h, http.MethodPost, "/api/services/some-slug/isochrone", userToken, isochroneBody)
 	assertRateLimited(t, second)
+}
+
+func TestPublicationIsochroneSharesTheAnonymousIsochroneLimiter(t *testing.T) {
+	h := newRateLimitedServer(t, newStubDeps(), config.Config{
+		RateLimitIsochrone: tinyPolicy(),
+	})
+
+	first := request(t, h, http.MethodPost, "/api/isochrone", "", isochroneBody)
+	if first.Code == http.StatusTooManyRequests {
+		t.Fatalf("anonymous isochrone was 429; body %s", first.Body.String())
+	}
+
+	// An anonymous plot over a publication spends from the same IP bucket, so
+	// it cannot be used to double a caller's isochrone allowance.
+	second := request(t, h, http.MethodPost, "/api/services/some-slug/publication/isochrone", "", isochroneBody)
+	assertRateLimited(t, second)
+}
+
+func TestPublicationIsochroneSecondRequestFromSameIPIsRateLimited(t *testing.T) {
+	h := newRateLimitedServer(t, newStubDeps(), config.Config{
+		RateLimitIsochrone: tinyPolicy(),
+	})
+
+	path := "/api/services/some-slug/publication/isochrone"
+	first := request(t, h, http.MethodPost, path, "", isochroneBody)
+	if first.Code == http.StatusTooManyRequests {
+		t.Fatalf("first request was 429; body %s", first.Body.String())
+	}
+	assertRateLimited(t, request(t, h, http.MethodPost, path, "", isochroneBody))
 }
 
 func TestLoginSecondRequestFromSameIPIsRateLimited(t *testing.T) {

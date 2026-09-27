@@ -63,7 +63,7 @@ func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routi
 	mux.HandleFunc("GET /api/scenarios/{slug}/stations", handler.ScenarioStations(store))
 	mux.HandleFunc("GET /api/scenarios/{slug}/travel-times", handler.ScenarioTravelTimes(store))
 
-	// One cap shared by all three isochrone endpoints: they enqueue onto the
+	// One cap shared by every isochrone endpoint: they enqueue onto the
 	// same queue for the same single worker, so a per-endpoint ceiling would
 	// bound nothing. Built here rather than at each registration so the
 	// "disabled" warning is logged once (SPA-219).
@@ -141,8 +141,7 @@ func registerCompileRoutes(mux *http.ServeMux, deps AuthDeps, publisher routing.
 	// Limit sits after OptionalAuth (so a session, when present, keys a
 	// user bucket) and before the backlog cap (cheap in-memory check
 	// before a DB count). The same limiter instance is shared with the
-	// authored isochrone POSTs; SPA-357's anonymous published-service
-	// isochrone inherits it by wrapping with this same limitIso.
+	// authored isochrone POSTs and the published-service isochrone.
 	mux.Handle("POST /api/isochrone",
 		optional(limitIso(requirePublisher(publisher, capBacklog(handler.Isochrone(deps, publisher, lg))))))
 	mux.Handle("GET /api/routing-jobs/{id}", optional(handler.RoutingJobStatus(deps)))
@@ -313,12 +312,22 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 	// snapshot. Unpublish deletes it.
 	mux.Handle("PUT /api/services/{slug}/publication", authenticated(handler.PublishService(deps, cfg.BoardingWait)))
 	mux.Handle("DELETE /api/services/{slug}/publication", authenticated(handler.UnpublishService(deps)))
-	// The public read of that snapshot, and the only route under
-	// /api/services that takes no identity — not even OptionalAuth, because
-	// its answer must not depend on who asks (ADR-0005). The draft reads and
-	// the compile above stay authenticated: publishing opens this resource,
-	// not those. The database-less 503 comes from the "/api/services/" entry.
+	// The public read of that snapshot. It and the isochrone below are the
+	// only routes under /api/services that take no identity — not even
+	// OptionalAuth, because their answer must not depend on who asks
+	// (ADR-0005). The draft reads, its isochrone and the compile above stay
+	// authenticated: publishing opens this resource, not those. The
+	// database-less 503 comes from the "/api/services/" entry.
 	mux.Handle("GET /api/services/{slug}/publication", handler.GetServicePublication(deps))
+	// Plot over that snapshot (SPA-357): the pinned graph only, and an
+	// ownerless routing job whoever asks, so the reader who enqueued it can
+	// poll it back without a session. Bare for the same reason as the read
+	// above; the IP bucket is the whole of its rate limit. It spends the same
+	// per-deployment backlog as every other isochrone, now on behalf of anyone
+	// on the internet, which is what SPA-220's limiter stands in front of.
+	mux.Handle("POST /api/services/{slug}/publication/isochrone",
+		limitIso(requirePublisher(publisher,
+			capBacklog(handler.PublicationIsochrone(deps, publisher, lg)))))
 
 	// User-owned scenarios: owner-scoped CRUD over a curated set of UserService
 	// ids. Named /api/user-scenarios, distinct from the public /api/scenarios
