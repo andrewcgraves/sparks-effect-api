@@ -428,6 +428,22 @@ only) and `GET /api/prerendered-isochrones/{id}` (with its payload); only the
 write above is gated, which is why it appears in the table despite not living
 under `/api/admin/`.
 
+### The published index
+
+`GET /api/published-services` lists every published `UserService` as a card:
+`slug`, `name`, `subtext` and `description`, most recently published first,
+with slug breaking a tie. It is unauthenticated, and the answer is the same for
+every caller, so an owner does not see their own unpublished drafts there either
+([ADR-0005](docs/adr/0005-publishing-an-authored-service.md)). The prose is the
+publication's frozen copy, so a draft edit does not show until it is
+republished. `ListPublishedServiceSummaries` selects neither the stops or
+vehicle documents nor the publication's routes, and migration 00027 indexes
+`published_at` for its sort.
+
+It is not `GET /api/services`, which stays the caller's own drafts. Curated
+scenarios stay at `GET /api/scenarios`: the two models differ, so a page that
+lists both calls both and merges them. There is no pagination yet.
+
 ### Bootstrapping the first admin
 
 Set both variables and boot once; the account is created if that email does not

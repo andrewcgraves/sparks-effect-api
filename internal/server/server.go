@@ -37,6 +37,7 @@ type AuthDeps interface {
 	handler.RoutingBacklogStore
 	handler.PrerenderedStore
 	handler.PublicationStore
+	handler.PublishedServiceStore
 	GetSessionUser(ctx context.Context, tokenHash string) (account.User, bool, error)
 }
 
@@ -79,6 +80,7 @@ func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routi
 	registerRouteRoutes(mux, deps, limitSnap)
 	registerCompileRoutes(mux, deps, publisher, capBacklog, limitIso, lg)
 	registerPrerenderedRoutes(mux, deps)
+	registerPublishedServiceRoutes(mux, deps)
 	registerAuthRoutes(mux, cfg, deps, publisher, capBacklog, limitLogin, limitIso, limitCompile, lg)
 	registerWorkerRoutes(mux, cfg, deps)
 
@@ -154,6 +156,23 @@ func registerPrerenderedRoutes(mux *http.ServeMux, deps AuthDeps) {
 	}
 	mux.HandleFunc("GET /api/scenarios/{slug}/prerendered-isochrones", handler.PrerenderedIsochrones(deps))
 	mux.HandleFunc("GET /api/prerendered-isochrones/{id}", handler.PrerenderedIsochrone(deps))
+}
+
+func registerPublishedServiceRoutes(mux *http.ServeMux, deps AuthDeps) {
+	if deps == nil {
+		mux.HandleFunc("/api/published-services", noDatabase("publication storage is unavailable"))
+		return
+	}
+	// The public index of published services (SPA-358). A path of its own
+	// rather than a mode of GET /api/services, which lists the caller's own
+	// drafts: a query parameter that changed whose services come back would
+	// make one URL mean two things. Nor /api/services/published, which would
+	// shadow the service whose slug is "published".
+	//
+	// Bare, not OptionalAuth: the answer is the same for every caller, so
+	// there is no identity for it to read. Curated scenarios stay at
+	// GET /api/scenarios; a page that wants both calls both.
+	mux.HandleFunc("GET /api/published-services", handler.PublishedServices(deps))
 }
 
 func passThrough(next http.Handler) http.Handler { return next }

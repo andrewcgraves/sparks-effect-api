@@ -94,6 +94,40 @@ func (r *Repo) GetServicePublication(ctx context.Context, serviceID string) (tra
 	return pub, true, nil
 }
 
+func (r *Repo) ListPublishedServiceSummaries(ctx context.Context) ([]transit.PublishedServiceSummary, error) {
+	// Every service_publications row is a published service, so there is no
+	// filter to write: an unpublished service has no row to find.
+	//
+	// The prose comes from the publication, never the draft. The join reaches
+	// user_services for the slug alone, which the publication does not copy
+	// because it cannot change: a slug is never re-minted, so reading it off
+	// the draft cannot leak an edit. Neither the draft's stops or vehicle
+	// documents nor the publication's routes payload are selected — this is a
+	// list of cards, and those columns are what make a row heavy.
+	//
+	// Most recently published first, since republishing moves published_at.
+	// Slug breaks a tie, so the order is total and a snapshot of it is stable.
+	rows, err := r.pool.Query(ctx,
+		`SELECT us.slug, p.name, p.subtext, p.description
+		   FROM service_publications p
+		   JOIN user_services us ON us.id = p.user_service_id
+		  ORDER BY p.published_at DESC, us.slug`)
+	if err != nil {
+		return nil, wrap("ListPublishedServiceSummaries", err)
+	}
+	defer rows.Close()
+
+	out := []transit.PublishedServiceSummary{}
+	for rows.Next() {
+		var s transit.PublishedServiceSummary
+		if err := rows.Scan(&s.Slug, &s.Name, &s.Subtext, &s.Description); err != nil {
+			return nil, wrap("ListPublishedServiceSummaries scan", err)
+		}
+		out = append(out, s)
+	}
+	return out, wrap("ListPublishedServiceSummaries rows", rows.Err())
+}
+
 func (r *Repo) GetSucceededCompileJob(ctx context.Context, id string) (transit.Job, bool, error) {
 	row := r.pool.QueryRow(ctx,
 		`SELECT `+jobColumns+` FROM jobs
