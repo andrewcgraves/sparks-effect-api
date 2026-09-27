@@ -462,7 +462,7 @@ func TestIsochroneCacheGetPut(t *testing.T) {
 	}
 	missing := stored
 	missing.StationSlug = "station-b"
-	geom := json.RawMessage(`{"type":"FeatureCollection","features":[]}`)
+	geom := json.RawMessage(`{"type":"FeatureCollection","features":[{"type":"Feature"}]}`)
 
 	if err := repo.PutIsochroneCache(ctx, []handler.CachedIsochrone{
 		{Key: stored, Geometry: geom, TilesetAt: time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)},
@@ -484,9 +484,10 @@ func TestIsochroneCacheGetPut(t *testing.T) {
 		t.Error("missing key was served")
 	}
 
-	// Repeated put of a different geometry is not an error and does not overwrite.
+	// A repeated put with no newer tileset is not an error and does not
+	// overwrite a usable row.
 	if err := repo.PutIsochroneCache(ctx, []handler.CachedIsochrone{
-		{Key: stored, Geometry: json.RawMessage(`{"type":"Point"}`)},
+		{Key: stored, Geometry: json.RawMessage(`{"type":"Point","features":[{"type":"Feature"}]}`)},
 	}); err != nil {
 		t.Fatalf("second Put: %v", err)
 	}
