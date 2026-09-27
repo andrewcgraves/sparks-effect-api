@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/routing"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
@@ -42,38 +44,84 @@ func GetServicePublication(store ServicePublicationStore) http.HandlerFunc {
 		// No identity is read, so the response depends on the slug alone: the
 		// owner sees what everyone sees, and a shared cache cannot mix a draft
 		// into it. The draft stays at GET /api/services/{slug} (ADR-0005).
-		pub, found, err := store.GetServicePublicationBySlug(r.Context(), r.PathValue("slug"))
-		if err != nil {
-			writeInternalError(r.Context(), w, "loading publication", err)
-			return
-		}
-		// Unpublished answers exactly as unknown does, before a first publish
-		// and after an unpublish alike. Anything else confirms to a stranger
-		// that a draft exists behind a guessed slug.
-		if !found {
-			writeError(w, http.StatusNotFound, "service not found")
-			return
-		}
-
-		job, found, err := store.GetSucceededCompileJob(r.Context(), pub.CompileJobID)
-		if err != nil {
-			writeInternalError(r.Context(), w, "loading published graph", err)
-			return
-		}
-		// The pin's foreign key holds the job for as long as it is pinned, so a
-		// miss means the publication just read was removed in between — most
-		// plausibly the service being deleted.
-		if !found {
-			writeError(w, http.StatusNotFound, "service not found")
-			return
-		}
-		if job.Result == nil {
-			writeInternalError(r.Context(), w, "loading published graph",
-				fmt.Errorf("pinned compile job %s has no graph", job.ID))
+		pub, job, ok := loadPublishedGraph(w, r, store)
+		if !ok {
 			return
 		}
 		writeJSON(w, http.StatusOK, publicationResponse{ServicePublication: pub, TransitGraph: job.Result})
 	}
+}
+
+type PublicationIsochroneStore interface {
+	ServicePublicationStore
+	RoutingStore
+}
+
+func PublicationIsochrone(store PublicationIsochroneStore, publisher routing.Publisher, log *slog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		req, ok := validateIsochroneRequest(w, r)
+		if !ok {
+			return
+		}
+
+		// The pinned job is the only graph this route can plot over, so there
+		// is no staleness check and no compile to fall back on: a pin cannot
+		// stop matching itself, and a reader with no session could not
+		// recompile anyway. The draft's own isochrone, with both, stays at
+		// POST /api/services/{slug}/isochrone.
+		pub, job, ok := loadPublishedGraph(w, r, store)
+		if !ok {
+			return
+		}
+
+		log.Debug("enqueueing isochrone", "target", "publication", "user_service_id", pub.UserServiceID,
+			"lat", req.Lat, "lng", req.Lng, "budget_mins", req.BudgetMins, "mode", req.Mode)
+
+		// Ownerless whoever asks, the owner included (ADR-0005): no identity is
+		// read, so GET /api/routing-jobs/{id} serves the job to anyone holding
+		// its id, exactly as it does POST /api/isochrone's.
+		enqueueIsochrone(w, r, store, publisher, transit.RoutingJob{
+			CompileJobID: job.ID,
+			Lat:          req.Lat,
+			Lng:          req.Lng,
+			BudgetMins:   req.BudgetMins,
+			Mode:         transit.TravelMode(req.Mode),
+		}, job.Result)
+	}
+}
+
+func loadPublishedGraph(w http.ResponseWriter, r *http.Request, store ServicePublicationStore) (transit.ServicePublication, transit.Job, bool) {
+	pub, found, err := store.GetServicePublicationBySlug(r.Context(), r.PathValue("slug"))
+	if err != nil {
+		writeInternalError(r.Context(), w, "loading publication", err)
+		return transit.ServicePublication{}, transit.Job{}, false
+	}
+	// Unpublished answers exactly as unknown does, before a first publish
+	// and after an unpublish alike. Anything else confirms to a stranger
+	// that a draft exists behind a guessed slug.
+	if !found {
+		writeError(w, http.StatusNotFound, "service not found")
+		return transit.ServicePublication{}, transit.Job{}, false
+	}
+
+	job, found, err := store.GetSucceededCompileJob(r.Context(), pub.CompileJobID)
+	if err != nil {
+		writeInternalError(r.Context(), w, "loading published graph", err)
+		return transit.ServicePublication{}, transit.Job{}, false
+	}
+	// The pin's foreign key holds the job for as long as it is pinned, so a
+	// miss means the publication just read was removed in between — most
+	// plausibly the service being deleted.
+	if !found {
+		writeError(w, http.StatusNotFound, "service not found")
+		return transit.ServicePublication{}, transit.Job{}, false
+	}
+	if job.Result == nil {
+		writeInternalError(r.Context(), w, "loading published graph",
+			fmt.Errorf("pinned compile job %s has no graph", job.ID))
+		return transit.ServicePublication{}, transit.Job{}, false
+	}
+	return pub, job, true
 }
 
 func PublishService(store PublicationStore, boardingWait transit.BoardingWaitPolicy) http.HandlerFunc {

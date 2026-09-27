@@ -54,9 +54,9 @@ One more overload, on the same models. Every seeded-model row (`scenarios`,
 - **Published** — an authored `UserService` that has a **publication**: a frozen
   snapshot of a specific succeeded compile job plus copies of its name,
   `subtext`, description and route geometry, taken when the owner published it.
-  Public reads of it serve the publication and never the **draft** — the live,
-  editable row the owner keeps working on — so an edit stays invisible until it
-  is republished. **Unpublishing** deletes the publication. Only a `UserService`
+  Public reads of it, and the isochrones anyone may plot over it, use the
+  publication and never the **draft** — the live, editable row the owner keeps
+  working on — so an edit stays invisible until it is republished. **Unpublishing** deletes the publication. Only a `UserService`
   can be published today; a curated row is public without being published, and
   `scenarios.status` is dead data unrelated to any of this. Not to be confused
   with the routing worker's *publication* of a queue message — the same idea one

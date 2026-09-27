@@ -268,8 +268,9 @@ func TestProtectedRoutesRejectAnonymousCallers(t *testing.T) {
 		{http.MethodPost, "/api/admin/routes"},
 		{http.MethodPost, "/api/scenarios/ca-hsr/compile"},
 		{http.MethodGet, "/api/jobs/some-id"},
-		// The authored draft surface. GET .../publication is the one public
-		// route under /api/services; everything else here stays behind the gate.
+		// The authored draft surface. GET .../publication and POST
+		// .../publication/isochrone are the public routes under /api/services;
+		// everything else here stays behind the gate.
 		{http.MethodPost, "/api/services"},
 		{http.MethodGet, "/api/services"},
 		{http.MethodGet, "/api/services/some-slug"},
@@ -498,6 +499,7 @@ func TestAuthRoutesReportUnavailableWithoutADatabase(t *testing.T) {
 		{http.MethodPut, "/api/services/some-slug/publication"},
 		{http.MethodDelete, "/api/services/some-slug/publication"},
 		{http.MethodGet, "/api/services/some-slug/publication"},
+		{http.MethodPost, "/api/services/some-slug/publication/isochrone"},
 		{http.MethodGet, "/api/internal/worker"},
 	} {
 		t.Run(p.method+" "+p.path, func(t *testing.T) {
