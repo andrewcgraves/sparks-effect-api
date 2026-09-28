@@ -135,16 +135,16 @@ func TestSegmentReverseRunSecondsMigrationIsANoOpOnAnEmptyDatabase(t *testing.T)
 			t.Fatalf("CompileSeededScenario: %v", err)
 		}
 
-		gotGilroy, _ := hopSeconds(t, graph, "gilroy", "merced")
-		gotMerced, _ := hopSeconds(t, graph, "merced", "gilroy")
-		if gotGilroy == gotMerced {
-			t.Errorf("gilroy↔merced: want different durations, both %d", gotGilroy)
+		gotGilroy, _ := hopSeconds(t, graph, "gilroy", "madera")
+		gotMadera, _ := hopSeconds(t, graph, "madera", "gilroy")
+		if gotGilroy == gotMadera {
+			t.Errorf("gilroy↔madera: want different durations, both %d", gotGilroy)
 		}
-		if gotGilroy != 3140 {
-			t.Errorf("gilroy→merced: want 3140 (run_seconds 3050 + dwell 90), got %d", gotGilroy)
+		if gotGilroy != 1940 {
+			t.Errorf("gilroy→madera: want 1940 (run_seconds 1850 + dwell 90), got %d", gotGilroy)
 		}
-		if gotMerced != 3030 {
-			t.Errorf("merced→gilroy: want 3030 (run_seconds 2940 + dwell 90), got %d", gotMerced)
+		if gotMadera != 2020 {
+			t.Errorf("madera→gilroy: want 2020 (reverse_run_seconds 1930 + dwell 90), got %d", gotMadera)
 		}
 	})
 }

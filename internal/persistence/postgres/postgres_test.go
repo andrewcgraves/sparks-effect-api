@@ -143,14 +143,14 @@ func TestSeedAndCompiledReadPathAcrossRestart(t *testing.T) {
 	}
 
 	// Seeded rows must still compile to the calibrated hop times: sf→millbrae
-	// = 760 run + 90 dwell = 850.
+	// = 900 run + 90 dwell = 990.
 	graph, err := transit.CompileSeededScenario(ctx, repo2, sc, transit.DefaultBoardingWaitPolicy())
 	if err != nil {
 		t.Fatalf("CompileSeededScenario: %v", err)
 	}
 	secs, svcID := hopSeconds(t, graph, "sf", "millbrae")
-	if secs != 850 {
-		t.Errorf("sf→millbrae: want 850s, got %d", secs)
+	if secs != 990 {
+		t.Errorf("sf→millbrae: want 990s, got %d", secs)
 	}
 	if svcID == "" {
 		t.Error("sf→millbrae: serviceID must be non-empty")
@@ -161,8 +161,8 @@ func TestSeedAndCompiledReadPathAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListServiceIDsByScenario: %v", err)
 	}
-	if len(ids) != 3 {
-		t.Errorf("scenario_service membership: want 3, got %d", len(ids))
+	if len(ids) != 4 {
+		t.Errorf("scenario_service membership: want 4, got %d", len(ids))
 	}
 }
 
