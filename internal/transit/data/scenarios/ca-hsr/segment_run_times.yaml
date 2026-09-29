@@ -5,37 +5,38 @@
 # The matrix itself is committed as internal/transit/testdata/ca-hsr-2026bp-all-stop-minutes.csv,
 # and TestSeededCAHSRMatchesBusinessPlanMatrix holds the compiled graph to it.
 #
-# ## Topology
+# ## Derivation (SPA-364)
 #
-# Phase 1 runs SF → Millbrae → San Jose → Gilroy → Madera → Fresno → … →
-# Anaheim. Merced is not on it: it sits up a stub off the Central Valley Wye,
-# joined to the corridor by its own merced ↔ madera segment on the Merced spur
-# route. The matrix is unambiguous about this — SF → Fresno (124 min) is faster
-# than SF → Merced (136), and Gilroy → Madera is 33 against Gilroy → Merced's
-# 56 — and treating Merced as a through stop between Gilroy and Madera, as this
-# file used to, made every Bay Area ↔ Central Valley time ~35 min slow and every
-# Merced-southward time up to 43 min fast (SPA-364).
-#
-# ## Derivation
-#
-# The run times below are a least-squares fit, not the matrix's adjacent cells.
+# The run times are a least-squares fit to the matrix, not its adjacent cells.
 # A compiled origin–destination time is the sum of its hops' run seconds plus
 # 90 s of resolved dwell per hop (Siemens Venture, level boarding); the fit
-# chooses run seconds that minimise the squared error of that sum against every
-# matrix pair among the Phase 1 stations and Merced (156 pairs), then rounds to
-# 10 s. Taking the adjacent cells directly does badly — they are close to
-# run-only, while the multi-stop cells add 1.5–2.5 min per intermediate stop, so
-# summing them loses up to 29 min over a long trip (RMS 12 min). The fit lands
-# every pair within 5.2 min (RMS 2.1 min); San Jose → Fresno compiles to 67.7
-# against 65, Fresno → San Jose to 70.5 against 70, and SF → Anaheim to 304.5
-# against 306.
+# picks run seconds that minimise the squared error of that sum against every
+# matrix pair among the Phase 1 stations (156 pairs), then rounds to 10 s.
+# The adjacent cells cannot be used directly: they are close to run-only, while
+# the multi-stop cells add 1.5–2.5 min per intermediate stop, so summing them
+# drifts by up to half an hour over a long trip.
+#
+# This replaces an earlier derivation that stripped ~90 s of dwell from each
+# cell and scaled every hop by 16/17 to land SF → Anaheim on exactly 306 min.
+# That matched the one end-to-end figure and little else: San Jose → Fresno
+# compiled to 99.5 min against the matrix's 65.
+#
+# ## Merced is on the line, and the matrix does not agree
+#
+# Every Phase 1 service here calls at Merced between Gilroy and Madera, so any
+# trip across it passes through. The matrix does not treat Merced that way —
+# it has San Jose → Fresno (65) faster than San Jose → Merced (78), and
+# SF → Fresno (124) faster than SF → Merced (136), which no set of times on a
+# single line can reproduce. The fit therefore splits the difference: pairs
+# that do not touch Merced land within 8.5 min (RMS 3.1 min; San Jose → Fresno
+# 71.5, Fresno → San Jose 74.2, SF → Anaheim 308.3), and trips to or from
+# Merced northward come out up to 30 min faster than the matrix. That is the
+# price of keeping Merced a through stop; the test states both tolerances.
 #
 # A hop carries reverse_run_seconds where the fitted directions differ by a
-# minute or more, because the matrix is not symmetric. Gilroy ↔ Madera (Pacheco
-# Pass) and Bakersfield ↔ Palmdale (Tehachapi) are the grades you would expect;
-# San Jose ↔ Gilroy and Merced ↔ Madera are the matrix's own asymmetry, kept
-# rather than averaged away. Everything else is fitted as one number for both
-# directions.
+# minute or more, because the matrix is not symmetric. Bakersfield ↔ Palmdale
+# (Tehachapi) is the grade you would expect; San Jose ↔ Gilroy and
+# Merced ↔ Madera are the matrix's own asymmetry.
 #
 # The Brightline West spur is not fitted and keeps its run-only estimates. The
 # matrix's Brightline ↔ Phase 1 cells include a connection at Palmdale of
@@ -48,8 +49,7 @@
 # departure computation from the destination.
 #
 # Segments are ordered in the primary service direction (SF → Anaheim for Phase 1,
-# Merced → Madera for the spur, Palmdale → Las Vegas for the Brightline West
-# spur, which branches at Palmdale).
+# Palmdale → Las Vegas for the Brightline West spur, which branches at Palmdale).
 #
 # Multi-hop origin–destination times are derived by summing consecutive segments in code
 # (see Store.TravelTimeBetween). This replaces the full NxN matrix; callers do not store
@@ -61,7 +61,7 @@
 
 scenario_slug: "ca-hsr"
 provenance: calibrated
-source: "2026 Business Plan Service Planning Methodology all-stop travel-time matrix (pp. 17, 20, 24-25), least-squares fit over Phase 1 + Merced pairs"
+source: "2026 Business Plan Service Planning Methodology all-stop travel-time matrix (pp. 17, 20, 24-25), least-squares fit over Phase 1 pairs"
 segments:
   # Phase 1: San Francisco → Anaheim (service direction)
   - from: sf
@@ -78,13 +78,17 @@ segments:
     reverse_run_seconds: 1350
     route_id: "00000000-0000-4002-8001-000000000001"
   - from: gilroy
+    to: merced
+    run_seconds: 1470
+    route_id: "00000000-0000-4002-8001-000000000001"
+  - from: merced
     to: madera
-    run_seconds: 1850
-    reverse_run_seconds: 1930
+    run_seconds: 610
+    reverse_run_seconds: 680
     route_id: "00000000-0000-4002-8001-000000000001"
   - from: madera
     to: fresno
-    run_seconds: 680
+    run_seconds: 590
     route_id: "00000000-0000-4002-8001-000000000001"
   - from: fresno
     to: kings-tulare
@@ -111,14 +115,8 @@ segments:
     to: anaheim
     run_seconds: 2060
     route_id: "00000000-0000-4002-8001-000000000001"
-  # --- Merced spur — Merced → Madera ---
-  - from: merced
-    to: madera
-    run_seconds: 1320
-    reverse_run_seconds: 1390
-    route_id: "00000000-0000-4002-8001-000000000003"
   # --- Brightline West — Palmdale → Las Vegas ---
-  # Run-only estimates; dwell is added at compile time. Not fitted — see above.
+  # Run-only estimates; dwell is added at compile time.
   - from: palmdale
     to: victor-valley
     run_seconds: 1050

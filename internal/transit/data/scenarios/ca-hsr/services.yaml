@@ -3,15 +3,7 @@
 # HSR Express: key stops only (skips Madera and Kings/Tulare). Parked — see
 #   `active` on its entry below.
 # HSR Local: all Phase 1 stops SF–Anaheim.
-# HSR Merced Shuttle: Merced–Madera over the Merced spur, interchanging with
-#   Phase 1 at Madera.
 # Brightline West: Palmdale–Victor Valley–Las Vegas spur, interchanging with Phase 1 at Palmdale.
-#
-# Neither Phase 1 service calls at Merced. Merced sits up a stub off the Central
-# Valley Wye, and the 2026 Business Plan's all-stop matrix runs its through
-# trains past it (SF → Fresno 124 min, SF → Merced 136). Authoring Merced as a
-# Phase 1 stop sent every Bay Area ↔ Central Valley train up the stub and back,
-# ~35 min slow (SPA-364), so Merced has a service of its own.
 #
 # Frequency windows are representative of the 2026 Business Plan peak/off-peak headways.
 # HeadwayS 1800 = every 30 min (peak), 3600 = every 60 min (off-peak).
@@ -46,18 +38,20 @@
       sequence: 3
     - station_id: "00000000-0000-4005-8001-000000000004"
       sequence: 4
-    - station_id: "00000000-0000-4005-8001-000000000007"
+    - station_id: "00000000-0000-4005-8001-000000000005"
       sequence: 5
-    - station_id: "00000000-0000-4005-8001-000000000009"
+    - station_id: "00000000-0000-4005-8001-000000000007"
       sequence: 6
-    - station_id: "00000000-0000-4005-8001-00000000000a"
+    - station_id: "00000000-0000-4005-8001-000000000009"
       sequence: 7
-    - station_id: "00000000-0000-4005-8001-00000000000c"
+    - station_id: "00000000-0000-4005-8001-00000000000a"
       sequence: 8
-    - station_id: "00000000-0000-4005-8001-00000000000d"
+    - station_id: "00000000-0000-4005-8001-00000000000c"
       sequence: 9
-    - station_id: "00000000-0000-4005-8001-00000000000e"
+    - station_id: "00000000-0000-4005-8001-00000000000d"
       sequence: 10
+    - station_id: "00000000-0000-4005-8001-00000000000e"
+      sequence: 11
   frequency_windows:
     - start_time: "06:00"
       end_time: "09:00"
@@ -83,48 +77,24 @@
       sequence: 3
     - station_id: "00000000-0000-4005-8001-000000000004"
       sequence: 4
-    - station_id: "00000000-0000-4005-8001-000000000006"
-      sequence: 5
-    - station_id: "00000000-0000-4005-8001-000000000007"
-      sequence: 6
-    - station_id: "00000000-0000-4005-8001-000000000008"
-      sequence: 7
-    - station_id: "00000000-0000-4005-8001-000000000009"
-      sequence: 8
-    - station_id: "00000000-0000-4005-8001-00000000000a"
-      sequence: 9
-    - station_id: "00000000-0000-4005-8001-00000000000c"
-      sequence: 10
-    - station_id: "00000000-0000-4005-8001-00000000000d"
-      sequence: 11
-    - station_id: "00000000-0000-4005-8001-00000000000e"
-      sequence: 12
-  frequency_windows:
-    - start_time: "06:00"
-      end_time: "09:00"
-      headway_s: 3600
-    - start_time: "09:00"
-      end_time: "20:00"
-      headway_s: 5400
-
-# --- HSR Merced Shuttle — Merced–Madera ---
-# Merced's only service, over the Merced spur route. A rider bound past Madera
-# stays on the graph at Madera and continues on HSR Local; interchange costs
-# nothing (boarding wait is charged once, at the origin). Windows follow HSR
-# Local's, so the shuttle meets every Local.
-- id: "00000000-0000-4004-8001-000000000004"
-  scenario_id: "00000000-0000-4001-8001-000000000001"
-  route_id: "00000000-0000-4002-8001-000000000003"
-  vehicle_type_id: "00000000-0000-4003-8001-000000000001"
-  name: "HSR Merced Shuttle"
-  direction: "both"
-  active: true
-  provenance: calibrated
-  stops:
     - station_id: "00000000-0000-4005-8001-000000000005"
-      sequence: 1
+      sequence: 5
     - station_id: "00000000-0000-4005-8001-000000000006"
-      sequence: 2
+      sequence: 6
+    - station_id: "00000000-0000-4005-8001-000000000007"
+      sequence: 7
+    - station_id: "00000000-0000-4005-8001-000000000008"
+      sequence: 8
+    - station_id: "00000000-0000-4005-8001-000000000009"
+      sequence: 9
+    - station_id: "00000000-0000-4005-8001-00000000000a"
+      sequence: 10
+    - station_id: "00000000-0000-4005-8001-00000000000c"
+      sequence: 11
+    - station_id: "00000000-0000-4005-8001-00000000000d"
+      sequence: 12
+    - station_id: "00000000-0000-4005-8001-00000000000e"
+      sequence: 13
   frequency_windows:
     - start_time: "06:00"
       end_time: "09:00"

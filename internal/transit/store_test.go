@@ -107,8 +107,8 @@ func TestGetRoutesByScenario(t *testing.T) {
 	sc, _ := store.GetScenarioBySlug("ca-hsr")
 	routes := store.GetRoutesByScenario(sc.ID)
 
-	if len(routes) != 3 {
-		t.Fatalf("expected 3 active routes (Phase 1 + Merced spur + Brightline West), got %d", len(routes))
+	if len(routes) != 2 {
+		t.Fatalf("expected 2 active routes (Phase 1 + Brightline West), got %d", len(routes))
 	}
 
 	for _, r := range routes {
@@ -351,22 +351,22 @@ func TestTravelTimeBetween(t *testing.T) {
 		t.Errorf("san-jose→sf: want 3440 (these hops are symmetric), got %d", got)
 	}
 
-	gotGilroy, _, _, ok := store.TravelTimeBetween("ca-hsr", "gilroy", "madera")
+	gotMerced, _, _, ok := store.TravelTimeBetween("ca-hsr", "merced", "madera")
 	if !ok {
-		t.Fatal("TravelTimeBetween: gilroy→madera not found")
+		t.Fatal("TravelTimeBetween: merced→madera not found")
 	}
-	gotMadera, _, _, ok := store.TravelTimeBetween("ca-hsr", "madera", "gilroy")
+	gotMadera, _, _, ok := store.TravelTimeBetween("ca-hsr", "madera", "merced")
 	if !ok {
-		t.Fatal("TravelTimeBetween: madera→gilroy not found")
+		t.Fatal("TravelTimeBetween: madera→merced not found")
 	}
-	if gotGilroy == gotMadera {
-		t.Errorf("gilroy↔madera: want different durations, both %d — not every hop is symmetric", gotGilroy)
+	if gotMerced == gotMadera {
+		t.Errorf("merced↔madera: want different durations, both %d — not every hop is symmetric", gotMerced)
 	}
-	if gotGilroy != 1940 {
-		t.Errorf("gilroy→madera: want 1940 (run_seconds 1850 + dwell 90), got %d", gotGilroy)
+	if gotMerced != 700 {
+		t.Errorf("merced→madera: want 700 (run_seconds 610 + dwell 90), got %d", gotMerced)
 	}
-	if gotMadera != 2020 {
-		t.Errorf("madera→gilroy: want 2020 (reverse_run_seconds 1930 + dwell 90), got %d", gotMadera)
+	if gotMadera != 770 {
+		t.Errorf("madera→merced: want 770 (reverse_run_seconds 680 + dwell 90), got %d", gotMadera)
 	}
 
 	got, _, _, ok = store.TravelTimeBetween("ca-hsr", "sf", "sf")
@@ -422,16 +422,16 @@ func TestTravelTimeBetween_caHSRCorridorDirectionsDiffer(t *testing.T) {
 	if !ok {
 		t.Fatal("TravelTimeBetween: sf→anaheim not found")
 	}
-	if got != 18270 {
-		t.Errorf("sf→anaheim: want 18270 (run sum 17280 + 11×dwell 90), got %d", got)
+	if got != 18500 {
+		t.Errorf("sf→anaheim: want 18500 (run sum 17420 + 12×dwell 90), got %d", got)
 	}
 
 	got, _, _, ok = store.TravelTimeBetween("ca-hsr", "anaheim", "sf")
 	if !ok {
 		t.Fatal("TravelTimeBetween: anaheim→sf not found")
 	}
-	if got != 18240 {
-		t.Errorf("anaheim→sf: want 18240 (run sum 17250 + 11×dwell 90), got %d", got)
+	if got != 18460 {
+		t.Errorf("anaheim→sf: want 18460 (run sum 17380 + 12×dwell 90), got %d", got)
 	}
 }
 
@@ -484,7 +484,7 @@ func TestCAHSRTransitGraph_inlinePayloadStaysSmallEnoughThatWorkerNeedsNoDatabas
 
 func TestLocalSFToAnaheim_compiledTime_approx306min(t *testing.T) {
 	// 2026 Business Plan all-stop matrix: SF→Anaheim = 306 min. Compiled
-	// Local = run sum 17280 s + 11×90 s dwell = 18270 s = 304.5 min; the run
+	// Local = run sum 17420 s + 12×90 s dwell = 18500 s = 308.3 min; the run
 	// times are a least-squares fit over every pair, not scaled to this one.
 	store := mustNewStore(t)
 	g, ok := store.Graph("ca-hsr")
@@ -496,18 +496,18 @@ func TestLocalSFToAnaheim_compiledTime_approx306min(t *testing.T) {
 	adj := serviceEdges(t, g, localSvcID, "HSR Local")
 
 	allStops := []string{
-		"sf", "millbrae", "san-jose", "gilroy", "madera",
+		"sf", "millbrae", "san-jose", "gilroy", "merced", "madera",
 		"fresno", "kings-tulare", "bakersfield", "palmdale",
 		"burbank-airport", "los-angeles", "anaheim",
 	}
 	total := sumStopToStop(t, adj, "HSR Local", allStops)
 
 	const (
-		wantMin = 18240
-		wantMax = 18480
+		wantMin = 18180
+		wantMax = 18540
 	)
 	if total < wantMin || total > wantMax {
-		t.Errorf("Local SF→Anaheim: got %d s (%d min), want %d–%d s (306 min ±120 s)",
+		t.Errorf("Local SF→Anaheim: got %d s (%d min), want %d–%d s (306 min ±180 s)",
 			total, total/60, wantMin, wantMax)
 	}
 }
@@ -522,21 +522,17 @@ func TestSeededTravelTimes_brightlineWestIsADistinctRouteGroup(t *testing.T) {
 	const (
 		phase1RouteID = "00000000-0000-4002-8001-000000000001"
 		bwRouteID     = "00000000-0000-4002-8001-000000000002"
-		spurRouteID   = "00000000-0000-4002-8001-000000000003"
 	)
 	byRoute := map[string][]string{}
 	for _, seg := range tt.Segments {
 		byRoute[seg.RouteID] = append(byRoute[seg.RouteID], seg.FromSlug+"→"+seg.ToSlug)
 	}
 
-	if len(byRoute) != 3 {
-		t.Errorf("want segments grouped under 3 routes, got %d: %v", len(byRoute), byRoute)
+	if len(byRoute) != 2 {
+		t.Errorf("want segments grouped under 2 routes, got %d: %v", len(byRoute), byRoute)
 	}
-	if got := len(byRoute[phase1RouteID]); got != 11 {
-		t.Errorf("Phase 1 route: want 11 segments, got %d", got)
-	}
-	if got := byRoute[spurRouteID]; len(got) != 1 || got[0] != "merced→madera" {
-		t.Errorf("Merced spur route: want [merced→madera], got %v", got)
+	if got := len(byRoute[phase1RouteID]); got != 12 {
+		t.Errorf("Phase 1 route: want 12 segments, got %d", got)
 	}
 	want := []string{"palmdale→victor-valley", "victor-valley→las-vegas"}
 	got := byRoute[bwRouteID]
@@ -547,33 +543,6 @@ func TestSeededTravelTimes_brightlineWestIsADistinctRouteGroup(t *testing.T) {
 		if got[i] != want[i] {
 			t.Errorf("Brightline West segment %d: want %q, got %q", i, want[i], got[i])
 		}
-	}
-}
-
-func TestCAHSRMercedIsServedOnlyFromItsSpur(t *testing.T) {
-	// Merced sits up a stub off the Central Valley Wye. Authoring it as a
-	// Phase 1 stop sent every through train up the stub and back (SPA-364).
-	store := mustNewStore(t)
-	sc, _ := store.GetScenarioBySlug("ca-hsr")
-
-	const (
-		mercedStationID = "00000000-0000-4005-8001-000000000005"
-		spurRouteID     = "00000000-0000-4002-8001-000000000003"
-	)
-	callers := 0
-	for _, svc := range store.GetServicesByScenario(sc.ID) {
-		for _, stop := range svc.Stops {
-			if stop.StationID != mercedStationID {
-				continue
-			}
-			callers++
-			if svc.RouteID != spurRouteID {
-				t.Errorf("service %q calls at Merced but runs over route %q, not the Merced spur", svc.Name, svc.RouteID)
-			}
-		}
-	}
-	if callers == 0 {
-		t.Error("no service calls at Merced; the spur service is missing")
 	}
 }
 

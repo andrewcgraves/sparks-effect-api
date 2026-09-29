@@ -161,8 +161,8 @@ func TestSeedAndCompiledReadPathAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListServiceIDsByScenario: %v", err)
 	}
-	if len(ids) != 4 {
-		t.Errorf("scenario_service membership: want 4, got %d", len(ids))
+	if len(ids) != 3 {
+		t.Errorf("scenario_service membership: want 3, got %d", len(ids))
 	}
 }
 
