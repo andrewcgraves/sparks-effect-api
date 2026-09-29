@@ -6,11 +6,12 @@
 # adjacent cells. The matrix is not hop-additive: the southbound adjacent cells
 # sum to 281 min while SF→Anaheim is 306. Each compiled hop below already includes
 # one 90 s level-boarding dwell, so run_seconds = minutes*60 - 90, and
-# reverse_run_seconds is the other direction the same way, omitted when the two
-# Table 3-4 directions are equal.
-#
-# reverse_run_seconds is set on every hop whose two Table 3-4 directions differ,
-# not only the two mountain hops.
+# reverse_run_seconds is the other direction the same way. reverse_run_seconds is
+# omitted when the fitted directed hop times are equal, and set when the fit's
+# two directions differ. Several hops are asymmetric even though their adjacent
+# Table 3-4 cells are equal, because the matrix is not hop-additive and the fit
+# absorbs that on the directed path sums (San Jose→Gilroy, Fresno→Kings/Tulare,
+# Palmdale→Burbank, and the Merced spur).
 #
 # The old 16/17 scale forced the published 306-minute SF→Anaheim total while the
 # alignment still ran the Merced detour. That made everything north of Merced
