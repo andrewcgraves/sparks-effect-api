@@ -105,7 +105,7 @@ func TestSeedAndCompiledReadPathAcrossRestart(t *testing.T) {
 		t.Fatal("ca-hsr scenario not found after restart")
 	}
 	if got := len(store.GetStationsByScenario(sc.ID)); got != 15 {
-		t.Errorf("stations: want 15 (13 Phase 1 + Brightline West spur), got %d", got)
+		t.Errorf("stations: want 15 (12 Phase 1 + Merced + Brightline West spur), got %d", got)
 	}
 	// Named rather than counted: what has to survive the restart is that the
 	// active services came back and the parked one stayed parked, which a
@@ -114,7 +114,7 @@ func TestSeedAndCompiledReadPathAcrossRestart(t *testing.T) {
 	for _, svc := range store.GetServicesByScenario(sc.ID) {
 		restored[svc.Name] = true
 	}
-	for _, want := range []string{"HSR Local", "Brightline West"} {
+	for _, want := range []string{"HSR Local", "Merced Shuttle", "Brightline West"} {
 		if !restored[want] {
 			t.Errorf("active service %q missing after restart", want)
 		}
@@ -143,14 +143,14 @@ func TestSeedAndCompiledReadPathAcrossRestart(t *testing.T) {
 	}
 
 	// Seeded rows must still compile to the calibrated hop times: sf→millbrae
-	// = 760 run + 90 dwell = 850.
+	// = 930 run + 90 dwell = 1020.
 	graph, err := transit.CompileSeededScenario(ctx, repo2, sc, transit.DefaultBoardingWaitPolicy())
 	if err != nil {
 		t.Fatalf("CompileSeededScenario: %v", err)
 	}
 	secs, svcID := hopSeconds(t, graph, "sf", "millbrae")
-	if secs != 850 {
-		t.Errorf("sf→millbrae: want 850s, got %d", secs)
+	if secs != 1020 {
+		t.Errorf("sf→millbrae: want 1020s, got %d", secs)
 	}
 	if svcID == "" {
 		t.Error("sf→millbrae: serviceID must be non-empty")

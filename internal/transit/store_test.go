@@ -107,8 +107,8 @@ func TestGetRoutesByScenario(t *testing.T) {
 	sc, _ := store.GetScenarioBySlug("ca-hsr")
 	routes := store.GetRoutesByScenario(sc.ID)
 
-	if len(routes) != 2 {
-		t.Fatalf("expected 2 active routes (Phase 1 + Brightline West), got %d", len(routes))
+	if len(routes) != 3 {
+		t.Fatalf("expected 3 routes (Phase 1 + Merced spur + Brightline West), got %d", len(routes))
 	}
 
 	for _, r := range routes {
@@ -133,7 +133,7 @@ func TestGetStationsByScenario(t *testing.T) {
 	stations := store.GetStationsByScenario(sc.ID)
 
 	if len(stations) != 15 {
-		t.Errorf("expected 15 stations (13 Phase 1 + Victor Valley and Las Vegas), got %d", len(stations))
+		t.Errorf("expected 15 stations (12 Phase 1 + Merced + Victor Valley and Las Vegas), got %d", len(stations))
 	}
 
 	slugsSeen := make(map[string]bool)
@@ -217,7 +217,7 @@ func TestGetServicesByScenario(t *testing.T) {
 	for _, svc := range services {
 		served[svc.Name] = true
 	}
-	for _, want := range []string{"HSR Local", "Brightline West"} {
+	for _, want := range []string{"HSR Local", "Merced Shuttle", "Brightline West"} {
 		if !served[want] {
 			t.Errorf("expected active service %q", want)
 		}
@@ -282,8 +282,8 @@ func TestGetTravelTimes(t *testing.T) {
 	found := false
 	for _, seg := range tt.Segments {
 		if seg.FromSlug == "sf" && seg.ToSlug == "millbrae" {
-			if seg.RunSeconds != 760 {
-				t.Errorf("sf→millbrae: want 760 run_seconds, got %d", seg.RunSeconds)
+			if seg.RunSeconds != 930 {
+				t.Errorf("sf→millbrae: want 930 run_seconds, got %d", seg.RunSeconds)
 			}
 			found = true
 		}
@@ -328,8 +328,8 @@ func TestTravelTimeBetween(t *testing.T) {
 	if !ok {
 		t.Fatal("TravelTimeBetween: sf→millbrae not found")
 	}
-	if got != 850 {
-		t.Errorf("sf→millbrae: want 850 (run_seconds 760 + dwell 90), got %d", got)
+	if got != 1020 {
+		t.Errorf("sf→millbrae: want 1020 (run_seconds 930 + dwell 90), got %d", got)
 	}
 	if svcID == "" {
 		t.Error("sf→millbrae: serviceID must be non-empty")
@@ -339,16 +339,16 @@ func TestTravelTimeBetween(t *testing.T) {
 	if !ok {
 		t.Fatal("TravelTimeBetween: sf→san-jose not found")
 	}
-	if got != 3050 {
-		t.Errorf("sf→san-jose: want 3050 (run_seconds 760+2110 + 2×dwell 90), got %d", got)
+	if got != 3480 {
+		t.Errorf("sf→san-jose: want 3480 (run_seconds 930+2370 + 2×dwell 90), got %d", got)
 	}
 
 	got, _, _, ok = store.TravelTimeBetween("ca-hsr", "san-jose", "sf")
 	if !ok {
 		t.Fatal("TravelTimeBetween: san-jose→sf (reverse) not found")
 	}
-	if got != 3050 {
-		t.Errorf("san-jose→sf: want 3050 (these hops are symmetric), got %d", got)
+	if got != 3480 {
+		t.Errorf("san-jose→sf: want 3480 (these hops are symmetric), got %d", got)
 	}
 
 	gotGilroy, _, _, ok := store.TravelTimeBetween("ca-hsr", "gilroy", "merced")
@@ -362,11 +362,13 @@ func TestTravelTimeBetween(t *testing.T) {
 	if gotGilroy == gotMerced {
 		t.Errorf("gilroy↔merced: want different durations, both %d — not every hop is symmetric", gotGilroy)
 	}
-	if gotGilroy != 3140 {
-		t.Errorf("gilroy→merced: want 3140 (run_seconds 3050 + dwell 90), got %d", gotGilroy)
+	// gilroy→madera on Phase 1 (1950+90) plus madera→merced on the spur (1410+90).
+	if gotGilroy != 3540 {
+		t.Errorf("gilroy→merced: want 3540 (via madera), got %d", gotGilroy)
 	}
-	if gotMerced != 3030 {
-		t.Errorf("merced→gilroy: want 3030 (run_seconds 2940 + dwell 90), got %d", gotMerced)
+	// merced→madera on the spur (1290+90) plus madera→gilroy on Phase 1 (2010+90).
+	if gotMerced != 3480 {
+		t.Errorf("merced→gilroy: want 3480 (via madera), got %d", gotMerced)
 	}
 
 	got, _, _, ok = store.TravelTimeBetween("ca-hsr", "sf", "sf")
@@ -422,16 +424,16 @@ func TestTravelTimeBetween_caHSRCorridorDirectionsDiffer(t *testing.T) {
 	if !ok {
 		t.Fatal("TravelTimeBetween: sf→anaheim not found")
 	}
-	if got != 18360 {
-		t.Errorf("sf→anaheim: want 18360 (run sum 17280 + 12×dwell 90), got %d", got)
+	if got != 18300 {
+		t.Errorf("sf→anaheim: want 18300 (run sum 17310 + 11×dwell 90), got %d", got)
 	}
 
 	got, _, _, ok = store.TravelTimeBetween("ca-hsr", "anaheim", "sf")
 	if !ok {
 		t.Fatal("TravelTimeBetween: anaheim→sf not found")
 	}
-	if got != 18080 {
-		t.Errorf("anaheim→sf: want 18080 (run sum 17000 + 12×dwell 90), got %d", got)
+	if got != 18180 {
+		t.Errorf("anaheim→sf: want 18180 (run sum 17190 + 11×dwell 90), got %d", got)
 	}
 }
 
@@ -484,7 +486,7 @@ func TestCAHSRTransitGraph_inlinePayloadStaysSmallEnoughThatWorkerNeedsNoDatabas
 
 func TestLocalSFToAnaheim_compiledTime_approx306min(t *testing.T) {
 	// Table 3-4, 2026 Business Plan: all-stop SF→Anaheim = 306 min.
-	// Compiled Local = run sum 17280 s + 12×90 s dwell = 18360 s = 306.0 min exactly.
+	// Compiled Local = run sum 17310 s + 11×90 s dwell = 18300 s = 305 min.
 	store := mustNewStore(t)
 	g, ok := store.Graph("ca-hsr")
 	if !ok {
@@ -495,7 +497,7 @@ func TestLocalSFToAnaheim_compiledTime_approx306min(t *testing.T) {
 	adj := serviceEdges(t, g, localSvcID, "HSR Local")
 
 	allStops := []string{
-		"sf", "millbrae", "san-jose", "gilroy", "merced", "madera",
+		"sf", "millbrae", "san-jose", "gilroy", "madera",
 		"fresno", "kings-tulare", "bakersfield", "palmdale",
 		"burbank-airport", "los-angeles", "anaheim",
 	}
@@ -521,17 +523,21 @@ func TestSeededTravelTimes_brightlineWestIsADistinctRouteGroup(t *testing.T) {
 	const (
 		phase1RouteID = "00000000-0000-4002-8001-000000000001"
 		bwRouteID     = "00000000-0000-4002-8001-000000000002"
+		spurRouteID   = "00000000-0000-4002-8001-000000000003"
 	)
 	byRoute := map[string][]string{}
 	for _, seg := range tt.Segments {
 		byRoute[seg.RouteID] = append(byRoute[seg.RouteID], seg.FromSlug+"→"+seg.ToSlug)
 	}
 
-	if len(byRoute) != 2 {
-		t.Errorf("want segments grouped under 2 routes, got %d: %v", len(byRoute), byRoute)
+	if len(byRoute) != 3 {
+		t.Errorf("want segments grouped under 3 routes, got %d: %v", len(byRoute), byRoute)
 	}
-	if got := len(byRoute[phase1RouteID]); got != 12 {
-		t.Errorf("Phase 1 route: want 12 segments, got %d", got)
+	if got := len(byRoute[phase1RouteID]); got != 11 {
+		t.Errorf("Phase 1 route: want 11 segments, got %d", got)
+	}
+	if got := byRoute[spurRouteID]; len(got) != 1 || got[0] != "merced→madera" {
+		t.Errorf("Merced spur route: want [merced→madera], got %v", got)
 	}
 	want := []string{"palmdale→victor-valley", "victor-valley→las-vegas"}
 	got := byRoute[bwRouteID]
