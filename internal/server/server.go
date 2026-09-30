@@ -48,6 +48,10 @@ func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routi
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", handler.Health)
+	// Liveness above stays cheap; readiness asks the database and the broker
+	// (SPA-379). Both bare: a probe carries no identity and must not spend a
+	// rate-limit bucket.
+	mux.HandleFunc("GET /readyz", handler.Ready(pinger(deps), pinger(publisher), lg))
 
 	// Public reads: the curated scenario data, unauthenticated by design.
 	//
@@ -173,6 +177,13 @@ func registerPublishedServiceRoutes(mux *http.ServeMux, deps AuthDeps) {
 	// there is no identity for it to read. Curated scenarios stay at
 	// GET /api/scenarios; a page that wants both calls both.
 	mux.HandleFunc("GET /api/published-services", handler.PublishedServices(deps))
+}
+
+// A component that cannot be pinged — no database, no broker, or the
+// in-memory FakePublisher — reads as "disabled" rather than failing readiness.
+func pinger(v any) handler.Pinger {
+	p, _ := v.(handler.Pinger)
+	return p
 }
 
 func passThrough(next http.Handler) http.Handler { return next }
@@ -411,8 +422,14 @@ func logRequests(lg *slog.Logger, next http.Handler) http.Handler {
 		start := time.Now()
 		next.ServeHTTP(rec, r)
 
+		// Probes are polled on a timer by the platform and uptime monitors;
+		// at info they would drown the requests worth reading.
+		level := slog.LevelInfo
+		if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
+			level = slog.LevelDebug
+		}
 		trace, _ := traceid.FromContext(r.Context())
-		lg.Info("request",
+		lg.Log(r.Context(), level, "request",
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", rec.status,

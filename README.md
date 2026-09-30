@@ -175,7 +175,7 @@ The four policies, overridable by env, are disabled only by `PER_MIN=0`
 | Compile | All three compile POSTs (one shared limiter) | 10/min, burst 3 |
 
 Ordinary CRUD, routing-job polling, public scenario/graph reads, `/healthz`,
-and `/api/internal/*` are not limited here.
+`/readyz`, and `/api/internal/*` are not limited here.
 
 ### Polling a routing job
 
@@ -255,6 +255,14 @@ Check it's up:
 ```sh
 curl localhost:8080/healthz
 ```
+
+`/healthz` is liveness: it answers `{"status":"ok"}` whenever the process is
+serving. `/readyz` is readiness: it pings Postgres and the broker (concurrently,
+within about a second) and answers 200 with `{"postgres":"ok","amqp":"ok"}`,
+or 503 naming whichever is `"unavailable"`. A component the deployment runs
+without — no `DATABASE_URL` or no `AMQP_URL` — reads `"disabled"` and does not
+fail the check, so a local run with neither answers 200. Both probes log at
+debug, not info.
 
 ## CORS
 

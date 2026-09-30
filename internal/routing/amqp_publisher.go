@@ -81,6 +81,31 @@ func (p *AMQPPublisher) Publish(ctx context.Context, msg Message) error {
 	return nil
 }
 
+func (p *AMQPPublisher) Ping(ctx context.Context) error {
+	// Dials rather than only inspecting the current channel: the publisher
+	// connects lazily, so a fresh process has no connection until its first
+	// publish, and one whose connection dropped would otherwise stay "down"
+	// until user traffic happened to redial it. A healthy broker answers the
+	// check by being reachable.
+	//
+	// amqp.Dial takes no context and waits up to 30s on an unresponsive host,
+	// so the caller's deadline is honored here rather than by the dial. The
+	// goroutine outlives an abandoned check by at most that long.
+	done := make(chan error, 1)
+	go func() {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		_, err := p.connect()
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return fmt.Errorf("routing: broker check: %w", ctx.Err())
+	}
+}
+
 func (p *AMQPPublisher) connect() (*amqp.Channel, error) {
 	if p.ch != nil && !p.ch.IsClosed() {
 		return p.ch, nil
