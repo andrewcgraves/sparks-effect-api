@@ -88,9 +88,12 @@ func TestCompiledCAHSRMatches2026BusinessPlan(t *testing.T) {
 		}
 	}
 
+	// The matrix is all-stop, so it is held against the graph without the HSR
+	// Express, which would otherwise win every pair it serves.
+	allStop := compileCAHSR(t, store, withoutExpress)
 	for from, row := range businessPlan2026AllStopMin {
 		for to, wantMin := range row {
-			got, _, _, ok := store.TravelTimeBetween("ca-hsr", from, to)
+			got, _, _, ok := graphDijkstra(allStop, from, to)
 			if !ok {
 				t.Errorf("%s→%s: got no path, matrix %d min", from, to, wantMin)
 				continue
