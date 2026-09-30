@@ -216,8 +216,10 @@ func TestDisabledUserCannotAuthenticateAndReenableRestoresSignIn(t *testing.T) {
 	}
 
 	const (
-		routeID   = "00000000-0000-4002-8003-0000000000d1"
-		serviceID = "00000000-0000-4008-8003-0000000000d1"
+		routeID          = "00000000-0000-4002-8003-0000000000d1"
+		serviceID        = "00000000-0000-4008-8003-0000000000d1"
+		seededScenarioID = "00000000-0000-4001-8003-0000000000d1"
+		userScenarioID   = "00000000-0000-4009-8003-0000000000d1"
 	)
 	if err := repo.CreateRoute(ctx, transit.Route{
 		ID: routeID, Slug: "owned-alignment", Name: "Owned Alignment", Mode: "rail",
@@ -237,6 +239,18 @@ func TestDisabledUserCannotAuthenticateAndReenableRestoresSignIn(t *testing.T) {
 	svc.MintStopSlugs()
 	if err := repo.CreateUserService(ctx, svc); err != nil {
 		t.Fatalf("CreateUserService: %v", err)
+	}
+	if err := repo.CreateScenario(ctx, transit.Scenario{
+		ID: seededScenarioID, Slug: "owned-net", Name: "Owned Net", OwnerID: &u.ID,
+	}); err != nil {
+		t.Fatalf("CreateScenario: %v", err)
+	}
+	authored := transit.UserScenario{
+		ID: userScenarioID, Slug: "owned-weekend", OwnerID: u.ID,
+		Name: "Owned Weekend", ServiceIDs: []string{serviceID},
+	}
+	if err := repo.CreateUserScenario(ctx, authored); err != nil {
+		t.Fatalf("CreateUserScenario: %v", err)
 	}
 
 	if err := repo.SetUserDisabled(ctx, u.ID, true); err != nil {
@@ -298,6 +312,20 @@ func TestDisabledUserCannotAuthenticateAndReenableRestoresSignIn(t *testing.T) {
 	}
 	if kept.OwnerID != u.ID || kept.Name != svc.Name {
 		t.Errorf("authored service = %+v, want owner %s name %q", kept, u.ID, svc.Name)
+	}
+	keptScenario, found, err := repo.GetScenarioByID(ctx, seededScenarioID)
+	if err != nil || !found {
+		t.Fatalf("GetScenarioByID after disable: found=%v err=%v", found, err)
+	}
+	if keptScenario.OwnerID == nil || *keptScenario.OwnerID != u.ID || keptScenario.Name != "Owned Net" {
+		t.Errorf("owned scenario = %+v, want owner %s name %q", keptScenario, u.ID, "Owned Net")
+	}
+	keptUserScenario, found, err := repo.GetUserScenarioByID(ctx, userScenarioID)
+	if err != nil || !found {
+		t.Fatalf("GetUserScenarioByID after disable: found=%v err=%v", found, err)
+	}
+	if keptUserScenario.OwnerID != u.ID || keptUserScenario.Name != authored.Name {
+		t.Errorf("authored user scenario = %+v, want owner %s name %q", keptUserScenario, u.ID, authored.Name)
 	}
 
 	// The other account was never disabled; its live session still resolves.
