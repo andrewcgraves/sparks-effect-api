@@ -11,6 +11,7 @@ type IsochroneKey struct {
 	Mode         string `json:"mode"`
 	ContourMins  int    `json:"contour_mins"`
 	DepartsOn    string `json:"departs_on,omitempty"`
+	BudgetMins   int    `json:"budget_mins,omitempty"`
 }
 
 type CachedIsochrone struct {

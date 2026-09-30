@@ -268,6 +268,23 @@ func TestWorkerCachePutCarriesDepartsOn(t *testing.T) {
 	}
 }
 
+func TestWorkerCachePutCarriesBudgetMins(t *testing.T) {
+	store := &fakeWorkerStore{}
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/internal/isochrone-cache", handler.WorkerCachePut(store))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/internal/isochrone-cache",
+		bytes.NewReader([]byte(`{"entries":[{"key":{"compile_job_id":"c1","station_slug":"north","mode":"transit","contour_mins":79,"departs_on":"2026-09-02","budget_mins":120},"geometry":{"type":"Polygon"}}]}`)))
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body %s", rec.Code, rec.Body.String())
+	}
+	if len(store.putEntries) != 1 || store.putEntries[0].Key.BudgetMins != 120 {
+		t.Errorf("put %+v, want budget_mins=120", store.putEntries)
+	}
+}
+
 func TestWorkerStoreInternalError(t *testing.T) {
 	store := &fakeWorkerStore{runningErr: errors.New("db down")}
 	mux := http.NewServeMux()
