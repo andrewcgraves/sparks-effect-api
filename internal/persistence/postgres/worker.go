@@ -53,26 +53,29 @@ func (r *Repo) GetIsochroneCache(ctx context.Context, keys []handler.IsochroneKe
 	modes := make([]string, len(keys))
 	contours := make([]int32, len(keys))
 	departsOn := make([]string, len(keys))
+	budgets := make([]int32, len(keys))
 	for i, k := range keys {
 		compileJobIDs[i] = k.CompileJobID
 		slugs[i] = k.StationSlug
 		modes[i] = k.Mode
 		contours[i] = int32(k.ContourMins)
 		departsOn[i] = k.DepartsOn
+		budgets[i] = int32(k.BudgetMins)
 	}
 
 	rows, err := r.pool.Query(ctx,
 		`SELECT wanted.compile_job_id, wanted.station_slug, wanted.mode, wanted.contour_mins,
-		        wanted.departs_on, c.geometry, c.tileset_at
-		   FROM unnest($1::text[], $2::text[], $3::text[], $4::int[], $5::text[])
-		        AS wanted (compile_job_id, station_slug, mode, contour_mins, departs_on)
+		        wanted.departs_on, wanted.budget_mins, c.geometry, c.tileset_at
+		   FROM unnest($1::text[], $2::text[], $3::text[], $4::int[], $5::text[], $6::int[])
+		        AS wanted (compile_job_id, station_slug, mode, contour_mins, departs_on, budget_mins)
 		   JOIN isochrone_cache c
 		     ON c.compile_job_id = wanted.compile_job_id::uuid
 		    AND c.station_slug   = wanted.station_slug
 		    AND c.mode           = wanted.mode
 		    AND c.contour_mins   = wanted.contour_mins
-		    AND c.departs_on IS NOT DISTINCT FROM NULLIF(wanted.departs_on, '')::date`,
-		compileJobIDs, slugs, modes, contours, departsOn)
+		    AND c.departs_on IS NOT DISTINCT FROM NULLIF(wanted.departs_on, '')::date
+		    AND c.budget_mins IS NOT DISTINCT FROM NULLIF(wanted.budget_mins, 0)`,
+		compileJobIDs, slugs, modes, contours, departsOn, budgets)
 	if err != nil {
 		return nil, wrap("GetIsochroneCache", err)
 	}
@@ -84,7 +87,7 @@ func (r *Repo) GetIsochroneCache(ctx context.Context, keys []handler.IsochroneKe
 			geom      []byte
 			tilesetAt *time.Time
 		)
-		if err := rows.Scan(&k.CompileJobID, &k.StationSlug, &k.Mode, &k.ContourMins, &k.DepartsOn, &geom, &tilesetAt); err != nil {
+		if err := rows.Scan(&k.CompileJobID, &k.StationSlug, &k.Mode, &k.ContourMins, &k.DepartsOn, &k.BudgetMins, &geom, &tilesetAt); err != nil {
 			return nil, wrap("GetIsochroneCache scan", err)
 		}
 		row := handler.CachedIsochrone{Key: k, Geometry: json.RawMessage(geom)}
@@ -124,7 +127,7 @@ func (r *Repo) PutIsochroneCache(ctx context.Context, entries []handler.CachedIs
 		}
 		batch.Queue(putIsochroneCacheSQL,
 			e.Key.CompileJobID, e.Key.StationSlug, e.Key.Mode, e.Key.ContourMins,
-			[]byte(e.Geometry), tilesetAt, e.Key.DepartsOn)
+			[]byte(e.Geometry), tilesetAt, e.Key.DepartsOn, e.Key.BudgetMins)
 	}
 
 	if err := r.pool.SendBatch(ctx, batch).Close(); err != nil {
@@ -134,8 +137,8 @@ func (r *Repo) PutIsochroneCache(ctx context.Context, entries []handler.CachedIs
 }
 
 var putIsochroneCacheSQL = `INSERT INTO isochrone_cache
-     (compile_job_id, station_slug, mode, contour_mins, geometry, tileset_at, departs_on)
-  VALUES ($1::uuid, $2, $3, $4, $5, $6, NULLIF($7, '')::date)
+     (compile_job_id, station_slug, mode, contour_mins, geometry, tileset_at, departs_on, budget_mins)
+  VALUES ($1::uuid, $2, $3, $4, $5, $6, NULLIF($7, '')::date, NULLIF($8::int, 0))
   ON CONFLICT ON CONSTRAINT isochrone_cache_key DO UPDATE
      SET geometry = excluded.geometry, tileset_at = excluded.tileset_at
    WHERE ` + usableGeometrySQL("excluded.geometry") + `

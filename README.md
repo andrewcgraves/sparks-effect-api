@@ -69,9 +69,9 @@ worker posts to `/api/internal/...`. A renamed JSON tag decodes as its
 zero value — every cache lookup misses, the response is still `200 OK`,
 and there is no error anywhere to find it by. That envelope is pinned by
 `contract/store/testdata/worker-store.golden.json` and
-`internal/handler/testdata/worker-store.golden.json`. `departs_on` is
-`omitempty` on the wire; the fixture keeps it non-empty so the SPA-269
-field cannot hide.
+`internal/handler/testdata/worker-store.golden.json`. `departs_on` and
+`budget_mins` are `omitempty` on the wire; the fixture keeps both non-empty so
+neither the SPA-269 nor the SPA-326 field can hide.
 
 `make check-contract` (and a CI job of the same name) still fetches the
 worker's copies on `main` and diffs both fixtures; it is not part of
@@ -90,7 +90,11 @@ egress-polygon cache go through `/api/internal/...`, gated by `WORKER_TOKEN`
 (a shared bearer secret, not a user session). Unset, those routes answer 503
 rather than being left unauthenticated. Deploy this side before the worker:
 its startup ping is `GET /api/internal/worker`. Transit cache rows also carry
-`departs_on` (SPA-269); walk/bike/drive omit it.
+`departs_on` (SPA-269) and `budget_mins` (SPA-326); walk/bike/drive omit both,
+and both are NULL in the table for those modes. Below the contour ceiling the
+budget and the contour together fix when the rider left the station, which the
+date alone does not — see the worker README's "Caching egress polygons" and
+migration `00029`'s header for the deploy order.
 
 A cache write that collides with an existing row replaces it only when the
 incoming polygon is usable and either the stored one is not (the worker
