@@ -21,6 +21,7 @@ type fakeAuthStore struct {
 	sessions map[string]account.Session
 	created  []account.User
 	failWith error
+	lookups  int
 }
 
 type userRecord struct {
@@ -59,6 +60,7 @@ func newFakeAuthStore(t *testing.T) *fakeAuthStore {
 }
 
 func (f *fakeAuthStore) GetUserCredentialsByEmail(_ context.Context, email string) (account.User, string, bool, error) {
+	f.lookups++
 	if f.failWith != nil {
 		return account.User{}, "", false, f.failWith
 	}

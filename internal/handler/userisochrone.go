@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 
@@ -12,6 +13,10 @@ import (
 
 const StaleGraphErrorCode = "stale_graph"
 
+// Every isochrone request, seeded, authored or published, is a point, a budget
+// and a mode: a few hundred bytes. Shared so the three stay one limit.
+const maxIsochroneBodyBytes = 4 << 10
+
 type userIsochroneRequest struct {
 	Lat        float64 `json:"lat"`
 	Lng        float64 `json:"lng"`
@@ -20,8 +25,15 @@ type userIsochroneRequest struct {
 }
 
 func validateIsochroneRequest(w http.ResponseWriter, r *http.Request) (userIsochroneRequest, bool) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxIsochroneBodyBytes)
+
 	var req userIsochroneRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+			return req, false
+		}
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return req, false
 	}

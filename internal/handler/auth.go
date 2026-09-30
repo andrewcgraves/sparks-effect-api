@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -31,10 +32,21 @@ type loginResponse struct {
 
 const invalidCredentials = "invalid email or password"
 
+const maxLoginBodyBytes = 4 << 10
+
 func Login(store AuthStore, ttl time.Duration, hasher auth.Hasher) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Capped before the decode: this route is public, and the credential
+		// lookup and bcrypt comparison below are the expensive part of it.
+		r.Body = http.MaxBytesReader(w, r.Body, maxLoginBodyBytes)
+
 		var req loginRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			var tooLarge *http.MaxBytesError
+			if errors.As(err, &tooLarge) {
+				writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+				return
+			}
 			writeError(w, http.StatusBadRequest, "malformed request body")
 			return
 		}

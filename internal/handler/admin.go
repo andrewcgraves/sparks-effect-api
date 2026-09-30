@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -24,10 +25,19 @@ type createUserRequest struct {
 	IsAdmin  bool   `json:"is_admin"`
 }
 
+const maxCreateUserBodyBytes = 64 << 10
+
 func CreateUser(store UserStore, hasher auth.Hasher) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, maxCreateUserBodyBytes)
+
 		var req createUserRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			var tooLarge *http.MaxBytesError
+			if errors.As(err, &tooLarge) {
+				writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+				return
+			}
 			writeError(w, http.StatusBadRequest, "malformed request body")
 			return
 		}
