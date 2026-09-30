@@ -63,6 +63,10 @@ from source and production stops matching what staging ran.
 - prd credentials (`DATABASE_URL`, AMQP URL, bootstrap admin password) live only
   in the production environment — the staging service and its build logs must
   not be able to read them
+- both services' **health check path** → `/readyz` (Settings → Deploy →
+  Healthcheck Path), so a deploy that cannot reach its database or broker never
+  takes traffic. Not `/healthz`: that answers "ok" whenever the process is up,
+  whatever state its dependencies are in, and stays the liveness check
 
 GitHub side, on a repository environment named `production` (Settings →
 Environments), so the credential is scoped to releases rather than to every

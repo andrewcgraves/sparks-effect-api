@@ -49,6 +49,13 @@ func Connect(ctx context.Context, databaseURL string, maxConns int) (*Repo, erro
 
 func (r *Repo) Close() { r.pool.Close() }
 
+func (r *Repo) Ping(ctx context.Context) error {
+	if err := r.pool.Ping(ctx); err != nil {
+		return fmt.Errorf("postgres: ping: %w", err)
+	}
+	return nil
+}
+
 func Migrate(ctx context.Context, databaseURL string) error {
 	cfg, err := pgx.ParseConfig(databaseURL)
 	if err != nil {
