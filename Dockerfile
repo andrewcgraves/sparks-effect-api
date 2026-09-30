@@ -9,11 +9,10 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -o /out/sparks-effect-api ./cmd/api
 
-FROM alpine:3.20
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
 
-RUN adduser -D -u 10001 appuser
-COPY --from=build /out/sparks-effect-api /usr/local/bin/sparks-effect-api
+COPY --from=build --chown=nonroot:nonroot /out/sparks-effect-api /sparks-effect-api
 
-USER appuser
+USER nonroot:nonroot
 EXPOSE 8080
-ENTRYPOINT ["/usr/local/bin/sparks-effect-api"]
+ENTRYPOINT ["/sparks-effect-api"]
