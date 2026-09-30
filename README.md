@@ -583,6 +583,8 @@ docker build -t sparks-effect-api .
 docker run -p 8080:8080 sparks-effect-api
 ```
 
+The runtime image is distroless static: non-root (uid 65532), CA certificates included, no shell and no package manager, so `docker exec` and `kubectl exec … sh` into the API container will not work.
+
 ## Project layout
 
 ```
