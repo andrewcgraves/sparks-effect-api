@@ -18,7 +18,7 @@ type WorkerStore interface {
 	MarkRoutingJobRunning(ctx context.Context, id string) error
 	SucceedRoutingJob(ctx context.Context, id string, result json.RawMessage) error
 	FailRoutingJob(ctx context.Context, id, errMsg string) error
-	GetIsochroneCache(ctx context.Context, keys []IsochroneKey) (map[IsochroneKey]json.RawMessage, error)
+	GetIsochroneCache(ctx context.Context, keys []IsochroneKey) (map[IsochroneKey]CachedIsochrone, error)
 	PutIsochroneCache(ctx context.Context, entries []CachedIsochrone) error
 }
 
@@ -80,10 +80,15 @@ func WorkerCacheLookup(ws WorkerStore) http.HandlerFunc {
 			writeInternalError(r.Context(), w, "reading isochrone cache", err)
 			return
 		}
+		// tileset_at is what lets the worker refuse a row cut from tiles it is
+		// no longer serving (SPA-325). A NULL stamp is omitted, and the worker
+		// reads an absent stamp as a miss.
 		out := store.CacheLookupResponse{Entries: []store.CacheLookupEntry{}}
 		for _, k := range body.Keys {
-			if geom, ok := found[k]; ok {
-				out.Entries = append(out.Entries, store.CacheLookupEntry{Key: k, Geometry: geom})
+			if row, ok := found[k]; ok {
+				out.Entries = append(out.Entries, store.CacheLookupEntry{
+					Key: k, Geometry: row.Geometry, TilesetAt: row.TilesetAt,
+				})
 			}
 		}
 		writeJSON(w, http.StatusOK, out)

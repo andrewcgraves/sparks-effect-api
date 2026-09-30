@@ -51,7 +51,7 @@ func goldenEnvelope() workerStoreEnvelope {
 	return workerStoreEnvelope{
 		CacheLookupRequest: store.CacheLookupRequest{Keys: []store.IsochroneKey{key}},
 		CacheLookupResponse: store.CacheLookupResponse{
-			Entries: []store.CacheLookupEntry{{Key: key, Geometry: geom}},
+			Entries: []store.CacheLookupEntry{{Key: key, Geometry: geom, TilesetAt: goldenTilesetAt()}},
 		},
 		CachePutRequest: store.CachePutRequest{
 			Entries: []store.CachedIsochrone{{

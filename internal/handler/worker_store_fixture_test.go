@@ -59,7 +59,7 @@ func goldenEnvelope() workerStoreEnvelope {
 	return workerStoreEnvelope{
 		CacheLookupRequest: store.CacheLookupRequest{Keys: []IsochroneKey{key}},
 		CacheLookupResponse: store.CacheLookupResponse{
-			Entries: []store.CacheLookupEntry{{Key: key, Geometry: geom}},
+			Entries: []store.CacheLookupEntry{{Key: key, Geometry: geom, TilesetAt: goldenTilesetAt()}},
 		},
 		CachePutRequest: store.CachePutRequest{
 			Entries: []CachedIsochrone{{
@@ -127,6 +127,9 @@ func TestWorkerStoreEnvelope_roundTripsThroughTheFixture(t *testing.T) {
 	if got.CacheLookupResponse.Entries[0].Key != want.CacheLookupResponse.Entries[0].Key {
 		t.Errorf("lookup entry key = %+v, want %+v", got.CacheLookupResponse.Entries[0].Key, want.CacheLookupResponse.Entries[0].Key)
 	}
+	if !got.CacheLookupResponse.Entries[0].TilesetAt.Equal(want.CacheLookupResponse.Entries[0].TilesetAt) {
+		t.Errorf("lookup tileset_at = %v, want %v", got.CacheLookupResponse.Entries[0].TilesetAt, want.CacheLookupResponse.Entries[0].TilesetAt)
+	}
 	if got.CachePutRequest.Entries[0].Key != want.CachePutRequest.Entries[0].Key {
 		t.Errorf("put key = %+v, want %+v", got.CachePutRequest.Entries[0].Key, want.CachePutRequest.Entries[0].Key)
 	}
@@ -180,8 +183,9 @@ func TestWorkerStoreEnvelope_isShapeComplete(t *testing.T) {
 func TestWorkerCacheLookup_servesTheGoldenEnvelope(t *testing.T) {
 	env := goldenEnvelope()
 	key := env.CacheLookupRequest.Keys[0]
-	store := &goldenWorkerStore{cache: map[IsochroneKey]json.RawMessage{
-		key: env.CacheLookupResponse.Entries[0].Geometry,
+	entry := env.CacheLookupResponse.Entries[0]
+	store := &goldenWorkerStore{cache: map[IsochroneKey]CachedIsochrone{
+		key: {Key: key, Geometry: entry.Geometry, TilesetAt: entry.TilesetAt},
 	}}
 
 	body, err := json.Marshal(env.CacheLookupRequest)
@@ -268,7 +272,7 @@ func TestWorkerJobTransitions_acceptTheGoldenEnvelope(t *testing.T) {
 }
 
 type goldenWorkerStore struct {
-	cache      map[IsochroneKey]json.RawMessage
+	cache      map[IsochroneKey]CachedIsochrone
 	putEntries []CachedIsochrone
 	result     json.RawMessage
 	errMsg     string
@@ -286,8 +290,8 @@ func (g *goldenWorkerStore) FailRoutingJob(_ context.Context, _, errMsg string) 
 	return nil
 }
 
-func (g *goldenWorkerStore) GetIsochroneCache(_ context.Context, keys []IsochroneKey) (map[IsochroneKey]json.RawMessage, error) {
-	out := map[IsochroneKey]json.RawMessage{}
+func (g *goldenWorkerStore) GetIsochroneCache(_ context.Context, keys []IsochroneKey) (map[IsochroneKey]CachedIsochrone, error) {
+	out := map[IsochroneKey]CachedIsochrone{}
 	for _, k := range keys {
 		if v, ok := g.cache[k]; ok {
 			out[k] = v
