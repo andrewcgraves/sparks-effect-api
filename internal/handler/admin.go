@@ -51,6 +51,10 @@ func CreateUser(store UserStore, hasher auth.Hasher) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "password is required")
 			return
 		}
+		if err := auth.ValidatePassword(req.Password, email); err != nil {
+			writeUnprocessable(w, err)
+			return
+		}
 
 		// Checked up front for a clean 409. The UNIQUE constraint on
 		// users.email is still the authority under a concurrent create; this
