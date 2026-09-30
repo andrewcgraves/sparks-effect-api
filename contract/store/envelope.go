@@ -24,8 +24,9 @@ type CacheLookupRequest struct {
 }
 
 type CacheLookupEntry struct {
-	Key      IsochroneKey    `json:"key"`
-	Geometry json.RawMessage `json:"geometry"`
+	Key       IsochroneKey    `json:"key"`
+	Geometry  json.RawMessage `json:"geometry"`
+	TilesetAt time.Time       `json:"tileset_at,omitzero"`
 }
 
 type CacheLookupResponse struct {

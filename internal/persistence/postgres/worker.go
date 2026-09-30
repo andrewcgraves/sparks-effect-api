@@ -42,8 +42,8 @@ func (r *Repo) execRoutingJob(ctx context.Context, op, id, sql string, args ...a
 	return nil
 }
 
-func (r *Repo) GetIsochroneCache(ctx context.Context, keys []handler.IsochroneKey) (map[handler.IsochroneKey]json.RawMessage, error) {
-	found := make(map[handler.IsochroneKey]json.RawMessage, len(keys))
+func (r *Repo) GetIsochroneCache(ctx context.Context, keys []handler.IsochroneKey) (map[handler.IsochroneKey]handler.CachedIsochrone, error) {
+	found := make(map[handler.IsochroneKey]handler.CachedIsochrone, len(keys))
 	if len(keys) == 0 {
 		return found, nil
 	}
@@ -63,7 +63,7 @@ func (r *Repo) GetIsochroneCache(ctx context.Context, keys []handler.IsochroneKe
 
 	rows, err := r.pool.Query(ctx,
 		`SELECT wanted.compile_job_id, wanted.station_slug, wanted.mode, wanted.contour_mins,
-		        wanted.departs_on, c.geometry
+		        wanted.departs_on, c.geometry, c.tileset_at
 		   FROM unnest($1::text[], $2::text[], $3::text[], $4::int[], $5::text[])
 		        AS wanted (compile_job_id, station_slug, mode, contour_mins, departs_on)
 		   JOIN isochrone_cache c
@@ -80,13 +80,18 @@ func (r *Repo) GetIsochroneCache(ctx context.Context, keys []handler.IsochroneKe
 
 	for rows.Next() {
 		var (
-			k    handler.IsochroneKey
-			geom []byte
+			k         handler.IsochroneKey
+			geom      []byte
+			tilesetAt *time.Time
 		)
-		if err := rows.Scan(&k.CompileJobID, &k.StationSlug, &k.Mode, &k.ContourMins, &k.DepartsOn, &geom); err != nil {
+		if err := rows.Scan(&k.CompileJobID, &k.StationSlug, &k.Mode, &k.ContourMins, &k.DepartsOn, &geom, &tilesetAt); err != nil {
 			return nil, wrap("GetIsochroneCache scan", err)
 		}
-		found[k] = json.RawMessage(geom)
+		row := handler.CachedIsochrone{Key: k, Geometry: json.RawMessage(geom)}
+		if tilesetAt != nil {
+			row.TilesetAt = tilesetAt.UTC()
+		}
+		found[k] = row
 	}
 	if err := rows.Err(); err != nil {
 		return nil, wrap("GetIsochroneCache", err)

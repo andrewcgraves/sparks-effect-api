@@ -144,11 +144,11 @@ func TestIsochroneCacheGetServesTheReplacementForAFeaturelessRow(t *testing.T) {
 	var parsed struct {
 		Features []json.RawMessage `json:"features"`
 	}
-	if err := json.Unmarshal(got[k], &parsed); err != nil {
+	if err := json.Unmarshal(got[k].Geometry, &parsed); err != nil {
 		t.Fatalf("geometry: %v", err)
 	}
 	if len(parsed.Features) != 1 {
-		t.Errorf("served %s; the featureless row was not replaced by the recomputed polygon", got[k])
+		t.Errorf("served %s; the featureless row was not replaced by the recomputed polygon", got[k].Geometry)
 	}
 }
 

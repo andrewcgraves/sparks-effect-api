@@ -189,8 +189,8 @@ func (s *stubAuthDeps) MarkRoutingJobRunning(context.Context, string) error { re
 func (s *stubAuthDeps) SucceedRoutingJob(context.Context, string, json.RawMessage) error {
 	return nil
 }
-func (s *stubAuthDeps) GetIsochroneCache(context.Context, []handler.IsochroneKey) (map[handler.IsochroneKey]json.RawMessage, error) {
-	return map[handler.IsochroneKey]json.RawMessage{}, nil
+func (s *stubAuthDeps) GetIsochroneCache(context.Context, []handler.IsochroneKey) (map[handler.IsochroneKey]handler.CachedIsochrone, error) {
+	return map[handler.IsochroneKey]handler.CachedIsochrone{}, nil
 }
 func (s *stubAuthDeps) PutIsochroneCache(context.Context, []handler.CachedIsochrone) error {
 	return nil

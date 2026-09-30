@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 )
@@ -26,7 +27,7 @@ type fakeWorkerStore struct {
 	errMsg      string
 	gotKeys     []handler.IsochroneKey
 	putEntries  []handler.CachedIsochrone
-	cache       map[handler.IsochroneKey]json.RawMessage
+	cache       map[handler.IsochroneKey]handler.CachedIsochrone
 }
 
 func (f *fakeWorkerStore) MarkRoutingJobRunning(_ context.Context, id string) error {
@@ -46,12 +47,12 @@ func (f *fakeWorkerStore) FailRoutingJob(_ context.Context, id, errMsg string) e
 	return f.failedErr
 }
 
-func (f *fakeWorkerStore) GetIsochroneCache(_ context.Context, keys []handler.IsochroneKey) (map[handler.IsochroneKey]json.RawMessage, error) {
+func (f *fakeWorkerStore) GetIsochroneCache(_ context.Context, keys []handler.IsochroneKey) (map[handler.IsochroneKey]handler.CachedIsochrone, error) {
 	f.gotKeys = keys
 	if f.getErr != nil {
 		return nil, f.getErr
 	}
-	out := map[handler.IsochroneKey]json.RawMessage{}
+	out := map[handler.IsochroneKey]handler.CachedIsochrone{}
 	for _, k := range keys {
 		if v, ok := f.cache[k]; ok {
 			out[k] = v
@@ -157,8 +158,8 @@ func TestWorkerMarkFailed(t *testing.T) {
 
 func TestWorkerCacheLookupEchoesCallerKeys(t *testing.T) {
 	k := handler.IsochroneKey{CompileJobID: "c1", StationSlug: "north", Mode: "walk", ContourMins: 30}
-	store := &fakeWorkerStore{cache: map[handler.IsochroneKey]json.RawMessage{
-		k: json.RawMessage(`{"type":"Polygon"}`),
+	store := &fakeWorkerStore{cache: map[handler.IsochroneKey]handler.CachedIsochrone{
+		k: {Key: k, Geometry: json.RawMessage(`{"type":"Polygon"}`)},
 	}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/internal/isochrone-cache/lookup", handler.WorkerCacheLookup(store))
@@ -193,9 +194,9 @@ func TestWorkerCacheLookupKeepsTransitDatesApart(t *testing.T) {
 	}
 	oct := sep
 	oct.DepartsOn = "2026-09-02"
-	store := &fakeWorkerStore{cache: map[handler.IsochroneKey]json.RawMessage{
-		sep: json.RawMessage(`{"day":"sep"}`),
-		oct: json.RawMessage(`{"day":"oct"}`),
+	store := &fakeWorkerStore{cache: map[handler.IsochroneKey]handler.CachedIsochrone{
+		sep: {Key: sep, Geometry: json.RawMessage(`{"day":"sep"}`)},
+		oct: {Key: oct, Geometry: json.RawMessage(`{"day":"oct"}`)},
 	}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/internal/isochrone-cache/lookup", handler.WorkerCacheLookup(store))
@@ -228,6 +229,45 @@ func TestWorkerCacheLookupKeepsTransitDatesApart(t *testing.T) {
 	}
 	if geom["day"] != "oct" {
 		t.Errorf("geometry = %v, want the October row", geom)
+	}
+}
+
+// SPA-325: the worker compares each row's stamp against the tileset it is
+// serving, so the stamp has to reach it; a NULL stamp is left out rather than
+// sent as the zero time.
+func TestWorkerCacheLookupCarriesTheTilesetStamp(t *testing.T) {
+	stamped := handler.IsochroneKey{CompileJobID: "c1", StationSlug: "north", Mode: "walk", ContourMins: 30}
+	unstamped := stamped
+	unstamped.StationSlug = "south"
+	at := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	store := &fakeWorkerStore{cache: map[handler.IsochroneKey]handler.CachedIsochrone{
+		stamped:   {Key: stamped, Geometry: json.RawMessage(`{"type":"Polygon"}`), TilesetAt: at},
+		unstamped: {Key: unstamped, Geometry: json.RawMessage(`{"type":"Polygon"}`)},
+	}}
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/internal/isochrone-cache/lookup", handler.WorkerCacheLookup(store))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/internal/isochrone-cache/lookup",
+		bytes.NewReader([]byte(`{"keys":[{"compile_job_id":"c1","station_slug":"north","mode":"walk","contour_mins":30},{"compile_job_id":"c1","station_slug":"south","mode":"walk","contour_mins":30}]}`)))
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Entries []map[string]json.RawMessage `json:"entries"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(out.Entries) != 2 {
+		t.Fatalf("entries = %d, want 2", len(out.Entries))
+	}
+	if got := string(out.Entries[0]["tileset_at"]); got != `"2026-09-01T00:00:00Z"` {
+		t.Errorf("stamped row tileset_at = %s, want \"2026-09-01T00:00:00Z\"", got)
+	}
+	if raw, ok := out.Entries[1]["tileset_at"]; ok {
+		t.Errorf("unstamped row carries tileset_at %s; a NULL stamp must be omitted", raw)
 	}
 }
 

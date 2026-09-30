@@ -101,6 +101,13 @@ no longer recomputed and dropped on every request. The "usable" test is the
 worker's `isochrone.usable` re-expressed as jsonb in
 `internal/persistence/postgres/worker.go`; nothing fails if the two drift.
 
+A cache lookup returns each row's `tileset_at` beside its geometry (omitted
+when NULL), and the worker treats a row whose stamp is not the tileset Valhalla
+is serving now as a miss (SPA-325). Together with the write guard above, a map
+cycle needs no purge: each stale row is recomputed once and replaced. The
+worker README records how it treats a NULL stamp. An older worker ignores the
+added field, so deploy this side first.
+
 Travel mode is stored in the domain's own vocabulary — `walk` / `bike` /
 `drive` / `transit` ([CONTEXT.md](CONTEXT.md#travel-mode-vs-costing)). "Costing"
 is Valhalla's word for the same concept and stays at the worker's client
