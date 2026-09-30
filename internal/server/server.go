@@ -94,6 +94,18 @@ func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routi
 		// forwards the same id to the worker (see handler.enqueueIsochrone).
 		Handler:           traceid.Middleware(logRequests(lg, h)),
 		ReadHeaderTimeout: 5 * time.Second,
+		// Headers and body together. The largest body any route accepts is an
+		// 8 MiB route ingest, and the public ones are capped at 4 KiB, so 15 s
+		// only cuts off a client trickling its body in to hold the connection.
+		ReadTimeout: 15 * time.Second,
+		// No handler waits on the worker: isochrones and compiles enqueue and
+		// answer with a job id. The slowest response is a compiled graph or
+		// publication read, a few seconds at worst, so 60 s is headroom for a
+		// slow client downloading it rather than for slow work.
+		WriteTimeout: 60 * time.Second,
+		// Long enough that the SPA's burst of reads on a page reuses one
+		// connection, short enough that abandoned keep-alives are reclaimed.
+		IdleTimeout: 120 * time.Second,
 	}
 }
 
