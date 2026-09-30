@@ -11,6 +11,7 @@ import (
 
 func rewindIsochroneCacheDepartsOnMigration(t *testing.T, url string) {
 	t.Helper()
+	rewindIsochroneCacheBudgetMinsMigration(t, url)
 	rewindUserServiceSubtextMigration(t, url)
 	exec(t, url, `
 		DO $rewind$
@@ -67,9 +68,8 @@ func TestIsochroneCacheDepartsOnMigrationAddsColumnAndUniqueKey(t *testing.T) {
 		  WHERE conrelid = 'isochrone_cache'::regclass AND contype = 'p'`); got != 0 {
 		t.Errorf("isochrone_cache still has a primary key after 00024; uniqueness moved to isochrone_cache_key, got %d pkeys", got)
 	}
-	want := "UNIQUE NULLS NOT DISTINCT (compile_job_id, station_slug, mode, contour_mins, departs_on)"
-	if def != want {
-		t.Errorf("isochrone_cache_key = %q, want %q", def, want)
+	if def != currentIsochroneCacheKey {
+		t.Errorf("isochrone_cache_key = %q, want %q", def, currentIsochroneCacheKey)
 	}
 
 	rewindIsochroneCacheDepartsOnMigration(t, url)
@@ -99,9 +99,8 @@ func TestIsochroneCacheDepartsOnMigrationIsSafeToReRun(t *testing.T) {
 	if !isochroneCacheHasColumn(t, url, "departs_on") {
 		t.Fatal("isochrone_cache.departs_on missing after re-run")
 	}
-	want := "UNIQUE NULLS NOT DISTINCT (compile_job_id, station_slug, mode, contour_mins, departs_on)"
-	if got := isochroneCacheUniqueDef(t, url); got != want {
-		t.Errorf("isochrone_cache_key after re-run = %q, want %q", got, want)
+	if got := isochroneCacheUniqueDef(t, url); got != currentIsochroneCacheKey {
+		t.Errorf("isochrone_cache_key after re-run = %q, want %q", got, currentIsochroneCacheKey)
 	}
 }
 

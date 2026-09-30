@@ -31,6 +31,9 @@ func goldenIsochroneKey() store.IsochroneKey {
 		// from the fixture and leave the exact drift that motivated the key
 		// change unguarded.
 		DepartsOn: "2026-09-02",
+		// budget_mins is omitempty too, and missing it is SPA-326's failure
+		// mode: two budgets at one contour silently share a transit row.
+		BudgetMins: 90,
 	}
 }
 
@@ -128,6 +131,9 @@ func TestWorkerStoreEnvelope_fixtureExercisesEveryJSONTag(t *testing.T) {
 
 	if !got["departs_on"] {
 		t.Error("departs_on is missing or zero in the fixture")
+	}
+	if !got["budget_mins"] {
+		t.Error("budget_mins is missing or zero in the fixture")
 	}
 }
 
