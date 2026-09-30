@@ -6,26 +6,46 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"sync"
+	"sync/atomic"
+	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 var ErrNotConfirmed = errors.New("routing: publish was not confirmed by the broker")
 
+// amqp.Dial's own default is 30s, for the TCP connect and again for the
+// handshake. Every caller of connect holds the publisher's lock, so that is
+// how long a black-holed broker could keep a publish waiting behind it.
+const dialTimeout = 2 * time.Second
+
 type AMQPPublisher struct {
-	url     string
-	queue   string
-	log     *slog.Logger
-	mu      sync.Mutex
+	url   string
+	queue string
+	log   *slog.Logger
+	// A one-slot semaphore rather than a sync.Mutex: Publish can stop waiting
+	// for it when its context ends, and Ping can decline to queue for it at all.
+	lock    chan struct{}
+	up      atomic.Bool
 	conn    *amqp.Connection
 	ch      *amqp.Channel
 	returns chan amqp.Return
 }
 
 func NewAMQPPublisher(url, queue string, log *slog.Logger) *AMQPPublisher {
-	return &AMQPPublisher{url: url, queue: queue, log: log}
+	return &AMQPPublisher{url: url, queue: queue, log: log, lock: make(chan struct{}, 1)}
 }
+
+func (p *AMQPPublisher) acquire(ctx context.Context) error {
+	select {
+	case p.lock <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("routing: waiting for the broker connection: %w", ctx.Err())
+	}
+}
+
+func (p *AMQPPublisher) release() { <-p.lock }
 
 func (p *AMQPPublisher) Publish(ctx context.Context, msg Message) error {
 	body, err := json.Marshal(msg)
@@ -33,8 +53,10 @@ func (p *AMQPPublisher) Publish(ctx context.Context, msg Message) error {
 		return fmt.Errorf("routing: marshal message: %w", err)
 	}
 
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	if err := p.acquire(ctx); err != nil {
+		return err
+	}
+	defer p.release()
 
 	ch, err := p.connect()
 	if err != nil {
@@ -88,13 +110,28 @@ func (p *AMQPPublisher) Ping(ctx context.Context) error {
 	// until user traffic happened to redial it. A healthy broker answers the
 	// check by being reachable.
 	//
-	// amqp.Dial takes no context and waits up to 30s on an unresponsive host,
-	// so the caller's deadline is honored here rather than by the dial. The
-	// goroutine outlives an abandoned check by at most that long.
+	// It never queues for the lock. The endpoint is public and unthrottled,
+	// so a check that waited would let polling stack up goroutines behind a
+	// slow dial, with every Publish stuck at the back of that queue. Someone
+	// else holding the lock is either a publish, which settles nothing about
+	// the connection, or a dial already under way; report what the last
+	// attempt left behind instead.
+	select {
+	case p.lock <- struct{}{}:
+	default:
+		if p.up.Load() {
+			return nil
+		}
+		return errors.New("routing: broker check: a connection attempt is already in progress")
+	}
+
+	// The dial takes no context, so the caller's deadline is honored here
+	// rather than by it. The goroutine outlives an abandoned check by at most
+	// dialTimeout per phase, and holds the lock while it does, so there is
+	// only ever one.
 	done := make(chan error, 1)
 	go func() {
-		p.mu.Lock()
-		defer p.mu.Unlock()
+		defer p.release()
 		_, err := p.connect()
 		done <- err
 	}()
@@ -112,7 +149,10 @@ func (p *AMQPPublisher) connect() (*amqp.Channel, error) {
 	}
 	p.reset()
 
-	conn, err := amqp.Dial(p.url)
+	conn, err := amqp.DialConfig(p.url, amqp.Config{
+		Locale: "en_US",
+		Dial:   amqp.DefaultDial(dialTimeout),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("routing: dial broker: %w", err)
 	}
@@ -140,10 +180,12 @@ func (p *AMQPPublisher) connect() (*amqp.Channel, error) {
 	// Buffered so a return never blocks the broker's reader goroutine in the
 	// window before Publish drains it.
 	p.returns = ch.NotifyReturn(make(chan amqp.Return, 1))
+	p.up.Store(true)
 	return ch, nil
 }
 
 func (p *AMQPPublisher) reset() {
+	p.up.Store(false)
 	if p.ch != nil {
 		_ = p.ch.Close()
 		p.ch = nil
@@ -156,7 +198,7 @@ func (p *AMQPPublisher) reset() {
 }
 
 func (p *AMQPPublisher) Close() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.lock <- struct{}{}
+	defer p.release()
 	p.reset()
 }

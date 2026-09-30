@@ -44,6 +44,13 @@ type AuthDeps interface {
 
 var _ AuthDeps = (*postgres.Repo)(nil)
 
+// pinger below reads a component it cannot ping as "disabled", so these keep
+// the real ones from quietly dropping out of readiness.
+var (
+	_ handler.Pinger = (*postgres.Repo)(nil)
+	_ handler.Pinger = (*routing.AMQPPublisher)(nil)
+)
+
 func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routing.Publisher, lg *slog.Logger) *http.Server {
 	mux := http.NewServeMux()
 
