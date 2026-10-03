@@ -85,7 +85,7 @@ func TestSeedLandsReverseRunSecondsOverrides(t *testing.T) {
 	for i := range tt.Segments {
 		seg := &tt.Segments[i]
 		switch {
-		case seg.FromSlug == "gilroy" && seg.ToSlug == "merced":
+		case seg.FromSlug == "gilroy" && seg.ToSlug == "madera":
 			gilroy = seg
 		case seg.FromSlug == "bakersfield" && seg.ToSlug == "palmdale":
 			bakersfield = seg
@@ -94,16 +94,16 @@ func TestSeedLandsReverseRunSecondsOverrides(t *testing.T) {
 		}
 	}
 	if gilroy == nil {
-		t.Fatal("gilroy→merced segment not seeded")
+		t.Fatal("gilroy→madera segment not seeded")
 	}
-	if gilroy.ReverseRunSeconds == nil || *gilroy.ReverseRunSeconds != 2940 {
-		t.Errorf("gilroy→merced reverse_run_seconds: want 2940, got %v", gilroy.ReverseRunSeconds)
+	if gilroy.ReverseRunSeconds == nil || *gilroy.ReverseRunSeconds != 2010 {
+		t.Errorf("gilroy→madera reverse_run_seconds: want 2010, got %v", gilroy.ReverseRunSeconds)
 	}
 	if bakersfield == nil {
 		t.Fatal("bakersfield→palmdale segment not seeded")
 	}
-	if bakersfield.ReverseRunSeconds == nil || *bakersfield.ReverseRunSeconds != 1490 {
-		t.Errorf("bakersfield→palmdale reverse_run_seconds: want 1490, got %v", bakersfield.ReverseRunSeconds)
+	if bakersfield.ReverseRunSeconds == nil || *bakersfield.ReverseRunSeconds != 1710 {
+		t.Errorf("bakersfield→palmdale reverse_run_seconds: want 1710, got %v", bakersfield.ReverseRunSeconds)
 	}
 	if millbrae == nil {
 		t.Fatal("sf→millbrae segment not seeded")

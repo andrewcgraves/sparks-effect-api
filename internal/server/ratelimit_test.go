@@ -169,6 +169,21 @@ func TestChangePasswordSharesTheLoginLimiter(t *testing.T) {
 		`{"current_password":"x","new_password":"y"}`))
 }
 
+func TestAccountTokenRoutesShareTheLoginLimiter(t *testing.T) {
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		t.Run(method, func(t *testing.T) {
+			h := newRateLimitedServer(t, newStubDeps(), config.Config{
+				RateLimitLogin: tinyPolicy(),
+			})
+			first := request(t, h, http.MethodPost, "/api/auth/login", "", loginBody)
+			if first.Code == http.StatusTooManyRequests {
+				t.Fatalf("first request was 429; body %s", first.Body.String())
+			}
+			assertRateLimited(t, request(t, h, method, "/api/auth/tokens/some-token", "", `{"password":"x"}`))
+		})
+	}
+}
+
 func TestSnapStopsSecondRequestFromSameIPIsRateLimited(t *testing.T) {
 	h := newRateLimitedServer(t, newStubDeps(), config.Config{
 		RateLimitSnapStops: tinyPolicy(),

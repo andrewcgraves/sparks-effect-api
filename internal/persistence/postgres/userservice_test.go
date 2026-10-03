@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/persistence/postgres"
@@ -94,6 +95,9 @@ func TestUserServiceRoundTrip(t *testing.T) {
 	if got.RouteID != want.RouteID || got.OwnerID != want.OwnerID {
 		t.Errorf("route/owner: got route=%s owner=%s", got.RouteID, got.OwnerID)
 	}
+	if got.RouteSlug != "us-route-0" || got.RouteName != "Route" {
+		t.Errorf("route slug/name: got %q / %q, want us-route-0 / Route", got.RouteSlug, got.RouteName)
+	}
 	// Inline vehicle params survive the jsonb round-trip exactly.
 	if got.Vehicle != want.Vehicle {
 		t.Errorf("vehicle: got %+v, want %+v", got.Vehicle, want.Vehicle)
@@ -133,6 +137,9 @@ func TestGetUserServiceByIDMatchesBySlug(t *testing.T) {
 	}
 	if byID.Slug != "bay-area-express" || len(byID.Stops) != 3 {
 		t.Fatalf("got %+v", byID)
+	}
+	if byID.RouteSlug != "us-route-0" || byID.RouteName != "Route" {
+		t.Errorf("route slug/name: got %q / %q, want us-route-0 / Route", byID.RouteSlug, byID.RouteName)
 	}
 }
 
@@ -175,6 +182,9 @@ func TestUpdateUserServiceReplacesAggregate(t *testing.T) {
 	if got.Name != "Renamed" || got.Subtext != "Diesel · Local" ||
 		got.Description != "Rewritten" || got.RouteID != usRouteID2 {
 		t.Errorf("scalars not updated: %+v", got)
+	}
+	if got.RouteSlug != "us-route-1" || got.RouteName != "Route" {
+		t.Errorf("route slug/name after re-point: got %q / %q, want us-route-1 / Route", got.RouteSlug, got.RouteName)
 	}
 	if got.Vehicle.MaxSpeedKMH != 250 || got.Vehicle.DwellS != 60 {
 		t.Errorf("vehicle not updated: %+v", got.Vehicle)
@@ -249,6 +259,136 @@ func TestListUserServicesByOwnerIsScoped(t *testing.T) {
 	if got[0].ID != mine.ID || len(got[0].Stops) != 3 || len(got[0].FrequencyWindows) != 2 {
 		t.Fatalf("listed service not fully hydrated: %+v", got[0])
 	}
+	if got[0].PublishedAt != nil {
+		t.Fatalf("unpublished PublishedAt = %v, want nil", got[0].PublishedAt)
+	}
+}
+
+func TestListUserServicesByOwnerReportsPublicationAndEditOrder(t *testing.T) {
+	repo, ctx, url := userServiceFixture(t)
+
+	older := sampleUserService()
+	older.ID = "00000000-0000-4008-8003-000000000004"
+	older.Slug = "older-published"
+	if err := repo.CreateUserService(ctx, older); err != nil {
+		t.Fatalf("create older: %v", err)
+	}
+	newer := sampleUserService()
+	newer.ID = "00000000-0000-4008-8003-000000000005"
+	newer.Slug = "newer-unpublished"
+	if err := repo.CreateUserService(ctx, newer); err != nil {
+		t.Fatalf("create newer: %v", err)
+	}
+
+	succeedUserServiceCompile(t, repo, ctx, older.ID, pubJobID, nil)
+	pub, err := publishUserService(ctx, repo, older.ID)
+	if err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	conn, err := pgx.Connect(ctx, url)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer func() { _ = conn.Close(ctx) }()
+	olderAt := time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)
+	newerAt := time.Date(2026, 7, 8, 9, 10, 11, 0, time.UTC)
+	if _, err := conn.Exec(ctx, `UPDATE user_services SET updated_at = $2 WHERE id = $1`, older.ID, olderAt); err != nil {
+		t.Fatalf("stamp older: %v", err)
+	}
+	if _, err := conn.Exec(ctx, `UPDATE user_services SET updated_at = $2 WHERE id = $1`, newer.ID, newerAt); err != nil {
+		t.Fatalf("stamp newer: %v", err)
+	}
+
+	got, err := repo.ListUserServicesByOwner(ctx, usOwnerID)
+	if err != nil {
+		t.Fatalf("ListUserServicesByOwner: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d services, want 2", len(got))
+	}
+	if got[0].ID != newer.ID || got[1].ID != older.ID {
+		t.Fatalf("order = %s then %s, want newer updated_at first", got[0].ID, got[1].ID)
+	}
+	if !got[0].UpdatedAt.Equal(newerAt) || !got[1].UpdatedAt.Equal(olderAt) {
+		t.Fatalf("updated_at = %s, %s", got[0].UpdatedAt, got[1].UpdatedAt)
+	}
+	if got[0].PublishedAt != nil {
+		t.Fatalf("unpublished PublishedAt = %v, want nil", got[0].PublishedAt)
+	}
+	if got[1].PublishedAt == nil || !got[1].PublishedAt.Equal(pub.PublishedAt) {
+		t.Fatalf("published PublishedAt = %v, want %v", got[1].PublishedAt, pub.PublishedAt)
+	}
+	if len(got[0].FrequencyWindows) != 2 || len(got[1].FrequencyWindows) != 2 {
+		t.Fatalf("frequency windows = %d, %d; want both hydrated", len(got[0].FrequencyWindows), len(got[1].FrequencyWindows))
+	}
+
+	byID, found, err := repo.GetUserServiceByID(ctx, older.ID)
+	if err != nil || !found {
+		t.Fatalf("GetUserServiceByID: found=%v err=%v", found, err)
+	}
+	if byID.PublishedAt != nil {
+		t.Fatalf("GetUserServiceByID PublishedAt = %v, want nil", byID.PublishedAt)
+	}
+}
+
+func TestListUserServicesByOwnerReturnsEachRoute(t *testing.T) {
+	repo, ctx, url := userServiceFixture(t)
+	conn, err := pgx.Connect(ctx, url)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer func() { _ = conn.Close(ctx) }()
+	for _, rename := range []struct{ id, name string }{
+		{usRouteID, "North Alignment"},
+		{usRouteID2, "South Alignment"},
+	} {
+		if _, err := conn.Exec(ctx, `UPDATE routes SET name = $2 WHERE id = $1`, rename.id, rename.name); err != nil {
+			t.Fatalf("rename route %s: %v", rename.id, err)
+		}
+	}
+
+	north := sampleUserService()
+	if err := repo.CreateUserService(ctx, north); err != nil {
+		t.Fatalf("create north: %v", err)
+	}
+	const southID = "00000000-0000-4008-8003-000000000010"
+	south := sampleUserService()
+	south.ID = southID
+	south.Slug = "south-local"
+	south.RouteID = usRouteID2
+	if err := repo.CreateUserService(ctx, south); err != nil {
+		t.Fatalf("create south: %v", err)
+	}
+
+	assertEachRoute := func(t *testing.T, got []transit.UserService) {
+		t.Helper()
+		if len(got) != 2 {
+			t.Fatalf("got %d services, want 2", len(got))
+		}
+		byID := map[string]transit.UserService{}
+		for _, svc := range got {
+			byID[svc.ID] = svc
+		}
+		if byID[usServiceID].RouteSlug != "us-route-0" || byID[usServiceID].RouteName != "North Alignment" {
+			t.Errorf("north route: slug=%q name=%q", byID[usServiceID].RouteSlug, byID[usServiceID].RouteName)
+		}
+		if byID[southID].RouteSlug != "us-route-1" || byID[southID].RouteName != "South Alignment" {
+			t.Errorf("south route: slug=%q name=%q", byID[southID].RouteSlug, byID[southID].RouteName)
+		}
+	}
+
+	got, err := repo.ListUserServicesByOwner(ctx, usOwnerID)
+	if err != nil {
+		t.Fatalf("ListUserServicesByOwner: %v", err)
+	}
+	assertEachRoute(t, got)
+
+	byIDs, err := repo.ListUserServicesByIDs(ctx, []string{southID, usServiceID})
+	if err != nil {
+		t.Fatalf("ListUserServicesByIDs: %v", err)
+	}
+	assertEachRoute(t, byIDs)
 }
 
 func TestListUserServicesByOwnerEmptyIsNotNil(t *testing.T) {

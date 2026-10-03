@@ -171,7 +171,7 @@ The four policies, overridable by env, are disabled only by `PER_MIN=0`
 | --- | --- | --- |
 | Isochrone | All `POST .../isochrone` (one shared limiter) | 10/min, burst 5 |
 | Snap-stops | `POST /api/routes/{slug}/snap-stops` | 30/min, burst 10 |
-| Login | `POST /api/auth/login` and `POST /api/auth/password` (one shared limiter) | 5/min, burst 5 |
+| Login | `POST /api/auth/login`, `GET`/`POST /api/auth/tokens/{token}` and `POST /api/auth/password` (one shared limiter) | 5/min, burst 5 |
 | Compile | All three compile POSTs (one shared limiter) | 10/min, burst 3 |
 
 Ordinary CRUD, routing-job polling, public scenario/graph reads, `/healthz`,
@@ -380,6 +380,32 @@ bcrypt-hashed. Sessions expire after `SESSION_TTL_HOURS` (default 24).
 Authentication requires `DATABASE_URL`; with the read-only embedded store the
 auth endpoints answer `503` rather than pretending to work.
 
+### Invite and reset links
+
+An admin never chooses another person's password (SPA-387).
+`POST /api/admin/invites` with `{email, name, is_admin}` creates the account
+with no usable password and answers `{user, url}`.
+`POST /api/admin/users/{id}/reset-link` answers `{url}`. The admin sends the
+link however they like; there is no email delivery.
+
+The link is `<WEBSITE_URL>/set-password?token=<token>`. `WEBSITE_URL` defaults
+to `https://sparks-effect.app`. The page reads the token with
+`GET /api/auth/tokens/{token}` (`{purpose, email, expires_at}`) and submits the
+new password to `POST /api/auth/tokens/{token}` with `{password}`. That checks
+the password policy, sets the password, signs out every existing session, and
+answers exactly what login does.
+
+- An invite lasts 7 days; a reset link lasts 1 hour.
+- A link works once. Issuing a reset link revokes the account's earlier unused
+  one, and redeeming any link revokes every other unused link for the account.
+- A used, expired, unknown, or disabled-account link all answer the same `404`.
+- Only the SHA-256 hash of the token is stored, in `account_tokens`, as with
+  sessions.
+- Both token routes share the login rate limiter's bucket.
+
+`POST /api/admin/users`, which takes the password in the request, stays for
+scripts.
+
 ### Two scenario models
 
 *Scenario* and *service* each name two models: the seeded world model
@@ -401,6 +427,8 @@ scenario/route reads or `/api/internal/*`.
 | Endpoint | Access | Purpose |
 | --- | --- | --- |
 | `POST /api/auth/login` | public | Exchange email + password for a token |
+| `GET /api/auth/tokens/{token}` | public | Read an invite or reset link: purpose, email, expiry |
+| `POST /api/auth/tokens/{token}` | public | Set the password from a link and sign in |
 | `POST /api/auth/logout` | authenticated | Revoke the presented token |
 | `GET /api/auth/me` | authenticated | The caller's identity and admin flag |
 | `PATCH /api/auth/me` | authenticated | Set the caller's display name (`{name}`, 1–80 characters after trimming); nothing else on the account changes |
@@ -418,7 +446,11 @@ scenario/route reads or `/api/internal/*`.
 | `GET`/`PUT /api/me/scenarios/{slug}/travel-times` | authenticated | Its segment run times, read and replaced whole |
 | `POST /api/me/services` | authenticated | Author a seeded service inside a scenario you own |
 | `GET`/`PUT`/`DELETE /api/me/services/{id}` | authenticated | Read, edit, or remove one |
-| `POST /api/admin/users` | admin | Provision an account |
+| `POST /api/admin/users` | admin | Provision an account with a password (for scripts) |
+| `POST /api/admin/invites` | admin | Create an account and return its one-time invite link |
+| `POST /api/admin/users/{id}/reset-link` | admin | Return a one-time password-reset link |
+| `GET /api/admin/users` | admin | Every account, oldest first, with `disabled_at` and how many UserServices it authored (`service_count`) and has published (`published_count`) |
+| `PATCH /api/admin/users/{id}` | admin | Set `is_admin` and/or `disabled`; disabling revokes the account's sessions. An admin demoting or disabling themselves gets 409 |
 | `POST /api/admin/routes` | admin | Ingest a curated alignment |
 | `POST /api/scenarios/{slug}/prerendered-isochrones` | admin | Curate a ready-to-display isochrone for a scenario |
 
@@ -494,13 +526,15 @@ BOOTSTRAP_ADMIN_EMAIL=you@example.com
 BOOTSTRAP_ADMIN_PASSWORD=<a strong password>
 ```
 
-Everyone else is then provisioned through `POST /api/admin/users`.
+Everyone else is then invited through `POST /api/admin/invites` (see
+[Invite and reset links](#invite-and-reset-links)), or provisioned with a
+password through `POST /api/admin/users`.
 
 ### Authorization
 
 Four rules, all enforced server-side:
 
-- **Admin gating** — `RequireAdmin` protects account provisioning and is the
+- **Admin gating** — `RequireAdmin` protects account provisioning and management and is the
   gate route-write endpoints register behind.
 - **Ownership** — `auth.CanAccess` is the single ownership predicate: admins
   reach everything, other users reach only rows they own, and unowned rows (the

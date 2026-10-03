@@ -11,9 +11,14 @@ import (
 )
 
 type UserService struct {
-	ID                 string                `json:"id"`
-	Slug               string                `json:"slug"`
+	ID   string `json:"id"`
+	Slug string `json:"slug"`
+	// RouteSlug and RouteName are copied from the route this service points at.
+	// A write names that route by slug, and a service that has never compiled
+	// has no graph to recover the slug from.
 	RouteID            string                `json:"route_id"`
+	RouteSlug          string                `json:"route_slug"`
+	RouteName          string                `json:"route_name"`
 	OwnerID            string                `json:"owner_id"`
 	Name               string                `json:"name"`
 	Subtext            string                `json:"subtext,omitempty"`
@@ -23,6 +28,7 @@ type UserService struct {
 	FrequencyWindows   []FrequencyWindow     `json:"frequency_windows"`
 	CreatedAt          time.Time             `json:"created_at"`
 	UpdatedAt          time.Time             `json:"updated_at"`
+	PublishedAt        *time.Time            `json:"-"`
 	BoardingWait       *BoardingWaitOverride `json:"boarding_wait,omitempty"`
 	BoardingWaitPolicy string                `json:"boarding_wait_policy,omitempty"`
 	BoardingWaitSecs   int                   `json:"boarding_wait_secs"`

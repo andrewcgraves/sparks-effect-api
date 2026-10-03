@@ -23,6 +23,7 @@ type AuthDeps interface {
 	handler.AuthStore
 	handler.AccountStore
 	handler.UserStore
+	handler.AdminUserStore
 	handler.OwnerStore
 	handler.RouteStore
 	handler.CompileStore
@@ -40,6 +41,7 @@ type AuthDeps interface {
 	handler.PublicationStore
 	handler.ServicePublicationStore
 	handler.PublishedServiceStore
+	handler.AccountTokenStore
 	GetSessionUser(ctx context.Context, tokenHash string) (account.User, bool, error)
 }
 
@@ -221,6 +223,7 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 		for _, pattern := range []string{
 			"/api/auth/login", "/api/auth/logout", "/api/auth/me",
 			"/api/auth/password", "/api/auth/sessions/revoke-all",
+			"/api/auth/tokens/",
 			"/api/me/scenarios", "/api/me/services",
 			// The owner-scoped seeded-model CRUD. Each collection needs its own
 			// entry alongside its subtree: "/api/me/routes/" does not serve
@@ -249,9 +252,14 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 	// where it is bcrypt.MinCost.
 	hasher := auth.NewHasher(cfg.PasswordHashCost)
 
-	// Public: the only unauthenticated auth route. There is deliberately no
-	// registration endpoint — accounts come from POST /api/admin/users.
+	// Public. There is deliberately no registration endpoint — accounts come
+	// from an admin, by invite or POST /api/admin/users.
 	mux.Handle("POST /api/auth/login", limitLogin(handler.Login(deps, cfg.SessionTTL, hasher)))
+	// Invite and reset links (SPA-387). Behind the login limiter, and the same
+	// instance of it: redeeming a link is signing in by another route, so a
+	// caller gets one budget for guessing credentials, not two.
+	mux.Handle("GET /api/auth/tokens/{token}", limitLogin(handler.AccountToken(deps)))
+	mux.Handle("POST /api/auth/tokens/{token}", limitLogin(handler.RedeemAccountToken(deps, cfg.SessionTTL, hasher)))
 
 	// Authenticated.
 	mux.Handle("POST /api/auth/logout", authenticated(handler.Logout(deps)))
@@ -388,6 +396,10 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 
 	// Admin-only.
 	mux.Handle("POST /api/admin/users", adminOnly(handler.CreateUser(deps, hasher)))
+	mux.Handle("GET /api/admin/users", adminOnly(handler.ListUsers(deps)))
+	mux.Handle("PATCH /api/admin/users/{id}", adminOnly(handler.PatchUser(deps)))
+	mux.Handle("POST /api/admin/invites", adminOnly(handler.CreateInvite(deps, cfg.WebsiteURL)))
+	mux.Handle("POST /api/admin/users/{id}/reset-link", adminOnly(handler.CreateResetLink(deps, cfg.WebsiteURL)))
 	mux.Handle("POST /api/admin/routes", adminOnly(handler.CreateRoute(deps)))
 	// Curating a prerendered isochrone is editorial content on a public page,
 	// so it sits behind the same admin gate — even though it hangs off the

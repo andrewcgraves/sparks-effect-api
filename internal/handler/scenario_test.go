@@ -431,12 +431,12 @@ func TestScenarioTravelTimes_reverseRunSecondsOmitempty(t *testing.T) {
 		_, has := seg["reverse_run_seconds"]
 		from, _ := seg["from"].(string)
 		to, _ := seg["to"].(string)
-		if from == "gilroy" && to == "merced" {
+		if from == "gilroy" && to == "madera" {
 			seenOverride = true
 			if !has {
-				t.Error("gilroy→merced: reverse_run_seconds missing from JSON")
-			} else if seg["reverse_run_seconds"] != float64(2940) {
-				t.Errorf("gilroy→merced reverse_run_seconds: want 2940, got %v", seg["reverse_run_seconds"])
+				t.Error("gilroy→madera: reverse_run_seconds missing from JSON")
+			} else if seg["reverse_run_seconds"] != float64(2010) {
+				t.Errorf("gilroy→madera reverse_run_seconds: want 2010, got %v", seg["reverse_run_seconds"])
 			}
 		}
 		if from == "sf" && to == "millbrae" {
@@ -447,7 +447,7 @@ func TestScenarioTravelTimes_reverseRunSecondsOmitempty(t *testing.T) {
 		}
 	}
 	if !seenOverride {
-		t.Error("gilroy→merced segment not found")
+		t.Error("gilroy→madera segment not found")
 	}
 	if !seenOmitted {
 		t.Error("sf→millbrae segment not found")

@@ -1,33 +1,45 @@
 # Adjacent segment run times (train in motion only — dwell is added at compile time).
-# Source: CA HSR 2026 Business Plan travel-time matrix (https://hsr.ca.gov/communications-outreach/reports/business-plans/2026-business-plan/).
+# Source: CA HSR 2026 Business Plan travel-time matrix
+# (https://hsr.ca.gov/communications-outreach/reports/business-plans/2026-business-plan/).
 #
-# Values are run-time only. Compiled Local SF→Anaheim = 18360 s (306 min) =
-# run sum 17280 s + 12×90 s resolved dwell. Derived by stripping ~90 s schedule
-# dwell per non-terminus segment from the 2026 Business Plan minute matrix, then
-# proportionally recalibrating to the published 306-min all-stop figure
-# (scale 16/17).
+# These integers are a directed path-sum fit to Table 3-4 (all-stop), not the raw
+# adjacent cells. The matrix is not hop-additive: the southbound adjacent cells
+# sum to 281 min while SF→Anaheim is 306. Each compiled hop below already includes
+# one 90 s level-boarding dwell, so run_seconds = minutes*60 - 90, and
+# reverse_run_seconds is the other direction the same way. reverse_run_seconds is
+# omitted when the fitted directed hop times are equal, and set when the fit's
+# two directions differ. Several hops are asymmetric even though their adjacent
+# Table 3-4 cells are equal, because the matrix is not hop-additive and the fit
+# absorbs that on the directed path sums (San Jose→Gilroy, Fresno→Kings/Tulare,
+# Palmdale→Burbank, and the Merced spur).
 #
-# Two mountain hops carry reverse_run_seconds: Gilroy↔Merced (Pacheco Pass) and
-# Bakersfield↔Palmdale (Tehachapi). The reverse values use the same treatment as
-# the forward ones — strip ~90 s dwell, scale 16/17 — applied to the published
-# northbound deltas. Compiled Local Anaheim→SF is therefore 18080 s (301 min
-# 20 s). That deliberately disagrees with the published 306-minute
-# origin–destination figure in both directions: adjacent hops are the source of
-# truth, and the published matrix is internally inconsistent (faster northbound
-# hops but the same 306-minute total both ways). Do not "correct" the northbound
-# total back to 306.
+# The old 16/17 scale forced the published 306-minute SF→Anaheim total while the
+# alignment still ran the Merced detour. That made everything north of Merced
+# about 30 min slow and everything south of it too fast. Do not reintroduce
+# that scale.
 #
-# The Gilroy–Merced 2-minute delta may not be grade. Merced sits on a stub off
-# the Central Valley Wye; a train calling there reverses and retraces. If the
-# difference is that turnaround, it belongs to the stop, not the span — recorded
-# here so a future ticket can consider a per-station reversal penalty.
+# Corridor totals (11 Phase 1 hops × 90 s dwell):
+#   SF→Anaheim compiled 18300 s = 305 min (matrix 306)
+#   Anaheim→SF compiled 18180 s = 303 min (matrix 306)
+#   San Jose→Fresno 66 min (matrix 65)
+#   Fresno→San Jose 70 min (matrix 70)
+#
+# The Merced spur is 23 min forward / 25 min reverse, not the Table 3-4 direct
+# cell of 20 and not the Table 3-1 M–B cell of 17. Footnote 7 says Merced trip
+# times include a Madera transfer, and the Merced rows are not a constant offset
+# from Madera (about +18 min toward the Bay Area and about +29 min toward
+# Anaheim). The graph has no transfer edge (CONTEXT.md): a path that arrives on
+# one service and leaves on another passes through the shared node and pays
+# nothing extra. 23 forward / 25 reverse is the pair that keeps every
+# Merced↔Phase 1 compiled time within 6 min of Table 3-4.
 #
 # Arrival isochrones ("everywhere that can reach here") are no longer equivalent
 # to departure isochrones ("everywhere reachable from here"). Do not reuse the
 # departure computation from the destination.
 #
 # Segments are ordered in the primary service direction (SF → Anaheim for Phase 1,
-# Palmdale → Las Vegas for the Brightline West spur, which branches at Palmdale).
+# Merced → Madera for the Merced spur, Palmdale → Las Vegas for the Brightline
+# West spur, which branches at Palmdale).
 #
 # Multi-hop origin–destination times are derived by summing consecutive segments in code
 # (see Store.TravelTimeBetween). This replaces the full NxN matrix; callers do not store
@@ -39,59 +51,64 @@
 
 scenario_slug: "ca-hsr"
 provenance: calibrated
-source: "2026 Business Plan Service Planning Methodology, Tables 3-3/3-4 (all-stop SF→Anaheim = 306 min)"
+source: "2026 Business Plan Service Planning Methodology, Table 3-4 (all-stop; directed path-sum fit, SF→Anaheim matrix 306 min)"
 segments:
   # Phase 1: San Francisco → Anaheim (service direction)
   - from: sf
     to: millbrae
-    run_seconds: 760
+    run_seconds: 930
     route_id: "00000000-0000-4002-8001-000000000001"
   - from: millbrae
     to: san-jose
-    run_seconds: 2110
+    run_seconds: 2370
     route_id: "00000000-0000-4002-8001-000000000001"
   - from: san-jose
     to: gilroy
-    run_seconds: 1100
+    run_seconds: 1170
+    reverse_run_seconds: 1350
     route_id: "00000000-0000-4002-8001-000000000001"
   - from: gilroy
-    to: merced
-    run_seconds: 3050
-    reverse_run_seconds: 2940
-    route_id: "00000000-0000-4002-8001-000000000001"
-  - from: merced
     to: madera
-    run_seconds: 1040
+    run_seconds: 1950
+    reverse_run_seconds: 2010
     route_id: "00000000-0000-4002-8001-000000000001"
   - from: madera
     to: fresno
-    run_seconds: 420
+    run_seconds: 570
     route_id: "00000000-0000-4002-8001-000000000001"
   - from: fresno
     to: kings-tulare
-    run_seconds: 650
+    run_seconds: 870
+    reverse_run_seconds: 810
     route_id: "00000000-0000-4002-8001-000000000001"
   - from: kings-tulare
     to: bakersfield
-    run_seconds: 1320
+    run_seconds: 1590
     route_id: "00000000-0000-4002-8001-000000000001"
   - from: bakersfield
     to: palmdale
-    run_seconds: 1660
-    reverse_run_seconds: 1490
+    run_seconds: 1950
+    reverse_run_seconds: 1710
     route_id: "00000000-0000-4002-8001-000000000001"
   - from: palmdale
     to: burbank-airport
-    run_seconds: 2500
+    run_seconds: 2790
+    reverse_run_seconds: 2730
     route_id: "00000000-0000-4002-8001-000000000001"
   - from: burbank-airport
     to: los-angeles
-    run_seconds: 870
+    run_seconds: 1050
     route_id: "00000000-0000-4002-8001-000000000001"
   - from: los-angeles
     to: anaheim
-    run_seconds: 1800
+    run_seconds: 2070
     route_id: "00000000-0000-4002-8001-000000000001"
+  # Merced spur: Merced → Madera
+  - from: merced
+    to: madera
+    run_seconds: 1290
+    reverse_run_seconds: 1410
+    route_id: "00000000-0000-4002-8001-000000000003"
   # --- Brightline West — Palmdale → Las Vegas ---
   # Run-only estimates; dwell is added at compile time.
   - from: palmdale
