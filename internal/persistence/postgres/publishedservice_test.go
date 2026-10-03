@@ -89,9 +89,14 @@ func TestListPublishedServiceSummariesListsOnlyPublicationsAndTheirProse(t *test
 	// A fresh compile is not a publication.
 	succeedUserServiceCompile(t, repo, ctx, compiledOnly.ID, idxJobB, nil)
 
+	pub, found, err := repo.GetServicePublication(ctx, published.ID)
+	if err != nil || !found {
+		t.Fatalf("GetServicePublication: found=%v err=%v", found, err)
+	}
 	want := transit.PublishedServiceSummary{
 		Slug: "published-line", Name: "Published Line",
 		Subtext: "Published Line subtext", Description: "Published Line description",
+		AuthorName: "Owner", PublishedAt: pub.PublishedAt,
 	}
 	if got := listIndex(t, repo, ctx); len(got) != 1 || got[0] != want {
 		t.Fatalf("index = %+v, want only %+v", got, want)
@@ -153,6 +158,44 @@ func TestListPublishedServiceSummariesOrdersMostRecentlyFirstPublishedFirst(t *t
 	}
 	if got := indexSlugs(listIndex(t, repo, ctx)); fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("order after republish = %v, want unchanged %v", got, want)
+	}
+}
+
+// A card's date is the latest publish, the same instant the public page shows,
+// while its place in the index stays at the first. Its byline is joined on
+// read, so a rename or a transfer reaches it without a republish.
+func TestListPublishedServiceSummariesCardDateAndBylineAreCurrent(t *testing.T) {
+	repo, ctx, dbURL := userServiceFixture(t)
+	svc := indexedService(idxServiceA, "card-line", "Card Line")
+	createIndexedServices(t, repo, ctx, svc)
+	publishIndexed(t, repo, ctx, svc.ID, idxJobA)
+	pinFirstPublished(t, dbURL, map[string]string{svc.ID: "2001-01-01T00:00:00Z"})
+
+	republished, err := publishUserService(ctx, repo, svc.ID)
+	if err != nil {
+		t.Fatalf("republish: %v", err)
+	}
+	card := func() transit.PublishedServiceSummary {
+		t.Helper()
+		got := listIndex(t, repo, ctx)
+		if len(got) != 1 {
+			t.Fatalf("index = %+v, want one card", got)
+		}
+		return got[0]
+	}
+	if got := card(); !got.PublishedAt.Equal(republished.PublishedAt) || got.AuthorName != "Owner" {
+		t.Fatalf("card = %+v, want published_at %v by Owner", got, republished.PublishedAt)
+	}
+
+	if _, _, err := repo.UpdateUserName(ctx, usOwnerID, "Renamed Owner"); err != nil {
+		t.Fatalf("UpdateUserName: %v", err)
+	}
+	if got := card().AuthorName; got != "Renamed Owner" {
+		t.Fatalf("author_name after rename = %q, want %q", got, "Renamed Owner")
+	}
+	execSQL(t, dbURL, `UPDATE user_services SET owner_id = $1 WHERE id = $2`, usStrangerID, svc.ID)
+	if got := card().AuthorName; got != "Stranger" {
+		t.Fatalf("author_name after a transfer = %q, want %q", got, "Stranger")
 	}
 }
 
@@ -239,7 +282,8 @@ func pinFirstPublished(t *testing.T, dbURL string, at map[string]string) {
 }
 
 // The index is a list of cards. It must not read the draft's stops or vehicle
-// documents, the publication's frozen routes, or the draft's prose. Asserted
+// documents, the publication's frozen routes, the draft's prose, or anything
+// of the author's but their display name. Asserted
 // by running it as a role that can see only the columns a card needs, so
 // Postgres itself refuses the read if it names any other.
 func TestListPublishedServiceSummariesReadsOnlyCardColumns(t *testing.T) {
@@ -251,8 +295,9 @@ func TestListPublishedServiceSummariesReadsOnlyCardColumns(t *testing.T) {
 	role := fmt.Sprintf("spa_index_reader_%d", time.Now().UnixNano())
 	exec(t, dbURL,
 		`CREATE ROLE `+role+` LOGIN PASSWORD 'index-reader'`,
-		`GRANT SELECT (id, slug) ON user_services TO `+role,
-		`GRANT SELECT (user_service_id, name, subtext, description, first_published_at)
+		`GRANT SELECT (id, slug, owner_id) ON user_services TO `+role,
+		`GRANT SELECT (id, name) ON users TO `+role,
+		`GRANT SELECT (user_service_id, name, subtext, description, published_at, first_published_at)
 		   ON service_publications TO `+role)
 	// Registered before the restricted pool's Close, so it runs after it:
 	// the role's privileges live in this database, and DROP OWNED clears them
@@ -302,6 +347,7 @@ func TestListPublishedServiceSummariesReadsOnlyCardColumns(t *testing.T) {
 		`SELECT vehicle FROM user_services`,
 		`SELECT name FROM user_services`,
 		`SELECT routes FROM service_publications`,
+		`SELECT email FROM users`,
 	} {
 		var pgErr *pgconn.PgError
 		_, err := conn.Exec(ctx, q)

@@ -15,6 +15,13 @@ func TestIntegration_PublishedServicesIndexListsOnlyPublications(t *testing.T) {
 	ctx := context.Background()
 	adminToken := provisionAdminAndLogin(t, h, repo)
 	owner := provisionMember(t, h, adminToken, "indexer@example.com", "member-password")
+	rename := func(name string) {
+		t.Helper()
+		if rec := request(t, h, http.MethodPatch, "/api/auth/me", owner, `{"name": "`+name+`"}`); rec.Code != http.StatusOK {
+			t.Fatalf("rename to %s: status %d, body %s", name, rec.Code, rec.Body.String())
+		}
+	}
+	rename("Ida Indexer")
 
 	routeID := mustUUID(t)
 	if err := repo.CreateRoute(ctx, transit.Route{
@@ -97,9 +104,23 @@ func TestIntegration_PublishedServicesIndexListsOnlyPublications(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatalf("index = %v, want only %s", slugs(items), first.Slug)
 	}
+	pubRec := request(t, h, http.MethodGet, "/api/services/"+first.Slug+"/publication", "")
+	if pubRec.Code != http.StatusOK {
+		t.Fatalf("GET publication: status %d, body %s", pubRec.Code, pubRec.Body.String())
+	}
+	var pub map[string]any
+	if err := json.Unmarshal(pubRec.Body.Bytes(), &pub); err != nil {
+		t.Fatalf("decode publication: %v", err)
+	}
+	if pub["author_name"] != "Ida Indexer" {
+		t.Fatalf("publication author_name = %v, want Ida Indexer", pub["author_name"])
+	}
+	// The card dates the publication exactly as the publication does. Only
+	// the author's name is public: these are exactly the card's keys.
 	want := map[string]any{
 		"slug": first.Slug, "name": "First Line",
 		"subtext": "Electrified · Express", "description": "Published first.",
+		"author_name": "Ida Indexer", "published_at": pub["published_at"],
 	}
 	if len(items[0]) != len(want) {
 		t.Fatalf("item = %+v, want exactly the keys of %+v", items[0], want)
@@ -109,6 +130,17 @@ func TestIntegration_PublishedServicesIndexListsOnlyPublications(t *testing.T) {
 			t.Errorf("%s = %v, want %v", k, items[0][k], v)
 		}
 	}
+
+	// A rename reaches the card and the page without a republish.
+	rename("Ida Renamed")
+	if _, items := index(""); len(items) != 1 || items[0]["author_name"] != "Ida Renamed" {
+		t.Fatalf("index after rename = %+v, want author_name Ida Renamed", items)
+	}
+	pubRec = request(t, h, http.MethodGet, "/api/services/"+first.Slug+"/publication", "")
+	if err := json.Unmarshal(pubRec.Body.Bytes(), &pub); err != nil || pub["author_name"] != "Ida Renamed" {
+		t.Fatalf("publication after rename: author_name %v, err %v", pub["author_name"], err)
+	}
+	anonBody, _ = index("")
 
 	// The owner of an unpublished draft does not see it listed: the index is
 	// the same for everyone who asks.

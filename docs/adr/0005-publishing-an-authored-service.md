@@ -256,6 +256,17 @@ on `transit.Scenario` and the seed YAML, and the `status` key on
   curated alignment does not reach existing publications until their owners
   republish. That is the same trade the pinned graph already makes, and the two
   must not disagree.
+- **The author is live, not frozen** (SPA-426). Both public reads answer
+  `author_name`, the owner's *current* display name, joined on read through
+  `user_services.owner_id` → `users.name`, rather than a column copied at
+  publish. Attribution is a fact about who stands behind the page now, not part
+  of what the author previewed: a frozen name would keep crediting the previous
+  owner after a transfer (SPA-389) and keep showing a name the author has since
+  changed (SPA-385). This is the one deliberate exception to section 3's "a
+  public read never reads the draft row", and it is narrow: the read takes the
+  owner reference, which an edit to the draft cannot change, and the owner's
+  name alone — never their email or id. Everything the author wrote stays
+  frozen.
 
 ## Considered and rejected
 

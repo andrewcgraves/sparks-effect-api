@@ -70,7 +70,8 @@ func decodePublishedPage(t *testing.T, rec *httptest.ResponseRecorder) published
 
 func TestPublishedServicesSendsCardFieldsInStoreOrder(t *testing.T) {
 	store := &fakePublishedServiceStore{items: []transit.PublishedServiceSummary{
-		{Slug: "newer", Name: "Newer Line", Subtext: "Electrified · Express", Description: "Published second."},
+		{Slug: "newer", Name: "Newer Line", Subtext: "Electrified · Express", Description: "Published second.",
+			AuthorName: "Ada Author", PublishedAt: time.Date(2026, 10, 12, 9, 30, 0, 0, time.UTC)},
 		{Slug: "older", Name: "Older Line"},
 	}}
 
@@ -93,7 +94,10 @@ func TestPublishedServicesSendsCardFieldsInStoreOrder(t *testing.T) {
 	want := map[string]any{
 		"slug": "newer", "name": "Newer Line",
 		"subtext": "Electrified · Express", "description": "Published second.",
+		"author_name": "Ada Author", "published_at": "2026-10-12T09:30:00Z",
 	}
+	// Exactly these keys: the byline is the author's name, never their email
+	// or id.
 	if len(got[0]) != len(want) {
 		t.Fatalf("first item keys = %+v, want exactly %+v", got[0], want)
 	}

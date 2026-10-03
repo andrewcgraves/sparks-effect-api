@@ -392,6 +392,10 @@ func TestGetServicePublicationServesTheSnapshotToEveryCaller(t *testing.T) {
 	if rec := publishAs(t, store, transit.DefaultBoardingWaitPolicy(), svcOwner, svc.Slug); rec.Code != http.StatusOK {
 		t.Fatalf("publish: status = %d; body %s", rec.Code, rec.Body.String())
 	}
+	// The store joins the owner's display name; the handler passes it through.
+	pub := store.pubs[svc.ID]
+	pub.AuthorName = "Ada Author"
+	store.pubs[svc.ID] = pub
 
 	// The draft moves on after publishing: new prose, another alignment, and a
 	// newer compile with a different graph. None of it may reach the read.
@@ -432,6 +436,9 @@ func TestGetServicePublicationServesTheSnapshotToEveryCaller(t *testing.T) {
 	if got.PublishedAt.IsZero() {
 		t.Fatal("published_at is zero")
 	}
+	if got.AuthorName != "Ada Author" {
+		t.Fatalf("author_name = %q, want %q", got.AuthorName, "Ada Author")
+	}
 	if len(got.Services) != 1 || len(got.Services[0].Edges) != 1 || got.Services[0].Edges[0].FromSlug != "a" {
 		t.Fatalf("graph = %+v, want job-1's", got.Services)
 	}
@@ -443,7 +450,7 @@ func TestGetServicePublicationServesTheSnapshotToEveryCaller(t *testing.T) {
 	if err := json.Unmarshal([]byte(first), &raw); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	for _, key := range []string{"services", "routes", "published_at", "compile_job_id"} {
+	for _, key := range []string{"services", "routes", "published_at", "compile_job_id", "author_name"} {
 		if _, ok := raw[key]; !ok {
 			t.Errorf("body has no %q key: %s", key, first)
 		}
@@ -451,6 +458,11 @@ func TestGetServicePublicationServesTheSnapshotToEveryCaller(t *testing.T) {
 	for _, key := range []string{"owner_id", "route_id", "slug", "vehicle", "stops"} {
 		if _, ok := raw[key]; ok {
 			t.Errorf("body carries the draft's %q: %s", key, first)
+		}
+	}
+	for _, key := range []string{"email", "author_email", "author_id", "owner_email"} {
+		if _, ok := raw[key]; ok {
+			t.Errorf("body carries the author's %q: %s", key, first)
 		}
 	}
 }
