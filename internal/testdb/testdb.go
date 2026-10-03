@@ -159,7 +159,12 @@ func sweep(admin string) {
 }
 
 func newName() string {
-	return fmt.Sprintf("%s%d_%d", namePrefix, time.Now().Unix(), counter.Add(1))
+	// Each test package is its own process, so this counter starts over in
+	// every one of them. Two packages that create a database in the same
+	// second would otherwise pick the same name and one CREATE DATABASE
+	// fails with "already exists". The pid separates them. createdAt reads
+	// only the unix prefix, before the first underscore.
+	return fmt.Sprintf("%s%d_%d_%d", namePrefix, time.Now().Unix(), os.Getpid(), counter.Add(1))
 }
 
 func createdAt(name string) time.Time {
