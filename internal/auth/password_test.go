@@ -6,10 +6,24 @@ import (
 	"time"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
+	"golang.org/x/crypto/bcrypt"
 )
 
+// MinCost still runs bcrypt. These tests cover salting and verification;
+// the production hasher stays at bcrypt.DefaultCost.
+var testHasher = auth.NewHasher(bcrypt.MinCost)
+
+func TestHasherCostsStayPinned(t *testing.T) {
+	if got := auth.DefaultHasher.Cost(); got != bcrypt.DefaultCost {
+		t.Errorf("DefaultHasher.Cost() = %d, want bcrypt.DefaultCost (%d)", got, bcrypt.DefaultCost)
+	}
+	if got := testHasher.Cost(); got != bcrypt.MinCost {
+		t.Errorf("testHasher.Cost() = %d, want bcrypt.MinCost (%d)", got, bcrypt.MinCost)
+	}
+}
+
 func TestHashPasswordVerifies(t *testing.T) {
-	hash, err := auth.DefaultHasher.Hash("correct horse battery staple")
+	hash, err := testHasher.Hash("correct horse battery staple")
 	if err != nil {
 		t.Fatalf("Hash: %v", err)
 	}
@@ -25,11 +39,11 @@ func TestHashPasswordVerifies(t *testing.T) {
 }
 
 func TestHashPasswordIsSalted(t *testing.T) {
-	a, err := auth.DefaultHasher.Hash("same-password")
+	a, err := testHasher.Hash("same-password")
 	if err != nil {
 		t.Fatalf("Hash: %v", err)
 	}
-	b, err := auth.DefaultHasher.Hash("same-password")
+	b, err := testHasher.Hash("same-password")
 	if err != nil {
 		t.Fatalf("Hash: %v", err)
 	}
@@ -51,23 +65,24 @@ func TestVerifyPasswordRejectsEmptyHash(t *testing.T) {
 
 func TestVerifyNothingAlwaysFailsAndCostsRealWork(t *testing.T) {
 	for _, pw := range []string{"", "anything", "no account has this password"} {
-		if auth.DefaultHasher.VerifyNothing(pw) {
+		if testHasher.VerifyNothing(pw) {
 			t.Errorf("VerifyNothing(%q) = true, must always be false", pw)
 		}
 	}
 
-	// A real bcrypt comparison at the configured cost is far slower than a
-	// bare return. This threshold is loose enough not to flake on slow CI but
-	// tight enough to catch the work being skipped entirely.
+	// A real bcrypt comparison is far slower than a bare return. MinCost on a
+	// fast machine finishes in under a millisecond, so the bound sits below
+	// that and well above an immediate return. It is there to catch the hash
+	// being skipped entirely, not to pin a work factor.
 	start := time.Now()
-	auth.DefaultHasher.VerifyNothing("some-password")
-	if elapsed := time.Since(start); elapsed < time.Millisecond {
+	testHasher.VerifyNothing("some-password")
+	if elapsed := time.Since(start); elapsed < 100*time.Microsecond {
 		t.Errorf("VerifyNothing returned in %v — too fast to have hashed anything", elapsed)
 	}
 }
 
 func TestHashPasswordRejectsEmptyPassword(t *testing.T) {
-	if _, err := auth.DefaultHasher.Hash(""); err == nil {
+	if _, err := testHasher.Hash(""); err == nil {
 		t.Error("Hash(\"\"): want error, got nil")
 	}
 }
