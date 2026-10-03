@@ -587,9 +587,12 @@ func (r *Repo) CreateUser(ctx context.Context, u account.User, passwordHash stri
 func (r *Repo) GetUserCredentialsByEmail(ctx context.Context, email string) (account.User, string, bool, error) {
 	var u account.User
 	var hash string
+	// disabled_at IS NULL so login's unknown-email path (status, body, and
+	// VerifyNothing) is the path a disabled account takes too. A handler check
+	// after found == true would be a different timing path.
 	err := r.pool.QueryRow(ctx,
-		`SELECT `+userColumns+`, password_hash FROM users WHERE email = $1`, email).
-		Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin, &u.CreatedAt, &u.UpdatedAt, &hash)
+		`SELECT `+userColumns+`, password_hash FROM users WHERE email = $1 AND disabled_at IS NULL`, email).
+		Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin, &u.CreatedAt, &u.UpdatedAt, &u.DisabledAt, &hash)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return account.User{}, "", false, nil
 	}
@@ -599,9 +602,9 @@ func (r *Repo) GetUserCredentialsByEmail(ctx context.Context, email string) (acc
 	return u, hash, true, nil
 }
 
-const userColumns = `id, email, name, is_admin, created_at, updated_at`
+const userColumns = `id, email, name, is_admin, created_at, updated_at, disabled_at`
 
-const userColumnsU = `u.id, u.email, u.name, u.is_admin, u.created_at, u.updated_at`
+const userColumnsU = `u.id, u.email, u.name, u.is_admin, u.created_at, u.updated_at, u.disabled_at`
 
 func (r *Repo) GetUserByID(ctx context.Context, id string) (account.User, bool, error) {
 	return scanUser(r.pool.QueryRow(ctx, `SELECT `+userColumns+` FROM users WHERE id = $1`, id))
@@ -613,7 +616,7 @@ func (r *Repo) GetUserByEmail(ctx context.Context, email string) (account.User, 
 
 func scanUser(row pgx.Row) (account.User, bool, error) {
 	var u account.User
-	err := row.Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin, &u.CreatedAt, &u.UpdatedAt)
+	err := row.Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin, &u.CreatedAt, &u.UpdatedAt, &u.DisabledAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return account.User{}, false, nil
 	}
@@ -633,12 +636,38 @@ func (r *Repo) ListUsers(ctx context.Context) ([]account.User, error) {
 	var out []account.User
 	for rows.Next() {
 		var u account.User
-		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin, &u.CreatedAt, &u.UpdatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin, &u.CreatedAt, &u.UpdatedAt, &u.DisabledAt); err != nil {
 			return nil, wrap("ListUsers scan", err)
 		}
 		out = append(out, u)
 	}
 	return out, wrap("ListUsers rows", rows.Err())
+}
+
+func (r *Repo) SetUserDisabled(ctx context.Context, id string, disabled bool) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return wrap("SetUserDisabled begin", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // rollback after commit is a no-op
+
+	stmt := `UPDATE users SET disabled_at = NULL, updated_at = now() WHERE id = $1`
+	if disabled {
+		stmt = `UPDATE users SET disabled_at = COALESCE(disabled_at, now()), updated_at = now() WHERE id = $1`
+	}
+	tag, err := tx.Exec(ctx, stmt, id)
+	if err != nil {
+		return wrap("SetUserDisabled", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("postgres: SetUserDisabled: user %q not found", id)
+	}
+	if disabled {
+		if _, err := tx.Exec(ctx, `DELETE FROM sessions WHERE user_id = $1`, id); err != nil {
+			return wrap("SetUserDisabled sessions", err)
+		}
+	}
+	return wrap("SetUserDisabled commit", tx.Commit(ctx))
 }
 
 // --- Sessions ---
@@ -654,7 +683,7 @@ func (r *Repo) GetSessionUser(ctx context.Context, tokenHash string) (account.Us
 	return scanUser(r.pool.QueryRow(ctx,
 		`SELECT `+userColumnsU+`
 		 FROM sessions s JOIN users u ON u.id = s.user_id
-		 WHERE s.token_hash = $1 AND s.expires_at > now()`, tokenHash))
+		 WHERE s.token_hash = $1 AND s.expires_at > now() AND u.disabled_at IS NULL`, tokenHash))
 }
 
 func (r *Repo) DeleteSession(ctx context.Context, tokenHash string) error {

@@ -91,7 +91,7 @@ type. `User` and `Session` live in `internal/account`.
 | **Compile job** | A row in `jobs`. Kinds: `compile_scenario`, `compile_user_scenario`, `compile_user_service`. Its `result` is a `TransitGraph`. Compilation runs **in-process in this API**, in `internal/compile`. That package is not the routing worker — the routing worker is a separate repository |
 | **Routing job** | A row in `routing_jobs`. Its `result` is the worker's isochrone GeoJSON. Created by the isochrone endpoints, executed **in the routing worker**, written back over `/api/internal/...`. Different table, different owning process — a "job" with no qualifier is ambiguous, so always say which |
 | **Prerendered isochrone** | An admin-curated, ready-to-display isochrone stored against a scenario, so a public page can show a result without enqueueing one. Also called a *curated* isochrone |
-| **User** | `account.User` — an authenticated person. Authored rows point at them through `owner_id`. `is_admin` is the only privilege bit: it gates curated writes and `/api/admin/users` |
+| **User** | `account.User` — an authenticated person. Authored rows point at them through `owner_id`. `is_admin` is the only privilege bit: it gates curated writes and `/api/admin/users`. `disabled_at` (nullable timestamptz) removes sign-in without deleting the person or their authored rows; NULL means the account can sign in. Publications stay published; attribution still shows the display name |
 | **Session** | `account.Session` — a hashed bearer token bound to a User, with an expiry. The raw token is returned once at login and never stored |
 
 ## Terms of art
