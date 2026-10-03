@@ -496,7 +496,7 @@ under `/api/admin/`.
 ### The published index
 
 `GET /api/published-services` lists every published `UserService` as a card:
-`slug`, `name`, `subtext` and `description`, most recently first published
+`slug`, `name`, `subtext` and `description`, by first publication, newest
 first, with slug breaking a tie. Republishing keeps a service's place, so a
 paged walk never skips one (migration 00032). It is unauthenticated, and the
 answer is the same for every caller, so an owner does not see their own

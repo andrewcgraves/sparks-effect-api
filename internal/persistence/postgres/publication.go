@@ -127,7 +127,7 @@ func (r *Repo) ListPublishedServiceSummaries(ctx context.Context, after *transit
 	// documents nor the publication's routes payload are selected — this is a
 	// list of cards, and those columns are what make a row heavy.
 	//
-	// Most recently first published first. Slug breaks a tie, so the order is
+	// By first publication, newest first. Slug breaks a tie, so the order is
 	// total, and neither key changes while a service stays published, so a
 	// keyset cursor over it never skips or repeats a row (00032).
 	//
@@ -159,22 +159,23 @@ func (r *Repo) ListPublishedServiceSummaries(ctx context.Context, after *transit
 	defer rows.Close()
 
 	page := transit.PublishedIndexPage{Items: []transit.PublishedServiceSummary{}}
-	var keys []transit.PublishedIndexKey
+	var last transit.PublishedIndexKey
 	for rows.Next() {
 		var s transit.PublishedServiceSummary
 		var at time.Time
 		if err := rows.Scan(&s.Slug, &s.Name, &s.Subtext, &s.Description, &at); err != nil {
 			return transit.PublishedIndexPage{}, wrap("ListPublishedServiceSummaries scan", err)
 		}
+		if limit > 0 && len(page.Items) == limit {
+			// The extra row: only its existence matters.
+			page.Next = &last
+			continue
+		}
 		page.Items = append(page.Items, s)
-		keys = append(keys, transit.PublishedIndexKey{FirstPublishedAt: at, Slug: s.Slug})
+		last = transit.PublishedIndexKey{FirstPublishedAt: at, Slug: s.Slug}
 	}
 	if err := rows.Err(); err != nil {
 		return transit.PublishedIndexPage{}, wrap("ListPublishedServiceSummaries rows", err)
-	}
-	if limit > 0 && len(page.Items) > limit {
-		page.Items = page.Items[:limit]
-		page.Next = &keys[limit-1]
 	}
 	return page, nil
 }

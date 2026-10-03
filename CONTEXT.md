@@ -61,6 +61,10 @@ One more overload, on the same models. Every seeded-model row (`scenarios`,
   with the routing worker's *publication* of a queue message — the same idea one
   level down, and in this repository spelled *enqueue*. See
   [ADR-0005](docs/adr/0005-publishing-an-authored-service.md).
+- **First published** — when a service's current publication began:
+  `first_published_at`, set on publishing and kept by every republish until the
+  service is unpublished. The published index orders by it, newest first, so a
+  republish keeps a service's place. *Published at* is the last publish.
 
 **Public** is the adjective for what anyone may read: curated rows, and
 publications.

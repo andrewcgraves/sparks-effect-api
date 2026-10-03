@@ -35,41 +35,31 @@ func PublishedServices(store PublishedServiceStore) http.HandlerFunc {
 		// page it continues.
 		q := r.URL.Query()
 
-		// Neither parameter: the bare array of everything, which a website
-		// built before SPA-434 still reads. Drop it once the website's
-		// production tag reads pages.
-		if !q.Has("limit") && !q.Has("cursor") {
-			page, err := store.ListPublishedServiceSummaries(r.Context(), nil, 0)
-			if err != nil {
-				writeInternalError(r.Context(), w, "listing published services", err)
-				return
-			}
-			items := page.Items
-			if items == nil {
-				items = []transit.PublishedServiceSummary{}
-			}
-			writeJSON(w, http.StatusOK, items)
-			return
-		}
-
-		limit := publishedIndexDefaultLimit
-		if q.Has("limit") {
-			n, err := strconv.Atoi(q.Get("limit"))
-			if err != nil || n < 1 {
-				writeError(w, http.StatusBadRequest, "limit must be a positive integer")
-				return
-			}
-			limit = min(n, publishedIndexMaxLimit)
-		}
-		// An empty cursor is the first page, so a client can always send one.
+		// Neither parameter: the bare array of everything (a limit of zero),
+		// which a website built before SPA-434 still reads. Drop it once the
+		// website's production tag reads pages.
+		paged := q.Has("limit") || q.Has("cursor")
 		var after *transit.PublishedIndexKey
-		if c := q.Get("cursor"); c != "" {
-			key, err := decodePublishedIndexCursor(c)
-			if err != nil {
-				writeError(w, http.StatusBadRequest, "malformed cursor")
-				return
+		limit := 0
+		if paged {
+			limit = publishedIndexDefaultLimit
+			if q.Has("limit") {
+				n, err := strconv.Atoi(q.Get("limit"))
+				if err != nil || n < 1 {
+					writeError(w, http.StatusBadRequest, "limit must be a positive integer")
+					return
+				}
+				limit = min(n, publishedIndexMaxLimit)
 			}
-			after = &key
+			// An empty cursor is the first page, so a client can always send one.
+			if c := q.Get("cursor"); c != "" {
+				key, err := decodePublishedIndexCursor(c)
+				if err != nil {
+					writeError(w, http.StatusBadRequest, "malformed cursor")
+					return
+				}
+				after = &key
+			}
 		}
 
 		page, err := store.ListPublishedServiceSummaries(r.Context(), after, limit)
@@ -77,10 +67,15 @@ func PublishedServices(store PublishedServiceStore) http.HandlerFunc {
 			writeInternalError(r.Context(), w, "listing published services", err)
 			return
 		}
-		out := publishedIndexPage{Items: page.Items}
-		if out.Items == nil {
-			out.Items = []transit.PublishedServiceSummary{}
+		items := page.Items
+		if items == nil {
+			items = []transit.PublishedServiceSummary{}
 		}
+		if !paged {
+			writeJSON(w, http.StatusOK, items)
+			return
+		}
+		out := publishedIndexPage{Items: items}
 		if page.Next != nil {
 			c := encodePublishedIndexCursor(*page.Next)
 			out.NextCursor = &c
