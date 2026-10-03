@@ -110,7 +110,9 @@
           ]
         ]
       ]
-    }
+    },
+    "tileset_at": "2026-03-01T12:00:00Z",
+    "reusable_until": "2026-09-03T07:00:00Z"
   },
   "job_failed": {
     "error": "valhalla unreachable"

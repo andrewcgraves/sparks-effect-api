@@ -211,6 +211,13 @@ through a node both of them touch.
   refused with 429 and `backlog_full`. The cap is per deployment, not per caller.
   Per-caller floods of the expensive POSTs are refused separately with 429 and
   `rate_limited`.
+- **Reuse** / **reused** — answering an isochrone request with an earlier
+  succeeded routing job instead of minting one (SPA-331). Reused only when the
+  graph, mode, budget, owner and origin (to five decimal places) agree, and the
+  result is still fresh by the worker's own clocks: not past its
+  `reusable_until` service-date rollover, and stamped with the newest tileset
+  any job has reported. A reused job is answered 200, not 202, and costs no
+  backlog slot. Migration `00034` holds the reasoning.
 - **Park** / **parked** — `Service.Active = false`. A parked service stays in the
   seed and in the database, documented, but is skipped by the compiler. It is how
   a stopping pattern is retired without deleting it. Un-parking reaches a
