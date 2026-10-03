@@ -28,6 +28,7 @@ type UserService struct {
 	FrequencyWindows   []FrequencyWindow     `json:"frequency_windows"`
 	CreatedAt          time.Time             `json:"created_at"`
 	UpdatedAt          time.Time             `json:"updated_at"`
+	PublishedAt        *time.Time            `json:"-"`
 	BoardingWait       *BoardingWaitOverride `json:"boarding_wait,omitempty"`
 	BoardingWaitPolicy string                `json:"boarding_wait_policy,omitempty"`
 	BoardingWaitSecs   int                   `json:"boarding_wait_secs"`

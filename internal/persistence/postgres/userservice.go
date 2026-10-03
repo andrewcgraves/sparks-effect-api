@@ -128,9 +128,14 @@ func (r *Repo) getUserServiceBy(ctx context.Context, op, query, arg string) (tra
 }
 
 func (r *Repo) ListUserServicesByOwner(ctx context.Context, ownerID string) ([]transit.UserService, error) {
+	// published_at is selected only here. scanUserService stays on the draft
+	// columns so get-by-id and get-by-slug cannot grow the field.
 	rows, err := r.pool.Query(ctx,
-		`SELECT `+userServiceColumns+` FROM `+userServiceFrom+`
-		 WHERE s.owner_id = $1 ORDER BY s.created_at, s.id`, ownerID)
+		`SELECT `+userServiceColumns+`, sp.published_at
+		   FROM `+userServiceFrom+`
+		   LEFT JOIN service_publications AS sp ON sp.user_service_id = s.id
+		  WHERE s.owner_id = $1
+		  ORDER BY s.updated_at DESC, s.id`, ownerID)
 	if err != nil {
 		return nil, wrap("ListUserServicesByOwner", err)
 	}
@@ -138,7 +143,7 @@ func (r *Repo) ListUserServicesByOwner(ctx context.Context, ownerID string) ([]t
 
 	out := []transit.UserService{}
 	for rows.Next() {
-		svc, err := scanUserService(rows)
+		svc, err := scanListedUserService(rows)
 		if err != nil {
 			return nil, wrap("ListUserServicesByOwner scan", err)
 		}
@@ -240,6 +245,25 @@ func scanUserService(row pgx.Row) (transit.UserService, error) {
 	if err := row.Scan(&svc.ID, &svc.Slug, &svc.RouteID, &svc.OwnerID, &svc.Name,
 		&svc.Subtext, &svc.Description, &vehicle, &stops, &kind, &secs, &svc.CreatedAt, &svc.UpdatedAt,
 		&svc.RouteSlug, &svc.RouteName); err != nil {
+		return transit.UserService{}, err
+	}
+	svc.BoardingWait = scanBoardingWait(kind, secs)
+	if err := unmarshalUserServiceDocs(&svc, vehicle, stops); err != nil {
+		return transit.UserService{}, err
+	}
+	return svc, nil
+}
+
+func scanListedUserService(row pgx.Row) (transit.UserService, error) {
+	var (
+		svc            transit.UserService
+		vehicle, stops []byte
+		kind           *string
+		secs           *int
+	)
+	if err := row.Scan(&svc.ID, &svc.Slug, &svc.RouteID, &svc.OwnerID, &svc.Name,
+		&svc.Subtext, &svc.Description, &vehicle, &stops, &kind, &secs, &svc.CreatedAt, &svc.UpdatedAt,
+		&svc.RouteSlug, &svc.RouteName, &svc.PublishedAt); err != nil {
 		return transit.UserService{}, err
 	}
 	svc.BoardingWait = scanBoardingWait(kind, secs)
