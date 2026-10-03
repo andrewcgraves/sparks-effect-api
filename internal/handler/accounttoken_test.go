@@ -214,7 +214,7 @@ func TestInviteValidatesInput(t *testing.T) {
 	}
 }
 
-func TestAcceptingATokenSetsThePasswordAndReturnsASession(t *testing.T) {
+func TestRedeemingATokenSetsThePasswordAndReturnsASession(t *testing.T) {
 	store := newFakeTokenStore(t)
 	_, tok := invite(t, store, `{"email":"new@example.com"}`)
 
@@ -251,7 +251,7 @@ func TestAcceptingATokenSetsThePasswordAndReturnsASession(t *testing.T) {
 	}
 }
 
-func TestAcceptingATokenEnforcesThePasswordPolicy(t *testing.T) {
+func TestRedeemingATokenEnforcesThePasswordPolicy(t *testing.T) {
 	store := newFakeTokenStore(t)
 	_, tok := invite(t, store, `{"email":"new@example.com"}`)
 

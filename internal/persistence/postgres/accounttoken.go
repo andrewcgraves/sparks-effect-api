@@ -39,13 +39,13 @@ func (r *Repo) CreateResetToken(ctx context.Context, t account.Token) error {
 	// Only the newest reset link works, so an admin who reissues one because
 	// the first went astray has also revoked the first.
 	if _, err := tx.Exec(ctx,
-		`DELETE FROM account_tokens WHERE user_id = $1 AND purpose = 'reset' AND used_at IS NULL`,
-		t.UserID); err != nil {
+		`DELETE FROM account_tokens WHERE user_id = $1 AND purpose = $2 AND used_at IS NULL`,
+		t.UserID, account.TokenPurposeReset); err != nil {
 		return wrap("CreateResetToken invalidate", err)
 	}
 	if _, err := tx.Exec(ctx,
-		`INSERT INTO account_tokens (token_hash, user_id, purpose, expires_at) VALUES ($1, $2, 'reset', $3)`,
-		t.TokenHash, t.UserID, t.ExpiresAt); err != nil {
+		`INSERT INTO account_tokens (token_hash, user_id, purpose, expires_at) VALUES ($1, $2, $3, $4)`,
+		t.TokenHash, t.UserID, account.TokenPurposeReset, t.ExpiresAt); err != nil {
 		return wrap("CreateResetToken", err)
 	}
 	return wrap("CreateResetToken commit", tx.Commit(ctx))

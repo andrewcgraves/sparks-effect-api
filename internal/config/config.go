@@ -42,7 +42,6 @@ const defaultSessionTTL = 24 * time.Hour
 
 const defaultRoutingQueue = "routing.jobs"
 
-// Invite and reset links point at this origin's set-password page.
 const defaultWebsiteURL = "https://sparks-effect.app"
 
 const defaultMaxInFlightIsochrones = 20
