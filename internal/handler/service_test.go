@@ -20,10 +20,11 @@ import (
 
 type fakeServiceStore struct {
 	fakeRoutingStore
-	services map[string]transit.UserService
-	routes   map[string]transit.Route
-	jobs     map[string]transit.Job
-	failWith error
+	services     map[string]transit.UserService
+	routes       map[string]transit.Route
+	jobs         map[string]transit.Job
+	failWith     error
+	ownerListIDs []string
 }
 
 func newFakeServiceStore() *fakeServiceStore {
@@ -102,6 +103,10 @@ func (f *fakeServiceStore) ListUserServicesByOwner(_ context.Context, ownerID st
 		if svc.OwnerID == ownerID {
 			out = append(out, svc)
 		}
+	}
+	f.ownerListIDs = make([]string, len(out))
+	for i := range out {
+		f.ownerListIDs[i] = out[i].ID
 	}
 	return out, nil
 }
@@ -598,6 +603,75 @@ func TestListReturnsEmptyArrayNotNull(t *testing.T) {
 	if body := strings.TrimSpace(rec.Body.String()); body != "[]" {
 		t.Fatalf("got body %q, want %q", body, "[]")
 	}
+}
+
+func TestListIncludesPublishedAtAndKeepsStoreOrder(t *testing.T) {
+	store := newFakeServiceStore()
+	unpublished := seedService(store, "svc-unpublished", "unpublished", svcOwner.ID)
+	unpublished.UpdatedAt = time.Date(2026, 4, 2, 0, 0, 0, 0, time.UTC)
+	store.services[unpublished.ID] = unpublished
+
+	when := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
+	published := seedService(store, "svc-published", "published", svcOwner.ID)
+	published.PublishedAt = &when
+	published.UpdatedAt = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	store.services[published.ID] = published
+
+	rec := serveAs(t, store, svcOwner, http.MethodGet, "/api/services", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list: got %d, want %d (body %s)", rec.Code, http.StatusOK, rec.Body)
+	}
+	if strings.Count(rec.Body.String(), `"published_at"`) != 2 {
+		t.Fatalf("published_at count = %d, want one key per service (body %s)",
+			strings.Count(rec.Body.String(), `"published_at"`), rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), `"published_at":null`) {
+		t.Fatalf("list omitted a null published_at: %s", rec.Body)
+	}
+
+	var body []map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v (body %s)", err, rec.Body)
+	}
+	if len(body) != len(store.ownerListIDs) {
+		t.Fatalf("got %d services, store returned %d", len(body), len(store.ownerListIDs))
+	}
+	for i, item := range body {
+		id, _ := item["id"].(string)
+		if id != store.ownerListIDs[i] {
+			t.Fatalf("response order %v, store order %v", idsFromList(body), store.ownerListIDs)
+		}
+	}
+	byID := map[string]map[string]any{}
+	for _, item := range body {
+		id, _ := item["id"].(string)
+		byID[id] = item
+	}
+	if byID[unpublished.ID]["published_at"] != nil {
+		t.Fatalf("unpublished published_at = %#v, want null", byID[unpublished.ID]["published_at"])
+	}
+	gotWhen, _ := byID[published.ID]["published_at"].(string)
+	if gotWhen != when.Format(time.RFC3339) {
+		t.Fatalf("published_at = %q, want %s", gotWhen, when.Format(time.RFC3339))
+	}
+
+	for _, slug := range []string{unpublished.Slug, published.Slug} {
+		got := serveAs(t, store, svcOwner, http.MethodGet, "/api/services/"+slug, "")
+		if got.Code != http.StatusOK {
+			t.Fatalf("GET /api/services/%s: got %d (body %s)", slug, got.Code, got.Body)
+		}
+		if strings.Contains(got.Body.String(), `"published_at"`) {
+			t.Fatalf("GET /api/services/%s included published_at: %s", slug, got.Body)
+		}
+	}
+}
+
+func idsFromList(body []map[string]any) []string {
+	ids := make([]string, len(body))
+	for i, item := range body {
+		ids[i], _ = item["id"].(string)
+	}
+	return ids
 }
 
 // --- Validation and error mapping ---
