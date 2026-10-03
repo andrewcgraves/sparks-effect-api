@@ -22,6 +22,7 @@ import (
 type AuthDeps interface {
 	handler.AuthStore
 	handler.UserStore
+	handler.AdminUserStore
 	handler.OwnerStore
 	handler.RouteStore
 	handler.CompileStore
@@ -388,6 +389,8 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 
 	// Admin-only.
 	mux.Handle("POST /api/admin/users", adminOnly(handler.CreateUser(deps, hasher)))
+	mux.Handle("GET /api/admin/users", adminOnly(handler.ListUsers(deps)))
+	mux.Handle("PATCH /api/admin/users/{id}", adminOnly(handler.PatchUser(deps)))
 	mux.Handle("POST /api/admin/invites", adminOnly(handler.CreateInvite(deps, cfg.WebsiteURL)))
 	mux.Handle("POST /api/admin/users/{id}/reset-link", adminOnly(handler.CreateResetLink(deps, cfg.WebsiteURL)))
 	mux.Handle("POST /api/admin/routes", adminOnly(handler.CreateRoute(deps)))
