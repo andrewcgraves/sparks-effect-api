@@ -266,6 +266,31 @@ func TestIsochrone_400_zeroBudget(t *testing.T) {
 	}
 }
 
+func TestIsochrone_400_budgetOverTheCap(t *testing.T) {
+	pub := &routing.FakePublisher{}
+	rec := postIsochrone(compiledStore(), pub,
+		`{"lat":37.7,"lng":-122.4,"budget_mins":301,"mode":"walk","scenario_slug":"ca-hsr"}`)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status: want 400, got %d", rec.Code)
+	}
+	if got := errorField(t, rec); got != "budget_mins must be at most 300" {
+		t.Errorf("error: want 'budget_mins must be at most 300', got %q", got)
+	}
+	if len(pub.Messages()) != 0 {
+		t.Error("an over-cap budget was enqueued")
+	}
+}
+
+func TestIsochrone_202_budgetAtTheCap(t *testing.T) {
+	rec := postIsochrone(compiledStore(), &routing.FakePublisher{},
+		`{"lat":37.7,"lng":-122.4,"budget_mins":300,"mode":"walk","scenario_slug":"ca-hsr"}`)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status: want 202, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestIsochrone_400_malformedJSON(t *testing.T) {
 	rec := postIsochrone(compiledStore(), &routing.FakePublisher{}, `{not valid json}`)
 
