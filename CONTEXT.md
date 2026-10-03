@@ -56,7 +56,8 @@ One more overload, on the same models. Every seeded-model row (`scenarios`,
   `subtext`, description and route geometry, taken when the owner published it.
   Public reads of it, and the isochrones anyone may plot over it, use the
   publication and never the **draft** — the live, editable row the owner keeps
-  working on — so an edit stays invisible until it is republished. **Unpublishing** deletes the publication. Only a `UserService`
+  working on — so an edit stays invisible until it is republished. The one
+  live part is the **byline**'s author name. **Unpublishing** deletes the publication. Only a `UserService`
   can be published today; a curated row is public without being published. Not to be confused
   with the routing worker's *publication* of a queue message — the same idea one
   level down, and in this repository spelled *enqueue*. See

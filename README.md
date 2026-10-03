@@ -590,10 +590,10 @@ Five rules, all enforced server-side:
   `CanAccess`, because adding to a scenario is changing it.
 - **Publication** — the one public read of an authored service.
   `GET /api/services/{slug}/publication` has no auth middleware at all and
-  reads only the snapshot in `service_publications` — the draft row is joined
-  for its slug and its owner's display name (`author_name`, live) and nothing
-  else — so it answers everyone alike, owner included, and never carries the
-  draft, the owner's email or their id. An unpublished slug gets the same 404
+  reads the snapshot in `service_publications`, plus two things joined through
+  the draft row that no edit can change: its slug, and its owner's current
+  display name (`author_name`). So it answers everyone alike, owner included,
+  and never carries an unpublished edit, the owner's email or their id. An unpublished slug gets the same 404
   as an unknown one, both before the first publish and after an unpublish.
   `POST /api/services/{slug}/publication/isochrone` plots over it the same
   way: no auth middleware, the same 404, and only the pinned compile job's

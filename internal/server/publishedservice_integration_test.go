@@ -103,10 +103,12 @@ func TestIntegration_PublishedServicesIndexListsOnlyPublications(t *testing.T) {
 		// Provisioned without a display name. The byline has its own test.
 		"author_name": "",
 	}
+	// Its value is the byline test's concern; here it only has to be present.
 	if _, ok := items[0]["published_at"].(string); !ok {
 		t.Errorf("published_at = %v, want a time", items[0]["published_at"])
 	}
-	if len(items[0]) != len(want)+1 {
+	delete(items[0], "published_at")
+	if len(items[0]) != len(want) {
 		t.Fatalf("item = %+v, want exactly the keys of %+v", items[0], want)
 	}
 	for k, v := range want {

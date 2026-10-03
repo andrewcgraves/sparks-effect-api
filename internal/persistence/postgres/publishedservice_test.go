@@ -187,26 +187,10 @@ func TestListPublishedServiceSummariesCarryAuthorAndPublishDate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("republish: %v", err)
 	}
-	got := card()
-	if got.AuthorName != "Owner" {
-		t.Fatalf("author = %q, want %q", got.AuthorName, "Owner")
+	if got := card().PublishedAt; !got.Equal(republished.PublishedAt) {
+		t.Fatalf("published_at = %v, want the latest publish %v", got, republished.PublishedAt)
 	}
-	if !got.PublishedAt.Equal(republished.PublishedAt) {
-		t.Fatalf("published_at = %v, want the latest publish %v", got.PublishedAt, republished.PublishedAt)
-	}
-
-	if _, _, err := repo.UpdateUserName(ctx, usOwnerID, "Renamed Owner"); err != nil {
-		t.Fatalf("UpdateUserName: %v", err)
-	}
-	if got := card().AuthorName; got != "Renamed Owner" {
-		t.Fatalf("author after rename = %q, want %q", got, "Renamed Owner")
-	}
-
-	// Accepting a handover moves owner_id; that is all this needs from it.
-	execSQL(t, dbURL, `UPDATE user_services SET owner_id = $1 WHERE id = $2`, usStrangerID, svc.ID)
-	if got := card().AuthorName; got != "Stranger" {
-		t.Fatalf("author after transfer = %q, want %q", got, "Stranger")
-	}
+	authorFollowsOwner(t, repo, ctx, dbURL, svc.ID, func() string { return card().AuthorName })
 }
 
 func TestListPublishedServiceSummariesPagesThroughEveryServiceOnce(t *testing.T) {

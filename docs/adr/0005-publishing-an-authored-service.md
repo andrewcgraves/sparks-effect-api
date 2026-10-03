@@ -145,7 +145,9 @@ So a publication freezes, at publish time and in the same transaction:
 
 **A public read never reads the draft row.** That is the property the design is
 built around: the public half of any handler can then not leak an unpublished
-edit, however it is written.
+edit, however it is written. (It joins through the draft for two things that
+are not edits: the slug, and since SPA-426 the owner, for the byline's live
+author name. See Consequences.)
 
 Where it is stored is SPA-355's call, with one recommendation: a
 `service_publications` table keyed on the service id, one row per published

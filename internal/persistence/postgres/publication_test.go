@@ -592,8 +592,8 @@ func TestGetServicePublicationBySlug(t *testing.T) {
 		t.Fatalf("publish: %v", err)
 	}
 
-	// An edit after publishing must not reach the read: it selects nothing
-	// from the draft row it joins through.
+	// An edit after publishing must not reach the read: of the draft row it
+	// joins through, it selects only the owner, for the byline.
 	stored, _, err := repo.GetUserServiceByID(ctx, svc.ID)
 	if err != nil {
 		t.Fatalf("reload: %v", err)
@@ -640,7 +640,14 @@ func TestGetServicePublicationBySlugNamesTheCurrentOwner(t *testing.T) {
 		}
 		return got.AuthorName
 	}
+	authorFollowsOwner(t, repo, ctx, url, svc.ID, authorName)
+}
 
+// authorFollowsOwner checks that a published service's author, as read by
+// authorName, starts as the fixture's owner and follows a rename and then a
+// transfer, with no republish in between.
+func authorFollowsOwner(t *testing.T, repo *postgres.Repo, ctx context.Context, url, serviceID string, authorName func() string) {
+	t.Helper()
 	if got := authorName(); got != "Owner" {
 		t.Fatalf("author = %q, want %q", got, "Owner")
 	}
@@ -653,7 +660,7 @@ func TestGetServicePublicationBySlugNamesTheCurrentOwner(t *testing.T) {
 	}
 
 	// Accepting a handover moves owner_id; that is all this needs from it.
-	execSQL(t, url, `UPDATE user_services SET owner_id = $1 WHERE id = $2`, usStrangerID, svc.ID)
+	execSQL(t, url, `UPDATE user_services SET owner_id = $1 WHERE id = $2`, usStrangerID, serviceID)
 	if got := authorName(); got != "Stranger" {
 		t.Fatalf("author after transfer = %q, want %q", got, "Stranger")
 	}
