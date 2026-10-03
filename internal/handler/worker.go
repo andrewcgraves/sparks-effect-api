@@ -16,20 +16,20 @@ var ErrJobNotFound = errors.New("routing job not found")
 // holds the egress ones that missed, the result all of them plus the origin. So
 // one limit serves both, and a put is never refused for a job whose result was
 // accepted. The largest real chain, testdata/cache-put-sj-240-bike.json (12
-// egress polygons, 438,897 bytes) and its 499,890-byte result, sit at about a
+// egress polygons, 438,897 bytes) and its 499,685-byte result, sit under a
 // sixteenth of it. Refusing a put only costs a cache write; refusing a result
 // fails the job, which is why this is generous rather than tight.
 const maxWorkerPolygonBodyBytes = 8 << 20
 
 // A key is a uuid, a slug, a mode, a contour, a date and a budget: under 300
-// bytes, so this admits every lookup maxWorkerCacheKeys allows.
+// bytes, so this admits every lookup maxWorkerCacheBatch allows.
 const maxWorkerLookupBodyBytes = 1 << 20
 
 // One key per station the chain reaches by transit, so a job asks for at most
 // one per node in its graph. ca-hsr has 15; every rail station in California is
 // a few hundred. A lookup or put over the cap is refused, which the worker
 // treats as a cache miss or an unwritten row, never a failed job.
-const maxWorkerCacheKeys = 1000
+const maxWorkerCacheBatch = 1000
 
 // The worker's failure message is one wrapped error string.
 const maxWorkerFailedBodyBytes = 64 << 10
@@ -95,8 +95,8 @@ func WorkerCacheLookup(ws WorkerStore) http.HandlerFunc {
 		if !decodeWorkerBody(w, r, maxWorkerLookupBodyBytes, &body) {
 			return
 		}
-		if len(body.Keys) > maxWorkerCacheKeys {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("keys: at most %d per lookup", maxWorkerCacheKeys))
+		if len(body.Keys) > maxWorkerCacheBatch {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("keys: at most %d per lookup", maxWorkerCacheBatch))
 			return
 		}
 		found, err := ws.GetIsochroneCache(r.Context(), body.Keys)
@@ -125,8 +125,8 @@ func WorkerCachePut(ws WorkerStore) http.HandlerFunc {
 		if !decodeWorkerBody(w, r, maxWorkerPolygonBodyBytes, &body) {
 			return
 		}
-		if len(body.Entries) > maxWorkerCacheKeys {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("entries: at most %d per put", maxWorkerCacheKeys))
+		if len(body.Entries) > maxWorkerCacheBatch {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("entries: at most %d per put", maxWorkerCacheBatch))
 			return
 		}
 		if err := ws.PutIsochroneCache(r.Context(), body.Entries); err != nil {

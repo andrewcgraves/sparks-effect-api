@@ -28,7 +28,6 @@ func fixturePut(t *testing.T) []handler.CachedIsochrone {
 	return body.Entries
 }
 
-// SPA-332: the largest real chain's put lands in full and reads back.
 func TestIsochroneCachePut_realChainFixture(t *testing.T) {
 	ctx := context.Background()
 	repo, _ := freshRepo(t)

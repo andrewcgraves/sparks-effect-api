@@ -135,11 +135,11 @@ func manyCacheKeys(n int) []string {
 }
 
 func manyCacheEntries(n int) string {
-	keys := manyCacheKeys(n)
-	for i, k := range keys {
-		keys[i] = `{"key":` + k + `,"geometry":{}}`
+	entries := manyCacheKeys(n)
+	for i, k := range entries {
+		entries[i] = `{"key":` + k + `,"geometry":{}}`
 	}
-	return `{"entries":[` + strings.Join(keys, ",") + `]}`
+	return `{"entries":[` + strings.Join(entries, ",") + `]}`
 }
 
 func manyCacheLookupKeys(n int) string {
@@ -253,8 +253,9 @@ func TestWorkerMarkFailed_413_recordsNothing(t *testing.T) {
 // The fixture is the put the San Jose 240-minute bike chain made: its twelve
 // egress polygons, taken from that job's result (the committed prerendered
 // isochrone-sj-240-bike.json) with the three properties the chain adds to each
-// one stripped, which is the shape the worker caches. The limits are sized from
-// it, so it must keep fitting under them.
+// one stripped, which is the shape the worker caches. The result carries no
+// tileset stamp, so the fixture's tileset_at is supplied. The limits are sized
+// from it, so it must keep fitting under them.
 func TestWorkerCachePut_204_realChainFixture(t *testing.T) {
 	body, err := os.ReadFile(filepath.Join("testdata", "cache-put-sj-240-bike.json"))
 	if err != nil {
