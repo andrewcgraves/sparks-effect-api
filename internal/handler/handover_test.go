@@ -36,6 +36,13 @@ func newFakeHandoverStore() *fakeHandoverStore {
 	}
 }
 
+func effectiveStatus(h transit.ServiceHandover) string {
+	if h.Status == transit.HandoverPending && !time.Now().Before(h.ExpiresAt) {
+		return transit.HandoverExpired
+	}
+	return h.Status
+}
+
 func (s *fakeHandoverStore) GetUserServiceBySlug(_ context.Context, slug string) (transit.UserService, bool, error) {
 	svc, ok := s.services[slug]
 	return svc, ok, nil
@@ -57,7 +64,7 @@ func (s *fakeHandoverStore) userByID(id string) account.User {
 
 func (s *fakeHandoverStore) HasPendingServiceHandover(_ context.Context, serviceID string) (bool, error) {
 	for _, h := range s.handovers {
-		if h.UserServiceID == serviceID && h.EffectiveStatus(time.Now()) == transit.HandoverPending {
+		if h.UserServiceID == serviceID && effectiveStatus(h) == transit.HandoverPending {
 			return true, nil
 		}
 	}
@@ -84,14 +91,14 @@ func (s *fakeHandoverStore) hydrate(h transit.ServiceHandover) transit.ServiceHa
 	}
 	h.FromName = s.userByID(h.FromUserID).Name
 	h.ToName = s.userByID(h.ToUserID).Name
-	h.Status = h.EffectiveStatus(time.Now())
+	h.Status = effectiveStatus(h)
 	return h
 }
 
 func (s *fakeHandoverStore) ListPendingServiceHandovers(_ context.Context, userID string) ([]transit.ServiceHandover, error) {
 	var out []transit.ServiceHandover
 	for _, h := range s.handovers {
-		if (h.FromUserID == userID || h.ToUserID == userID) && h.EffectiveStatus(time.Now()) == transit.HandoverPending {
+		if (h.FromUserID == userID || h.ToUserID == userID) && effectiveStatus(h) == transit.HandoverPending {
 			out = append(out, s.hydrate(h))
 		}
 	}
@@ -110,7 +117,7 @@ func (s *fakeHandoverStore) close(id, callerID string, sender bool, status strin
 		if party != callerID {
 			return transit.ServiceHandover{}, handler.ErrHandoverNotFound
 		}
-		if h.EffectiveStatus(time.Now()) != transit.HandoverPending {
+		if effectiveStatus(h) != transit.HandoverPending {
 			return transit.ServiceHandover{}, handler.ErrHandoverNotPending
 		}
 		now := time.Now()
@@ -224,6 +231,15 @@ func TestOfferHandover_onlyTheOwnerOrAnAdminCanOffer(t *testing.T) {
 	}
 	if len(store.handovers) != 1 || store.handovers[0].FromUserID != svcOwner.ID {
 		t.Fatalf("admin offer recorded %+v, want one sent from the owner", store.handovers)
+	}
+}
+
+func TestOfferHandover_strangerGets404WhateverTheBody(t *testing.T) {
+	for _, body := range []string{``, `{}`, `not json`, `{"to_email":"stranger@example.com"}`} {
+		rec := handoverAs(t, newFakeHandoverStore(), svcStranger, http.MethodPost, "/api/services/line-a/handovers", body)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("%q: status = %d, want 404", body, rec.Code)
+		}
 	}
 }
 
@@ -365,7 +381,7 @@ func TestDeclineHandover_onlyTheRecipient(t *testing.T) {
 	}
 }
 
-func TestCloseHandover_anExpiredOfferCannotBeCancelledOrDeclined(t *testing.T) {
+func TestDecideHandover_anExpiredOfferCannotBeCancelledOrDeclined(t *testing.T) {
 	for _, tc := range []struct {
 		caller account.User
 		action string
@@ -379,7 +395,7 @@ func TestCloseHandover_anExpiredOfferCannotBeCancelledOrDeclined(t *testing.T) {
 	}
 }
 
-func TestCloseHandover_unknownOrMalformedIdIs404(t *testing.T) {
+func TestDecideHandover_unknownOrMalformedIdIs404(t *testing.T) {
 	for _, id := range []string{"00000000-0000-4000-8000-000000000999", "not-a-uuid"} {
 		for _, action := range []string{"cancel", "decline"} {
 			rec := handoverAs(t, newFakeHandoverStore(), svcOwner, http.MethodPost, "/api/handovers/"+id+"/"+action, "")

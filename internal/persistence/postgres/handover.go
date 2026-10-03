@@ -11,19 +11,22 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// Status is computed rather than read, because expiry is lazy (00032): a row
-// still 'pending' on disk past its expires_at reads as 'expired'.
+// Expiry is lazy (00032): a row still 'pending' on disk past its expires_at
+// reads as 'expired'. These two are the only spellings of that boundary.
+const (
+	expiredPending = `h.status = 'pending' AND h.expires_at <= now()`
+	livePending    = `h.status = 'pending' AND h.expires_at > now()`
+)
+
 const handoverSelect = `
 	SELECT h.id, h.user_service_id, s.slug, s.name,
 	       h.from_user_id, f.name, h.to_user_id, t.name,
-	       CASE WHEN h.status = 'pending' AND h.expires_at <= now() THEN 'expired' ELSE h.status END,
+	       CASE WHEN ` + expiredPending + ` THEN 'expired' ELSE h.status END,
 	       h.created_at, h.decided_at, h.expires_at
 	  FROM service_handovers h
 	  JOIN user_services s ON s.id = h.user_service_id
 	  JOIN users f ON f.id = h.from_user_id
 	  JOIN users t ON t.id = h.to_user_id`
-
-const livePending = `h.status = 'pending' AND h.expires_at > now()`
 
 func scanHandover(row pgx.Row) (transit.ServiceHandover, error) {
 	var h transit.ServiceHandover
@@ -51,8 +54,8 @@ func (r *Repo) OfferServiceHandover(ctx context.Context, h transit.ServiceHandov
 	// An expired offer is still 'pending' on disk and would hold the
 	// one-pending index against this insert, so it is closed first.
 	if _, err := tx.Exec(ctx,
-		`UPDATE service_handovers SET status = 'expired', decided_at = expires_at
-		  WHERE user_service_id = $1 AND status = 'pending' AND expires_at <= now()`,
+		`UPDATE service_handovers h SET status = 'expired', decided_at = h.expires_at
+		  WHERE h.user_service_id = $1 AND `+expiredPending,
 		h.UserServiceID); err != nil {
 		return transit.ServiceHandover{}, wrap("OfferServiceHandover expire", err)
 	}
@@ -97,18 +100,26 @@ func (r *Repo) ListPendingServiceHandovers(ctx context.Context, userID string) (
 }
 
 func (r *Repo) CancelServiceHandover(ctx context.Context, id, fromUserID string) (transit.ServiceHandover, error) {
-	return r.closeHandover(ctx, "CancelServiceHandover", "from_user_id", id, fromUserID, transit.HandoverCancelled)
+	return r.decideHandover(ctx, "CancelServiceHandover", sender, id, fromUserID, transit.HandoverCancelled)
 }
 
 func (r *Repo) DeclineServiceHandover(ctx context.Context, id, toUserID string) (transit.ServiceHandover, error) {
-	return r.closeHandover(ctx, "DeclineServiceHandover", "to_user_id", id, toUserID, transit.HandoverDeclined)
+	return r.decideHandover(ctx, "DeclineServiceHandover", recipient, id, toUserID, transit.HandoverDeclined)
 }
 
-// partyColumn is one of two constants from the callers above, never input.
-func (r *Repo) closeHandover(ctx context.Context, op, partyColumn, id, callerID, status string) (transit.ServiceHandover, error) {
+// The column a decision belongs to. It is spliced into SQL, so it is only
+// ever one of these two constants.
+type handoverParty string
+
+const (
+	sender    handoverParty = "from_user_id"
+	recipient handoverParty = "to_user_id"
+)
+
+func (r *Repo) decideHandover(ctx context.Context, op string, party handoverParty, id, callerID, status string) (transit.ServiceHandover, error) {
 	tag, err := r.pool.Exec(ctx,
 		`UPDATE service_handovers h SET status = $3, decided_at = now()
-		  WHERE h.id = $1 AND h.`+partyColumn+` = $2 AND `+livePending,
+		  WHERE h.id = $1 AND h.`+string(party)+` = $2 AND `+livePending,
 		id, callerID, status)
 	if err != nil {
 		return transit.ServiceHandover{}, wrap(op, err)
@@ -122,7 +133,7 @@ func (r *Repo) closeHandover(ctx context.Context, op, partyColumn, id, callerID,
 	// is no such offer), which reads as not found, or it is already closed.
 	var exists bool
 	if err := r.pool.QueryRow(ctx,
-		`SELECT EXISTS (SELECT 1 FROM service_handovers WHERE id = $1 AND `+partyColumn+` = $2)`,
+		`SELECT EXISTS (SELECT 1 FROM service_handovers WHERE id = $1 AND `+string(party)+` = $2)`,
 		id, callerID).Scan(&exists); err != nil {
 		return transit.ServiceHandover{}, wrap(op+" lookup", err)
 	}

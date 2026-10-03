@@ -24,12 +24,3 @@ type ServiceHandover struct {
 	DecidedAt     *time.Time
 	ExpiresAt     time.Time
 }
-
-// Expiry is lazy: nothing rewrites a pending row when its deadline passes, so
-// every reader asks this rather than trusting Status.
-func (h ServiceHandover) EffectiveStatus(now time.Time) string {
-	if h.Status == HandoverPending && !now.Before(h.ExpiresAt) {
-		return HandoverExpired
-	}
-	return h.Status
-}

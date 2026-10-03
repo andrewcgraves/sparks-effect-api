@@ -86,6 +86,16 @@ func outgoingView(h transit.ServiceHandover) outgoingHandover {
 
 func OfferHandover(store HandoverStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Authorised before the body is read, so a stranger gets the same 404
+		// for a real slug as for a missing one whatever they send.
+		svc, ok := loadService(w, r, store)
+		if !ok {
+			return
+		}
+		if !authorizeService(w, r, svc) {
+			return
+		}
+
 		r.Body = http.MaxBytesReader(w, r.Body, maxHandoverBodyBytes)
 		var req offerHandoverRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -100,14 +110,6 @@ func OfferHandover(store HandoverStore) http.HandlerFunc {
 		email := normalizeEmail(req.ToEmail)
 		if email == "" {
 			writeError(w, http.StatusBadRequest, "to_email is required")
-			return
-		}
-
-		svc, ok := loadService(w, r, store)
-		if !ok {
-			return
-		}
-		if !authorizeService(w, r, svc) {
 			return
 		}
 
@@ -191,19 +193,19 @@ func MyHandovers(store HandoverStore) http.HandlerFunc {
 }
 
 func CancelHandover(store HandoverStore) http.HandlerFunc {
-	return closeHandover(store.CancelServiceHandover, func(w http.ResponseWriter, h transit.ServiceHandover) {
+	return decideHandover(store.CancelServiceHandover, func(w http.ResponseWriter, h transit.ServiceHandover) {
 		writeJSON(w, http.StatusOK, outgoingView(h))
 	})
 }
 
 func DeclineHandover(store HandoverStore) http.HandlerFunc {
-	return closeHandover(store.DeclineServiceHandover, func(w http.ResponseWriter, h transit.ServiceHandover) {
+	return decideHandover(store.DeclineServiceHandover, func(w http.ResponseWriter, h transit.ServiceHandover) {
 		writeJSON(w, http.StatusOK, incomingView(h))
 	})
 }
 
-func closeHandover(
-	close func(ctx context.Context, id, callerID string) (transit.ServiceHandover, error),
+func decideHandover(
+	decide func(ctx context.Context, id, callerID string) (transit.ServiceHandover, error),
 	respond func(http.ResponseWriter, transit.ServiceHandover),
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -221,14 +223,14 @@ func closeHandover(
 		}
 		// Admins get no override: only the one party a decision belongs to
 		// may make it, and everyone else is told the offer does not exist.
-		h, err := close(r.Context(), id, user.ID)
+		h, err := decide(r.Context(), id, user.ID)
 		switch {
 		case errors.Is(err, ErrHandoverNotFound):
 			writeError(w, http.StatusNotFound, ErrHandoverNotFound.Error())
 		case errors.Is(err, ErrHandoverNotPending):
 			writeError(w, http.StatusConflict, ErrHandoverNotPending.Error())
 		case err != nil:
-			writeInternalError(r.Context(), w, "closing handover", err)
+			writeInternalError(r.Context(), w, "deciding handover", err)
 		default:
 			respond(w, h)
 		}
