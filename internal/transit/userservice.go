@@ -11,9 +11,14 @@ import (
 )
 
 type UserService struct {
-	ID                 string                `json:"id"`
-	Slug               string                `json:"slug"`
+	ID   string `json:"id"`
+	Slug string `json:"slug"`
+	// RouteSlug and RouteName are copied from the route this service points at.
+	// A write names that route by slug, and a service that has never compiled
+	// has no graph to recover the slug from.
 	RouteID            string                `json:"route_id"`
+	RouteSlug          string                `json:"route_slug"`
+	RouteName          string                `json:"route_name"`
 	OwnerID            string                `json:"owner_id"`
 	Name               string                `json:"name"`
 	Subtext            string                `json:"subtext,omitempty"`
