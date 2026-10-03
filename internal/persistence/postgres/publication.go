@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
@@ -115,7 +116,7 @@ func (r *Repo) GetServicePublicationBySlug(ctx context.Context, slug string) (tr
 	return pub, true, nil
 }
 
-func (r *Repo) ListPublishedServiceSummaries(ctx context.Context) ([]transit.PublishedServiceSummary, error) {
+func (r *Repo) ListPublishedServiceSummaries(ctx context.Context, after *transit.PublishedIndexKey, limit int) (transit.PublishedIndexPage, error) {
 	// Every service_publications row is a published service, so there is no
 	// filter to write: an unpublished service has no row to find.
 	//
@@ -126,27 +127,56 @@ func (r *Repo) ListPublishedServiceSummaries(ctx context.Context) ([]transit.Pub
 	// documents nor the publication's routes payload are selected — this is a
 	// list of cards, and those columns are what make a row heavy.
 	//
-	// Most recently published first, since republishing moves published_at.
-	// Slug breaks a tie, so the order is total and a snapshot of it is stable.
+	// Most recently first published first. Slug breaks a tie, so the order is
+	// total, and neither key changes while a service stays published, so a
+	// keyset cursor over it never skips or repeats a row (00032).
+	//
+	// A limit of zero or less reads everything. Otherwise one row more than
+	// the limit is read: it is the evidence that a next page exists, so the
+	// last page carries no next key and nobody fetches an empty one.
+	var afterAt *time.Time
+	var afterSlug string
+	if after != nil {
+		afterAt, afterSlug = &after.FirstPublishedAt, after.Slug
+	}
+	var fetch *int
+	if limit > 0 {
+		n := limit + 1
+		fetch = &n
+	}
 	rows, err := r.pool.Query(ctx,
-		`SELECT us.slug, p.name, p.subtext, p.description
+		`SELECT us.slug, p.name, p.subtext, p.description, p.first_published_at
 		   FROM service_publications p
 		   JOIN user_services us ON us.id = p.user_service_id
-		  ORDER BY p.published_at DESC, us.slug`)
+		  WHERE $1::timestamptz IS NULL
+		     OR p.first_published_at < $1
+		     OR (p.first_published_at = $1 AND us.slug > $2)
+		  ORDER BY p.first_published_at DESC, us.slug
+		  LIMIT $3`, afterAt, afterSlug, fetch)
 	if err != nil {
-		return nil, wrap("ListPublishedServiceSummaries", err)
+		return transit.PublishedIndexPage{}, wrap("ListPublishedServiceSummaries", err)
 	}
 	defer rows.Close()
 
-	out := []transit.PublishedServiceSummary{}
+	page := transit.PublishedIndexPage{Items: []transit.PublishedServiceSummary{}}
+	var keys []transit.PublishedIndexKey
 	for rows.Next() {
 		var s transit.PublishedServiceSummary
-		if err := rows.Scan(&s.Slug, &s.Name, &s.Subtext, &s.Description); err != nil {
-			return nil, wrap("ListPublishedServiceSummaries scan", err)
+		var at time.Time
+		if err := rows.Scan(&s.Slug, &s.Name, &s.Subtext, &s.Description, &at); err != nil {
+			return transit.PublishedIndexPage{}, wrap("ListPublishedServiceSummaries scan", err)
 		}
-		out = append(out, s)
+		page.Items = append(page.Items, s)
+		keys = append(keys, transit.PublishedIndexKey{FirstPublishedAt: at, Slug: s.Slug})
 	}
-	return out, wrap("ListPublishedServiceSummaries rows", rows.Err())
+	if err := rows.Err(); err != nil {
+		return transit.PublishedIndexPage{}, wrap("ListPublishedServiceSummaries rows", err)
+	}
+	if limit > 0 && len(page.Items) > limit {
+		page.Items = page.Items[:limit]
+		page.Next = &keys[limit-1]
+	}
+	return page, nil
 }
 
 func (r *Repo) GetSucceededCompileJob(ctx context.Context, id string) (transit.Job, bool, error) {
