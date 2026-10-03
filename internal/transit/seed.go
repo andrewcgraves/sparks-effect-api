@@ -65,9 +65,10 @@ func loadEmbeddedScenarios() ([]embeddedScenario, error) {
 	// The scenario YAML is compiled into the binary, and routes.yaml alone is
 	// hundreds of kilobytes. Decoding it dominates every NewStore, seed, and
 	// reconcile call, and tests do those on nearly every case. Parse once per
-	// process and hand each caller a copy: compilation writes the resolved
-	// boarding wait onto the services it was given, and a later call may pass
-	// a different policy.
+	// process and hand each caller a copy. Each caller keeps the slices it
+	// was given: the store holds them, and seed writes them. Sharing the
+	// cached parse would alias geometry and the other reference fields
+	// across calls.
 	embeddedOnce.Do(func() {
 		embeddedParsed, embeddedErr = readEmbeddedScenarios()
 	})

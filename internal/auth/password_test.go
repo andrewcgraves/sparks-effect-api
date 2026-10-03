@@ -13,6 +13,15 @@ import (
 // the production hasher stays at bcrypt.DefaultCost.
 var testHasher = auth.NewHasher(bcrypt.MinCost)
 
+func TestHasherCostsStayPinned(t *testing.T) {
+	if got := auth.DefaultHasher.Cost(); got != bcrypt.DefaultCost {
+		t.Errorf("DefaultHasher.Cost() = %d, want bcrypt.DefaultCost (%d)", got, bcrypt.DefaultCost)
+	}
+	if got := testHasher.Cost(); got != bcrypt.MinCost {
+		t.Errorf("testHasher.Cost() = %d, want bcrypt.MinCost (%d)", got, bcrypt.MinCost)
+	}
+}
+
 func TestHashPasswordVerifies(t *testing.T) {
 	hash, err := testHasher.Hash("correct horse battery staple")
 	if err != nil {

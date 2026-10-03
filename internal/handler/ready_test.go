@@ -55,9 +55,12 @@ func TestReady(t *testing.T) {
 
 func TestReady_boundsASlowComponent(t *testing.T) {
 	// A check that never returns on its own: only the handler's deadline ends it.
-	// The production bound is a second; shorten it here so the suite is not
-	// waiting that second out. The assertion below fails if Ready stops
-	// consulting readyTimeout.
+	// The production bound is a second; pin that initializer, then shorten it
+	// so the suite is not waiting that second out. The elapsed assertion
+	// fails if Ready stops consulting readyTimeout.
+	if readyTimeout != time.Second {
+		t.Fatalf("production readyTimeout = %s, want %s", readyTimeout, time.Second)
+	}
 	readyTimeout = 25 * time.Millisecond
 	t.Cleanup(func() { readyTimeout = time.Second })
 
