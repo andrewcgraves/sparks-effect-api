@@ -22,6 +22,7 @@ import (
 type AuthDeps interface {
 	handler.AuthStore
 	handler.UserStore
+	handler.AdminUserStore
 	handler.OwnerStore
 	handler.RouteStore
 	handler.CompileStore
@@ -39,15 +40,27 @@ type AuthDeps interface {
 	handler.PublicationStore
 	handler.ServicePublicationStore
 	handler.PublishedServiceStore
+	handler.AccountTokenStore
 	GetSessionUser(ctx context.Context, tokenHash string) (account.User, bool, error)
 }
 
 var _ AuthDeps = (*postgres.Repo)(nil)
 
+// pinger below reads a component it cannot ping as "disabled", so these keep
+// the real ones from quietly dropping out of readiness.
+var (
+	_ handler.Pinger = (*postgres.Repo)(nil)
+	_ handler.Pinger = (*routing.AMQPPublisher)(nil)
+)
+
 func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routing.Publisher, lg *slog.Logger) *http.Server {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", handler.Health)
+	// Liveness above stays cheap; readiness asks the database and the broker
+	// (SPA-379). Both bare: a probe carries no identity and must not spend a
+	// rate-limit bucket.
+	mux.HandleFunc("GET /readyz", handler.Ready(pinger(deps), pinger(publisher), lg))
 
 	// Public reads: the curated scenario data, unauthenticated by design.
 	//
@@ -94,6 +107,18 @@ func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routi
 		// forwards the same id to the worker (see handler.enqueueIsochrone).
 		Handler:           traceid.Middleware(logRequests(lg, h)),
 		ReadHeaderTimeout: 5 * time.Second,
+		// Headers and body together. The largest body any route accepts is an
+		// 8 MiB route ingest, and the public ones are capped at 4 KiB, so 15 s
+		// only cuts off a client trickling its body in to hold the connection.
+		ReadTimeout: 15 * time.Second,
+		// No handler waits on the worker: isochrones and compiles enqueue and
+		// answer with a job id. The slowest response is a compiled graph or
+		// publication read, a few seconds at worst, so 60 s is headroom for a
+		// slow client downloading it rather than for slow work.
+		WriteTimeout: 60 * time.Second,
+		// Long enough that the SPA's burst of reads on a page reuses one
+		// connection, short enough that abandoned keep-alives are reclaimed.
+		IdleTimeout: 120 * time.Second,
 	}
 }
 
@@ -175,6 +200,13 @@ func registerPublishedServiceRoutes(mux *http.ServeMux, deps AuthDeps) {
 	mux.HandleFunc("GET /api/published-services", handler.PublishedServices(deps))
 }
 
+// A component that cannot be pinged — no database, no broker, or the
+// in-memory FakePublisher — reads as "disabled" rather than failing readiness.
+func pinger(v any) handler.Pinger {
+	p, _ := v.(handler.Pinger)
+	return p
+}
+
 func passThrough(next http.Handler) http.Handler { return next }
 
 func requirePublisher(publisher routing.Publisher, h http.Handler) http.Handler {
@@ -189,6 +221,7 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 	if deps == nil {
 		for _, pattern := range []string{
 			"/api/auth/login", "/api/auth/logout", "/api/auth/me",
+			"/api/auth/tokens/",
 			"/api/me/scenarios", "/api/me/services",
 			// The owner-scoped seeded-model CRUD. Each collection needs its own
 			// entry alongside its subtree: "/api/me/routes/" does not serve
@@ -217,9 +250,14 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 	// where it is bcrypt.MinCost.
 	hasher := auth.NewHasher(cfg.PasswordHashCost)
 
-	// Public: the only unauthenticated auth route. There is deliberately no
-	// registration endpoint — accounts come from POST /api/admin/users.
+	// Public. There is deliberately no registration endpoint — accounts come
+	// from an admin, by invite or POST /api/admin/users.
 	mux.Handle("POST /api/auth/login", limitLogin(handler.Login(deps, cfg.SessionTTL, hasher)))
+	// Invite and reset links (SPA-387). Behind the login limiter, and the same
+	// instance of it: redeeming a link is signing in by another route, so a
+	// caller gets one budget for guessing credentials, not two.
+	mux.Handle("GET /api/auth/tokens/{token}", limitLogin(handler.AccountToken(deps)))
+	mux.Handle("POST /api/auth/tokens/{token}", limitLogin(handler.RedeemAccountToken(deps, cfg.SessionTTL, hasher)))
 
 	// Authenticated.
 	mux.Handle("POST /api/auth/logout", authenticated(handler.Logout(deps)))
@@ -351,6 +389,10 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 
 	// Admin-only.
 	mux.Handle("POST /api/admin/users", adminOnly(handler.CreateUser(deps, hasher)))
+	mux.Handle("GET /api/admin/users", adminOnly(handler.ListUsers(deps)))
+	mux.Handle("PATCH /api/admin/users/{id}", adminOnly(handler.PatchUser(deps)))
+	mux.Handle("POST /api/admin/invites", adminOnly(handler.CreateInvite(deps, cfg.WebsiteURL)))
+	mux.Handle("POST /api/admin/users/{id}/reset-link", adminOnly(handler.CreateResetLink(deps, cfg.WebsiteURL)))
 	mux.Handle("POST /api/admin/routes", adminOnly(handler.CreateRoute(deps)))
 	// Curating a prerendered isochrone is editorial content on a public page,
 	// so it sits behind the same admin gate — even though it hangs off the
@@ -411,8 +453,14 @@ func logRequests(lg *slog.Logger, next http.Handler) http.Handler {
 		start := time.Now()
 		next.ServeHTTP(rec, r)
 
+		// Probes are polled on a timer by the platform and uptime monitors;
+		// at info they would drown the requests worth reading.
+		level := slog.LevelInfo
+		if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
+			level = slog.LevelDebug
+		}
 		trace, _ := traceid.FromContext(r.Context())
-		lg.Info("request",
+		lg.Log(r.Context(), level, "request",
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", rec.status,

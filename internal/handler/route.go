@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -22,24 +21,10 @@ type RouteStore interface {
 
 func CreateRoute(store RouteStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var in route.Ingest
-		dec := json.NewDecoder(r.Body)
-		// Unknown fields are rejected rather than ignored. A misspelled physics
-		// key (cant__mm) would otherwise decode to a zero-valued segment and
-		// sail through range validation as tangent, level track — silently
-		// storing physics the author never wrote.
-		dec.DisallowUnknownFields()
-		if err := dec.Decode(&in); err != nil {
-			writeError(w, http.StatusBadRequest, "malformed request body: "+err.Error())
-			return
-		}
-
-		// Validation is a pure function over the payload, so every geometry and
-		// physics rule is exercised in internal/route's own tests rather than
-		// through HTTP. Its messages name the offending field and segment, so
-		// they are returned to the client as-is.
-		if err := route.Validate(in); err != nil {
-			writeUnprocessable(w, err)
+		// The same ingest as an owned route, so the same decode, body cap and
+		// validation: a route an owner may save is one an admin may curate.
+		in, ok := decodeRouteIngest(w, r)
+		if !ok {
 			return
 		}
 

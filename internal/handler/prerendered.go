@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -18,6 +19,10 @@ type PrerenderedStore interface {
 	GetPrerenderedIsochrone(ctx context.Context, id string) (transit.PrerenderedIsochrone, bool, error)
 	CreatePrerenderedIsochrone(ctx context.Context, p *transit.PrerenderedIsochrone) error
 }
+
+// The largest committed payload, isochrone-sj-240-bike.json, is 499,890
+// bytes. 2 MiB leaves four times that for a bigger budget or a finer mode.
+const maxPrerenderedBodyBytes = 2 << 20
 
 type prerenderedResponse struct {
 	ID         string             `json:"id"`
@@ -111,8 +116,15 @@ func PrerenderedIsochrone(store PrerenderedStore) http.HandlerFunc {
 
 func CreatePrerenderedIsochrone(store PrerenderedStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, maxPrerenderedBodyBytes)
+
 		var req prerenderedCreateRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			var tooLarge *http.MaxBytesError
+			if errors.As(err, &tooLarge) {
+				writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+				return
+			}
 			writeError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}

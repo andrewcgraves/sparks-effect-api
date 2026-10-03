@@ -153,13 +153,14 @@ func TestSeedAndCompiledReadPathAcrossRestart(t *testing.T) {
 		t.Error("sf→millbrae: serviceID must be non-empty")
 	}
 
-	// Curated membership join was populated for the scenario.
+	// Curated membership join was populated for the scenario: HSR Express,
+	// HSR Local, Merced Shuttle and Brightline West.
 	ids, err := repo2.ListServiceIDsByScenario(ctx, sc.ID)
 	if err != nil {
 		t.Fatalf("ListServiceIDsByScenario: %v", err)
 	}
 	if len(ids) != 4 {
-		t.Errorf("scenario_service membership: want 4 (Express, Local, Merced Shuttle, Brightline West), got %d", len(ids))
+		t.Errorf("scenario_service membership: want 4, got %d", len(ids))
 	}
 }
 

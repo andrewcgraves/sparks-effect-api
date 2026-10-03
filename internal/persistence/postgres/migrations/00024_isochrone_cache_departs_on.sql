@@ -32,6 +32,20 @@
 -- invalidation is now the correct outcome, but it happens on read in the
 -- worker (a mismatched or NULL stamp is a miss), not by minting a new key.
 --
+-- Amended by SPA-325: the paragraph above was not true when it was written.
+-- Nothing read tileset_at back until SPA-325, so a map cycle left rows cut from
+-- the previous tiles being served indefinitely. The decision now in force:
+-- GetIsochroneCache returns each row's stamp, and the worker serves a row only
+-- when that stamp equals the tileset Valhalla is serving. A NULL stamp is a
+-- miss. A worker that holds no stamp (synthetic, or /status has not answered
+-- since boot) cannot verify any row, so it skips the lookup and treats every
+-- key as a miss. A miss is recomputed and, through SPA-328's write guard, the
+-- stamped polygon replaces an older or NULL row, so a cycle heals itself.
+-- The one case that does not heal is a rollback to an older tileset. Rows the
+-- newer tiles stamped keep mismatching, because an older stamp never
+-- replaces a newer one; they are recomputed on every request (correct but
+-- uncached) until the map moves forward again.
+--
 -- ## Deploy order
 --
 -- The column must exist before the worker writes it. The worker's ON CONFLICT

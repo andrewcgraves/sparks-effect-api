@@ -3,10 +3,12 @@ package postgres_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/persistence/postgres"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
+	"github.com/jackc/pgx/v5"
 )
 
 const (
@@ -21,8 +23,14 @@ const (
 
 func userScenarioFixture(t *testing.T) (*postgres.Repo, context.Context) {
 	t.Helper()
+	repo, ctx, _ := userScenarioDB(t)
+	return repo, ctx
+}
+
+func userScenarioDB(t *testing.T) (*postgres.Repo, context.Context, string) {
+	t.Helper()
 	ctx := context.Background()
-	repo, _ := freshRepo(t)
+	repo, url := freshRepo(t)
 
 	for _, u := range []account.User{
 		{ID: usnOwnerID, Email: "usn-owner@example.com", Name: "Owner"},
@@ -63,7 +71,7 @@ func userScenarioFixture(t *testing.T) (*postgres.Repo, context.Context) {
 	if err := repo.CreateUserService(ctx, basicSvc(usnService2ID, "usn-service-2", usnOwnerID)); err != nil {
 		t.Fatalf("CreateUserService 2: %v", err)
 	}
-	return repo, ctx
+	return repo, ctx, url
 }
 
 func sampleUserScenario() transit.UserScenario {
@@ -259,6 +267,53 @@ func TestListUserScenariosByOwner(t *testing.T) {
 	if len(got[0].ServiceIDs) != 2 {
 		t.Errorf("hydrated service_ids: want 2, got %d", len(got[0].ServiceIDs))
 	}
+}
+
+func TestListUserScenariosByOwnerOrdersByUpdatedAtDesc(t *testing.T) {
+	repo, ctx, url := userScenarioDB(t)
+
+	older := sampleUserScenario()
+	older.ID = "00000000-0000-4009-8006-000000000004"
+	older.Slug = "older"
+	if err := repo.CreateUserScenario(ctx, older); err != nil {
+		t.Fatalf("create older: %v", err)
+	}
+	newer := sampleUserScenario()
+	newer.ID = "00000000-0000-4009-8006-000000000005"
+	newer.Slug = "newer"
+	if err := repo.CreateUserScenario(ctx, newer); err != nil {
+		t.Fatalf("create newer: %v", err)
+	}
+
+	conn, err := pgx.Connect(ctx, url)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer func() { _ = conn.Close(ctx) }()
+	olderAt := time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)
+	newerAt := time.Date(2026, 7, 8, 9, 10, 11, 0, time.UTC)
+	if _, err := conn.Exec(ctx, `UPDATE user_scenarios SET updated_at = $2 WHERE id = $1`, older.ID, olderAt); err != nil {
+		t.Fatalf("stamp older: %v", err)
+	}
+	if _, err := conn.Exec(ctx, `UPDATE user_scenarios SET updated_at = $2 WHERE id = $1`, newer.ID, newerAt); err != nil {
+		t.Fatalf("stamp newer: %v", err)
+	}
+
+	got, err := repo.ListUserScenariosByOwner(ctx, usnOwnerID)
+	if err != nil {
+		t.Fatalf("ListUserScenariosByOwner: %v", err)
+	}
+	if len(got) != 2 || got[0].ID != newer.ID || got[1].ID != older.ID {
+		t.Fatalf("order = %+v, want newer updated_at first", idsOf(got))
+	}
+}
+
+func idsOf(scenarios []transit.UserScenario) []string {
+	ids := make([]string, len(scenarios))
+	for i := range scenarios {
+		ids[i] = scenarios[i].ID
+	}
+	return ids
 }
 
 func TestUserServiceIDsOwnedBy(t *testing.T) {

@@ -93,6 +93,7 @@ test-race: deps
 # nothing, so Go's default per-package parallelism is safe again.
 test-integration: deps
 	TEST_DATABASE_URL="$(TEST_DATABASE_URL)" TEST_AMQP_URL="$(TEST_AMQP_URL)" \
+		TEST_POSTGRES_IMAGE="$(POSTGRES_IMAGE)" DOCKER="$(DOCKER)" \
 		go test ./... -race -cover
 	go test -C contract ./... -race -cover
 

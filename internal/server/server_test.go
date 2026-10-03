@@ -28,6 +28,27 @@ func TestNew_healthz(t *testing.T) {
 	}
 }
 
+func TestNew_readyzWithNeitherBackingService(t *testing.T) {
+	store, err := transit.NewStore(transit.DefaultBoardingWaitPolicy())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	// What cmd/api builds with neither DATABASE_URL nor AMQP_URL set.
+	srv := New(config.Config{Port: "8080"}, store, nil, nil, logger.Discard())
+
+	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("readyz: want 200, got %d", rec.Code)
+	}
+	const want = `{"amqp":"disabled","postgres":"disabled"}` + "\n"
+	if got := rec.Body.String(); got != want {
+		t.Errorf("readyz body: want %q, got %q", want, got)
+	}
+}
+
 func TestCORS_flagOn_localhostOrigin_GET(t *testing.T) {
 	store, err := transit.NewStore(transit.DefaultBoardingWaitPolicy())
 	if err != nil {

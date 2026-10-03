@@ -72,7 +72,24 @@ func (s *stubAuthDeps) UserServiceIDsOwnedBy(context.Context, string, []string) 
 func (s *stubAuthDeps) CreateSession(context.Context, account.Session) error   { return nil }
 func (s *stubAuthDeps) DeleteSession(context.Context, string) error            { return nil }
 func (s *stubAuthDeps) CreateUser(context.Context, account.User, string) error { return nil }
+func (s *stubAuthDeps) GetUserByID(_ context.Context, id string) (account.User, bool, error) {
+	return account.User{ID: id}, true, nil
+}
+func (s *stubAuthDeps) CreateInvite(context.Context, account.User, account.Token) error { return nil }
+func (s *stubAuthDeps) CreateResetToken(context.Context, account.Token) error           { return nil }
+func (s *stubAuthDeps) GetAccountToken(context.Context, string) (account.Token, account.User, bool, error) {
+	return account.Token{}, account.User{}, false, nil
+}
+func (s *stubAuthDeps) RedeemAccountToken(context.Context, string, string, account.Session) (account.User, bool, error) {
+	return account.User{}, false, nil
+}
 func (s *stubAuthDeps) GetUserByEmail(context.Context, string) (account.User, bool, error) {
+	return account.User{}, false, nil
+}
+func (s *stubAuthDeps) ListUsers(context.Context) ([]account.UserSummary, error) {
+	return nil, nil
+}
+func (s *stubAuthDeps) PatchUser(context.Context, string, account.UserPatch) (account.User, bool, error) {
 	return account.User{}, false, nil
 }
 func (s *stubAuthDeps) ListScenariosByOwner(context.Context, string) ([]transit.Scenario, error) {
@@ -189,8 +206,8 @@ func (s *stubAuthDeps) MarkRoutingJobRunning(context.Context, string) error { re
 func (s *stubAuthDeps) SucceedRoutingJob(context.Context, string, json.RawMessage) error {
 	return nil
 }
-func (s *stubAuthDeps) GetIsochroneCache(context.Context, []handler.IsochroneKey) (map[handler.IsochroneKey]json.RawMessage, error) {
-	return map[handler.IsochroneKey]json.RawMessage{}, nil
+func (s *stubAuthDeps) GetIsochroneCache(context.Context, []handler.IsochroneKey) (map[handler.IsochroneKey]handler.CachedIsochrone, error) {
+	return map[handler.IsochroneKey]handler.CachedIsochrone{}, nil
 }
 func (s *stubAuthDeps) PutIsochroneCache(context.Context, []handler.CachedIsochrone) error {
 	return nil
@@ -265,6 +282,10 @@ func TestProtectedRoutesRejectAnonymousCallers(t *testing.T) {
 		{http.MethodGet, "/api/me/scenarios"},
 		{http.MethodGet, "/api/me/services"},
 		{http.MethodPost, "/api/admin/users"},
+		{http.MethodGet, "/api/admin/users"},
+		{http.MethodPatch, "/api/admin/users/some-id"},
+		{http.MethodPost, "/api/admin/invites"},
+		{http.MethodPost, "/api/admin/users/some-id/reset-link"},
 		{http.MethodPost, "/api/admin/routes"},
 		{http.MethodPost, "/api/scenarios/ca-hsr/compile"},
 		{http.MethodGet, "/api/jobs/some-id"},
@@ -307,22 +328,34 @@ func TestProtectedRoutesRejectAnonymousCallers(t *testing.T) {
 func TestAdminRoutesRejectNonAdmins(t *testing.T) {
 	h := newTestServer(t, newStubDeps())
 
-	for _, path := range []string{
-		"/api/admin/users",
-		"/api/admin/routes",
+	for _, route := range []struct{ method, path string }{
+		{http.MethodPost, "/api/admin/users"},
+		{http.MethodGet, "/api/admin/users"},
+		{http.MethodPatch, "/api/admin/users/some-id"},
+		{http.MethodPost, "/api/admin/invites"},
+		{http.MethodPost, "/api/admin/users/some-id/reset-link"},
+		{http.MethodPost, "/api/admin/routes"},
 		// Not under /api/admin/, so nothing about its path says it is gated —
 		// which is exactly why it is asserted here.
-		"/api/scenarios/ca-hsr/prerendered-isochrones",
+		{http.MethodPost, "/api/scenarios/ca-hsr/prerendered-isochrones"},
 	} {
-		t.Run(path, func(t *testing.T) {
-			rec := request(t, h, http.MethodPost, path, userToken)
+		t.Run(route.method+" "+route.path, func(t *testing.T) {
+			rec := request(t, h, route.method, route.path, userToken)
 			if rec.Code != http.StatusForbidden {
 				t.Errorf("status = %d, want 403 for a non-admin", rec.Code)
 			}
 
 			// The same route admits an admin — proving the 403 was the gate and
-			// not a misrouted request.
-			rec = request(t, h, http.MethodPost, path, adminToken)
+			// not a misrouted request. The stub knows no users, so PATCH answers
+			// 404 from the handler; a body is sent so it gets that far.
+			if route.method == http.MethodPatch {
+				rec = request(t, h, route.method, route.path, adminToken, `{"is_admin":true}`)
+				if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "user not found") {
+					t.Errorf("admin PATCH: status %d body %s, want the handler's 404", rec.Code, rec.Body.String())
+				}
+				return
+			}
+			rec = request(t, h, route.method, route.path, adminToken)
 			if rec.Code == http.StatusForbidden || rec.Code == http.StatusNotFound {
 				t.Errorf("admin was blocked from an admin route: status %d", rec.Code)
 			}
@@ -483,6 +516,8 @@ func TestAuthRoutesReportUnavailableWithoutADatabase(t *testing.T) {
 
 	for _, p := range []struct{ method, path string }{
 		{http.MethodPost, "/api/auth/login"},
+		{http.MethodGet, "/api/auth/tokens/some-token"},
+		{http.MethodPost, "/api/auth/tokens/some-token"},
 		{http.MethodGet, "/api/auth/me"},
 		{http.MethodPost, "/api/admin/users"},
 		{http.MethodGet, "/api/me/scenarios"},

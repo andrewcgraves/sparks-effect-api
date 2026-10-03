@@ -49,6 +49,13 @@ func Connect(ctx context.Context, databaseURL string, maxConns int) (*Repo, erro
 
 func (r *Repo) Close() { r.pool.Close() }
 
+func (r *Repo) Ping(ctx context.Context) error {
+	if err := r.pool.Ping(ctx); err != nil {
+		return fmt.Errorf("postgres: ping: %w", err)
+	}
+	return nil
+}
+
 func Migrate(ctx context.Context, databaseURL string) error {
 	cfg, err := pgx.ParseConfig(databaseURL)
 	if err != nil {
@@ -580,9 +587,12 @@ func (r *Repo) CreateUser(ctx context.Context, u account.User, passwordHash stri
 func (r *Repo) GetUserCredentialsByEmail(ctx context.Context, email string) (account.User, string, bool, error) {
 	var u account.User
 	var hash string
+	// disabled_at IS NULL so login's unknown-email path (status, body, and
+	// VerifyNothing) is the path a disabled account takes too. A handler check
+	// after found == true would be a different timing path.
 	err := r.pool.QueryRow(ctx,
-		`SELECT `+userColumns+`, password_hash FROM users WHERE email = $1`, email).
-		Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin, &u.CreatedAt, &u.UpdatedAt, &hash)
+		`SELECT `+userColumns+`, password_hash FROM users WHERE email = $1 AND disabled_at IS NULL`, email).
+		Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin, &u.CreatedAt, &u.UpdatedAt, &u.DisabledAt, &hash)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return account.User{}, "", false, nil
 	}
@@ -592,9 +602,9 @@ func (r *Repo) GetUserCredentialsByEmail(ctx context.Context, email string) (acc
 	return u, hash, true, nil
 }
 
-const userColumns = `id, email, name, is_admin, created_at, updated_at`
+const userColumns = `id, email, name, is_admin, created_at, updated_at, disabled_at`
 
-const userColumnsU = `u.id, u.email, u.name, u.is_admin, u.created_at, u.updated_at`
+const userColumnsU = `u.id, u.email, u.name, u.is_admin, u.created_at, u.updated_at, u.disabled_at`
 
 func (r *Repo) GetUserByID(ctx context.Context, id string) (account.User, bool, error) {
 	return scanUser(r.pool.QueryRow(ctx, `SELECT `+userColumns+` FROM users WHERE id = $1`, id))
@@ -606,7 +616,7 @@ func (r *Repo) GetUserByEmail(ctx context.Context, email string) (account.User, 
 
 func scanUser(row pgx.Row) (account.User, bool, error) {
 	var u account.User
-	err := row.Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin, &u.CreatedAt, &u.UpdatedAt)
+	err := row.Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin, &u.CreatedAt, &u.UpdatedAt, &u.DisabledAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return account.User{}, false, nil
 	}
@@ -616,22 +626,113 @@ func scanUser(row pgx.Row) (account.User, bool, error) {
 	return u, true, nil
 }
 
-func (r *Repo) ListUsers(ctx context.Context) ([]account.User, error) {
-	rows, err := r.pool.Query(ctx, `SELECT `+userColumns+` FROM users ORDER BY email`)
+func (r *Repo) ListUsers(ctx context.Context) ([]account.UserSummary, error) {
+	// The counts cover authored UserServices only: a publication hangs off a
+	// user_services row, so seeded services an account owns are not counted.
+	rows, err := r.pool.Query(ctx,
+		`SELECT u.id, u.email, u.name, u.is_admin, u.created_at, u.disabled_at,
+		        c.service_count, c.published_count
+		   FROM users u
+		  CROSS JOIN LATERAL (
+		        SELECT count(*) AS service_count,
+		               count(p.user_service_id) AS published_count
+		          FROM user_services us
+		          LEFT JOIN service_publications p ON p.user_service_id = us.id
+		         WHERE us.owner_id = u.id
+		  ) c
+		  ORDER BY u.created_at, u.id`)
 	if err != nil {
 		return nil, wrap("ListUsers", err)
 	}
 	defer rows.Close()
 
-	var out []account.User
+	var out []account.UserSummary
 	for rows.Next() {
-		var u account.User
-		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin, &u.CreatedAt, &u.UpdatedAt); err != nil {
+		var u account.UserSummary
+		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin, &u.CreatedAt, &u.DisabledAt,
+			&u.ServiceCount, &u.PublishedCount); err != nil {
 			return nil, wrap("ListUsers scan", err)
 		}
 		out = append(out, u)
 	}
 	return out, wrap("ListUsers rows", rows.Err())
+}
+
+func (r *Repo) SetUserDisabled(ctx context.Context, id string, disabled bool) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return wrap("SetUserDisabled begin", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // rollback after commit is a no-op
+
+	found, err := setUserDisabled(ctx, tx, id, disabled)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("postgres: SetUserDisabled: user %q not found", id)
+	}
+	return wrap("SetUserDisabled commit", tx.Commit(ctx))
+}
+
+func setUserDisabled(ctx context.Context, tx pgx.Tx, id string, disabled bool) (bool, error) {
+	// Sessions are revoked in the caller's transaction, so no request can
+	// authenticate between the flag landing and the sessions going.
+	stmt := `UPDATE users SET disabled_at = NULL, updated_at = now() WHERE id = $1`
+	if disabled {
+		stmt = `UPDATE users SET disabled_at = COALESCE(disabled_at, now()), updated_at = now() WHERE id = $1`
+	}
+	tag, err := tx.Exec(ctx, stmt, id)
+	if err != nil {
+		return false, wrap("SetUserDisabled", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return false, nil
+	}
+	if disabled {
+		if _, err := tx.Exec(ctx, `DELETE FROM sessions WHERE user_id = $1`, id); err != nil {
+			return false, wrap("SetUserDisabled sessions", err)
+		}
+	}
+	return true, nil
+}
+
+func (r *Repo) PatchUser(ctx context.Context, id string, patch account.UserPatch) (account.User, bool, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return account.User{}, false, wrap("PatchUser begin", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // rollback after commit is a no-op
+
+	// id::text, as ListUserServicesByIDs does, so a path id that is not a
+	// uuid names no user instead of failing the cast with a 500.
+	err = tx.QueryRow(ctx, `SELECT id FROM users WHERE id::text = $1 FOR UPDATE`, id).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return account.User{}, false, nil
+	}
+	if err != nil {
+		return account.User{}, false, wrap("PatchUser lock", err)
+	}
+
+	if patch.IsAdmin != nil {
+		if _, err := tx.Exec(ctx,
+			`UPDATE users SET is_admin = $2, updated_at = now() WHERE id = $1`, id, *patch.IsAdmin); err != nil {
+			return account.User{}, false, wrap("PatchUser is_admin", err)
+		}
+	}
+	if patch.Disabled != nil {
+		if _, err := setUserDisabled(ctx, tx, id, *patch.Disabled); err != nil {
+			return account.User{}, false, err
+		}
+	}
+	u, found, err := scanUser(tx.QueryRow(ctx, `SELECT `+userColumns+` FROM users WHERE id = $1`, id))
+	if err != nil || !found {
+		return account.User{}, false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return account.User{}, false, wrap("PatchUser commit", err)
+	}
+	return u, true, nil
 }
 
 // --- Sessions ---
@@ -647,7 +748,7 @@ func (r *Repo) GetSessionUser(ctx context.Context, tokenHash string) (account.Us
 	return scanUser(r.pool.QueryRow(ctx,
 		`SELECT `+userColumnsU+`
 		 FROM sessions s JOIN users u ON u.id = s.user_id
-		 WHERE s.token_hash = $1 AND s.expires_at > now()`, tokenHash))
+		 WHERE s.token_hash = $1 AND s.expires_at > now() AND u.disabled_at IS NULL`, tokenHash))
 }
 
 func (r *Repo) DeleteSession(ctx context.Context, tokenHash string) error {

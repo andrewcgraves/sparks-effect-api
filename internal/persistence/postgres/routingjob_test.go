@@ -266,7 +266,7 @@ func TestIsochroneCacheSchema(t *testing.T) {
 		t.Fatalf("rows: %v", err)
 	}
 
-	want := []string{"compile_job_id", "contour_mins", "departs_on", "mode", "station_slug"}
+	want := []string{"budget_mins", "compile_job_id", "contour_mins", "departs_on", "mode", "station_slug"}
 	if len(key) != len(want) {
 		t.Fatalf("unique key = %v, want %v", key, want)
 	}
@@ -276,7 +276,7 @@ func TestIsochroneCacheSchema(t *testing.T) {
 		}
 	}
 
-	// A row keyed on those five goes in, tileset timestamp and all; a second
+	// A row keyed on those six goes in, tileset timestamp and all; a second
 	// row differing only in tileset timestamp collides, which is what
 	// "compared on read, not part of the key" means in practice.
 	geometry := json.RawMessage(`{"type":"Polygon","coordinates":[]}`)
@@ -483,6 +483,11 @@ func TestIsochroneCacheGetPut(t *testing.T) {
 	if _, ok := got[missing]; ok {
 		t.Error("missing key was served")
 	}
+	// SPA-325: the worker refuses a row cut from another tileset, so the
+	// stamp has to come back out exactly as it went in.
+	if want := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC); !got[stored].TilesetAt.Equal(want) {
+		t.Errorf("tileset_at = %v, want %v", got[stored].TilesetAt, want)
+	}
 
 	// A repeated put with no newer tileset is not an error and does not
 	// overwrite a usable row.
@@ -496,11 +501,11 @@ func TestIsochroneCacheGetPut(t *testing.T) {
 		t.Fatalf("Get after second Put: %v", err)
 	}
 	var parsed map[string]any
-	if err := json.Unmarshal(got[stored], &parsed); err != nil {
+	if err := json.Unmarshal(got[stored].Geometry, &parsed); err != nil {
 		t.Fatalf("geometry: %v", err)
 	}
 	if parsed["type"] != "FeatureCollection" {
-		t.Errorf("second Put overwrote the row: %s", got[stored])
+		t.Errorf("second Put overwrote the row: %s", got[stored].Geometry)
 	}
 
 	if err := repo.PutIsochroneCache(ctx, nil); err != nil {
@@ -552,7 +557,7 @@ func TestIsochroneCacheGetPutKeepsTransitDatesApart(t *testing.T) {
 	assertDay := func(k handler.IsochroneKey, want string) {
 		t.Helper()
 		var parsed map[string]any
-		if err := json.Unmarshal(got[k], &parsed); err != nil {
+		if err := json.Unmarshal(got[k].Geometry, &parsed); err != nil {
 			t.Fatalf("%s: %v", want, err)
 		}
 		if parsed["day"] != want {
@@ -574,5 +579,69 @@ func TestIsochroneCacheGetPutKeepsTransitDatesApart(t *testing.T) {
 	}
 	if _, ok := onlyWalk[walk]; !ok {
 		t.Error("walk lookup missed the NULL-date row")
+	}
+	// Those rows went in without a stamp; NULL comes back as the zero time,
+	// which the lookup endpoint omits and the worker reads as a miss.
+	if at := onlyWalk[walk].TilesetAt; !at.IsZero() {
+		t.Errorf("unstamped row read back with tileset_at %v, want zero", at)
+	}
+}
+
+func TestIsochroneCacheGetPutKeepsTransitBudgetsApart(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := freshRepo(t)
+	seedCompileJob(t, repo, routingCompileJobID)
+
+	// SPA-326: one contour, station and date, two budgets — the two chains
+	// were on the platform 30 minutes apart.
+	ninety := handler.IsochroneKey{
+		CompileJobID: routingCompileJobID, StationSlug: "station-a",
+		Mode: "transit", ContourMins: 79, DepartsOn: "2026-09-02", BudgetMins: 90,
+	}
+	oneTwenty := ninety
+	oneTwenty.BudgetMins = 120
+	walk := handler.IsochroneKey{
+		CompileJobID: routingCompileJobID, StationSlug: "station-a",
+		Mode: "walk", ContourMins: 79,
+	}
+
+	if err := repo.PutIsochroneCache(ctx, []handler.CachedIsochrone{
+		{Key: ninety, Geometry: json.RawMessage(`{"budget":90}`)},
+		{Key: walk, Geometry: json.RawMessage(`{"budget":"none"}`)},
+	}); err != nil {
+		t.Fatalf("PutIsochroneCache: %v", err)
+	}
+
+	got, err := repo.GetIsochroneCache(ctx, []handler.IsochroneKey{ninety, oneTwenty, walk})
+	if err != nil {
+		t.Fatalf("GetIsochroneCache: %v", err)
+	}
+	if _, ok := got[ninety]; !ok {
+		t.Error("the budget-90 row was not served back for budget 90")
+	}
+	if _, ok := got[oneTwenty]; ok {
+		t.Error("budget 90's polygon was served for budget 120's question")
+	}
+	if _, ok := got[walk]; !ok {
+		t.Error("walk lookup missed the NULL-budget row")
+	}
+
+	if err := repo.PutIsochroneCache(ctx, []handler.CachedIsochrone{
+		{Key: oneTwenty, Geometry: json.RawMessage(`{"budget":120}`)},
+	}); err != nil {
+		t.Fatalf("PutIsochroneCache(120): %v", err)
+	}
+	got, err = repo.GetIsochroneCache(ctx, []handler.IsochroneKey{ninety, oneTwenty})
+	if err != nil {
+		t.Fatalf("GetIsochroneCache: %v", err)
+	}
+	for k, want := range map[handler.IsochroneKey]float64{ninety: 90, oneTwenty: 120} {
+		var parsed map[string]any
+		if err := json.Unmarshal(got[k].Geometry, &parsed); err != nil {
+			t.Fatalf("budget %d: %v", k.BudgetMins, err)
+		}
+		if parsed["budget"] != want {
+			t.Errorf("budget %d served geometry for budget %v", k.BudgetMins, parsed["budget"])
+		}
 	}
 }

@@ -210,6 +210,10 @@ func decodeRouteIngest(w http.ResponseWriter, r *http.Request) (route.Ingest, bo
 
 	var in route.Ingest
 	dec := json.NewDecoder(r.Body)
+	// Unknown fields are rejected rather than ignored. A misspelled physics
+	// key (cant__mm) would otherwise decode to a zero-valued segment and
+	// sail through range validation as tangent, level track — silently
+	// storing physics the author never wrote.
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&in); err != nil {
 		var tooLarge *http.MaxBytesError
