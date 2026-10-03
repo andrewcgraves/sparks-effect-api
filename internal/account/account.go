@@ -18,3 +18,18 @@ type Session struct {
 	CreatedAt time.Time
 	ExpiresAt time.Time
 }
+
+type TokenPurpose string
+
+const (
+	TokenPurposeInvite TokenPurpose = "invite"
+	TokenPurposeReset  TokenPurpose = "reset"
+)
+
+type Token struct {
+	TokenHash string
+	UserID    string
+	Purpose   TokenPurpose
+	ExpiresAt time.Time
+	UsedAt    *time.Time
+}

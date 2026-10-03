@@ -82,6 +82,17 @@ func TestLoad_allowLocalhostCORS_enabledByEnv(t *testing.T) {
 	}
 }
 
+func TestLoad_websiteURL(t *testing.T) {
+	t.Setenv("WEBSITE_URL", "")
+	if got := Load().WebsiteURL; got != "https://sparks-effect.app" {
+		t.Errorf("WebsiteURL default = %q, want https://sparks-effect.app", got)
+	}
+	t.Setenv("WEBSITE_URL", "https://dev.sparks-effect.app")
+	if got := Load().WebsiteURL; got != "https://dev.sparks-effect.app" {
+		t.Errorf("WebsiteURL = %q, want the WEBSITE_URL value", got)
+	}
+}
+
 func TestLoad_logLevel_defaultsToInfo(t *testing.T) {
 	t.Setenv("LOG_LEVEL", "")
 	t.Setenv("VERBOSE", "")
