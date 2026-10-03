@@ -670,6 +670,41 @@ func (r *Repo) SetUserDisabled(ctx context.Context, id string, disabled bool) er
 	return wrap("SetUserDisabled commit", tx.Commit(ctx))
 }
 
+func (r *Repo) UpdateUserName(ctx context.Context, id, name string) (account.User, bool, error) {
+	return scanUser(r.pool.QueryRow(ctx,
+		`UPDATE users SET name = $2, updated_at = now() WHERE id = $1 RETURNING `+userColumns, id, name))
+}
+
+// ChangePassword answers false, changing nothing, for a user that is missing
+// or disabled. The hash update and the revocation of every other session share
+// one transaction, so a stolen session cannot outlive the password change that
+// was meant to end it.
+func (r *Repo) ChangePassword(ctx context.Context, id, passwordHash, keepTokenHash string) (bool, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return false, wrap("ChangePassword begin", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // rollback after commit is a no-op
+
+	tag, err := tx.Exec(ctx,
+		`UPDATE users SET password_hash = $2, updated_at = now() WHERE id = $1 AND disabled_at IS NULL`,
+		id, passwordHash)
+	if err != nil {
+		return false, wrap("ChangePassword", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return false, nil
+	}
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM sessions WHERE user_id = $1 AND token_hash <> $2`, id, keepTokenHash); err != nil {
+		return false, wrap("ChangePassword sessions", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, wrap("ChangePassword commit", err)
+	}
+	return true, nil
+}
+
 // --- Sessions ---
 
 func (r *Repo) CreateSession(ctx context.Context, s account.Session) error {
@@ -689,6 +724,11 @@ func (r *Repo) GetSessionUser(ctx context.Context, tokenHash string) (account.Us
 func (r *Repo) DeleteSession(ctx context.Context, tokenHash string) error {
 	_, err := r.pool.Exec(ctx, `DELETE FROM sessions WHERE token_hash = $1`, tokenHash)
 	return wrap("DeleteSession", err)
+}
+
+func (r *Repo) DeleteUserSessions(ctx context.Context, userID string) error {
+	_, err := r.pool.Exec(ctx, `DELETE FROM sessions WHERE user_id = $1`, userID)
+	return wrap("DeleteUserSessions", err)
 }
 
 func (r *Repo) DeleteExpiredSessions(ctx context.Context) (int64, error) {
