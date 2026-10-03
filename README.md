@@ -416,6 +416,8 @@ scenario/route reads or `/api/internal/*`.
 | `POST /api/me/services` | authenticated | Author a seeded service inside a scenario you own |
 | `GET`/`PUT`/`DELETE /api/me/services/{id}` | authenticated | Read, edit, or remove one |
 | `POST /api/admin/users` | admin | Provision an account |
+| `GET /api/admin/users` | admin | Every account, oldest first, with `disabled_at` and how many UserServices it authored (`service_count`) and has published (`published_count`) |
+| `PATCH /api/admin/users/{id}` | admin | Set `is_admin` and/or `disabled`; disabling revokes the account's sessions. An admin demoting or disabling themselves gets 409 |
 | `POST /api/admin/routes` | admin | Ingest a curated alignment |
 | `POST /api/scenarios/{slug}/prerendered-isochrones` | admin | Curate a ready-to-display isochrone for a scenario |
 
@@ -497,7 +499,7 @@ Everyone else is then provisioned through `POST /api/admin/users`.
 
 Four rules, all enforced server-side:
 
-- **Admin gating** — `RequireAdmin` protects account provisioning and is the
+- **Admin gating** — `RequireAdmin` protects account provisioning and management and is the
   gate route-write endpoints register behind.
 - **Ownership** — `auth.CanAccess` is the single ownership predicate: admins
   reach everything, other users reach only rows they own, and unowned rows (the

@@ -5,6 +5,7 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/account"
@@ -626,17 +627,31 @@ func scanUser(row pgx.Row) (account.User, bool, error) {
 	return u, true, nil
 }
 
-func (r *Repo) ListUsers(ctx context.Context) ([]account.User, error) {
-	rows, err := r.pool.Query(ctx, `SELECT `+userColumns+` FROM users ORDER BY email`)
+// The counts cover authored UserServices only: a publication hangs off a
+// user_services row, so seeded services an account owns are not counted.
+func (r *Repo) ListUsers(ctx context.Context) ([]account.UserSummary, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT u.id, u.email, u.name, u.is_admin, u.created_at, u.disabled_at,
+		        c.service_count, c.published_count
+		   FROM users u
+		  CROSS JOIN LATERAL (
+		        SELECT count(*) AS service_count,
+		               count(p.user_service_id) AS published_count
+		          FROM user_services us
+		          LEFT JOIN service_publications p ON p.user_service_id = us.id
+		         WHERE us.owner_id = u.id
+		  ) c
+		  ORDER BY u.created_at, u.id`)
 	if err != nil {
 		return nil, wrap("ListUsers", err)
 	}
 	defer rows.Close()
 
-	var out []account.User
+	var out []account.UserSummary
 	for rows.Next() {
-		var u account.User
-		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin, &u.CreatedAt, &u.UpdatedAt, &u.DisabledAt); err != nil {
+		var u account.UserSummary
+		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.IsAdmin, &u.CreatedAt, &u.DisabledAt,
+			&u.ServiceCount, &u.PublishedCount); err != nil {
 			return nil, wrap("ListUsers scan", err)
 		}
 		out = append(out, u)
@@ -651,23 +666,93 @@ func (r *Repo) SetUserDisabled(ctx context.Context, id string, disabled bool) er
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // rollback after commit is a no-op
 
+	found, err := setUserDisabled(ctx, tx, id, disabled)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("postgres: SetUserDisabled: user %q not found", id)
+	}
+	return wrap("SetUserDisabled commit", tx.Commit(ctx))
+}
+
+// Disabling revokes every session in the caller's transaction, so no request
+// can authenticate between the flag landing and the sessions going.
+func setUserDisabled(ctx context.Context, tx pgx.Tx, id string, disabled bool) (bool, error) {
 	stmt := `UPDATE users SET disabled_at = NULL, updated_at = now() WHERE id = $1`
 	if disabled {
 		stmt = `UPDATE users SET disabled_at = COALESCE(disabled_at, now()), updated_at = now() WHERE id = $1`
 	}
 	tag, err := tx.Exec(ctx, stmt, id)
 	if err != nil {
-		return wrap("SetUserDisabled", err)
+		return false, wrap("SetUserDisabled", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("postgres: SetUserDisabled: user %q not found", id)
+		return false, nil
 	}
 	if disabled {
 		if _, err := tx.Exec(ctx, `DELETE FROM sessions WHERE user_id = $1`, id); err != nil {
-			return wrap("SetUserDisabled sessions", err)
+			return false, wrap("SetUserDisabled sessions", err)
 		}
 	}
-	return wrap("SetUserDisabled commit", tx.Commit(ctx))
+	return true, nil
+}
+
+func (r *Repo) PatchUser(ctx context.Context, id string, patch account.UserPatch) (account.User, bool, error) {
+	// A path id that is not a uuid names no user. Without this Postgres
+	// rejects the cast and the admin sees a 500 for a typo.
+	if !isUUID(id) {
+		return account.User{}, false, nil
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return account.User{}, false, wrap("PatchUser begin", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // rollback after commit is a no-op
+
+	if patch.IsAdmin != nil {
+		tag, err := tx.Exec(ctx,
+			`UPDATE users SET is_admin = $2, updated_at = now() WHERE id = $1`, id, *patch.IsAdmin)
+		if err != nil {
+			return account.User{}, false, wrap("PatchUser is_admin", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return account.User{}, false, nil
+		}
+	}
+	if patch.Disabled != nil {
+		found, err := setUserDisabled(ctx, tx, id, *patch.Disabled)
+		if err != nil || !found {
+			return account.User{}, false, err
+		}
+	}
+	u, found, err := scanUser(tx.QueryRow(ctx, `SELECT `+userColumns+` FROM users WHERE id = $1`, id))
+	if err != nil || !found {
+		return account.User{}, false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return account.User{}, false, wrap("PatchUser commit", err)
+	}
+	return u, true, nil
+}
+
+func isUUID(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i, c := range s {
+		switch i {
+		case 8, 13, 18, 23:
+			if c != '-' {
+				return false
+			}
+		default:
+			if !strings.ContainsRune("0123456789abcdefABCDEF", c) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // --- Sessions ---

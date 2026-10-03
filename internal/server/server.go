@@ -22,6 +22,7 @@ import (
 type AuthDeps interface {
 	handler.AuthStore
 	handler.UserStore
+	handler.AdminUserStore
 	handler.OwnerStore
 	handler.RouteStore
 	handler.CompileStore
@@ -381,6 +382,8 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 
 	// Admin-only.
 	mux.Handle("POST /api/admin/users", adminOnly(handler.CreateUser(deps, hasher)))
+	mux.Handle("GET /api/admin/users", adminOnly(handler.ListUsers(deps)))
+	mux.Handle("PATCH /api/admin/users/{id}", adminOnly(handler.PatchUser(deps)))
 	mux.Handle("POST /api/admin/routes", adminOnly(handler.CreateRoute(deps)))
 	// Curating a prerendered isochrone is editorial content on a public page,
 	// so it sits behind the same admin gate — even though it hangs off the

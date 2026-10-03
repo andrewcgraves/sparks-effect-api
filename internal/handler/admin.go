@@ -97,3 +97,83 @@ func CreateUser(store UserStore, hasher auth.Hasher) http.HandlerFunc {
 		writeJSON(w, http.StatusCreated, user)
 	}
 }
+
+type AdminUserStore interface {
+	ListUsers(ctx context.Context) ([]account.UserSummary, error)
+	PatchUser(ctx context.Context, id string, patch account.UserPatch) (account.User, bool, error)
+}
+
+func ListUsers(store AdminUserStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		users, err := store.ListUsers(r.Context())
+		if err != nil {
+			writeInternalError(r.Context(), w, "listing users", err)
+			return
+		}
+		if users == nil {
+			users = []account.UserSummary{}
+		}
+		writeJSON(w, http.StatusOK, users)
+	}
+}
+
+type patchUserRequest struct {
+	IsAdmin  *bool `json:"is_admin"`
+	Disabled *bool `json:"disabled"`
+}
+
+const maxPatchUserBodyBytes = 4 << 10
+
+func PatchUser(store AdminUserStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		caller, ok := auth.UserFrom(r.Context())
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "authentication required")
+			return
+		}
+
+		r.Body = http.MaxBytesReader(w, r.Body, maxPatchUserBodyBytes)
+		var req patchUserRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			var tooLarge *http.MaxBytesError
+			if errors.As(err, &tooLarge) {
+				writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+				return
+			}
+			writeError(w, http.StatusBadRequest, "malformed request body")
+			return
+		}
+		if req.IsAdmin == nil && req.Disabled == nil {
+			writeError(w, http.StatusBadRequest, "nothing to change: send is_admin or disabled")
+			return
+		}
+
+		// An admin only loses their own access at another admin's hand, which
+		// is what keeps the last admin from locking everyone out.
+		id := r.PathValue("id")
+		if id == caller.ID {
+			if req.IsAdmin != nil && !*req.IsAdmin {
+				writeError(w, http.StatusConflict, "an admin cannot demote themselves")
+				return
+			}
+			if req.Disabled != nil && *req.Disabled {
+				writeError(w, http.StatusConflict, "an admin cannot disable themselves")
+				return
+			}
+		}
+
+		user, found, err := store.PatchUser(r.Context(), id, account.UserPatch{
+			IsAdmin:  req.IsAdmin,
+			Disabled: req.Disabled,
+		})
+		if err != nil {
+			writeInternalError(r.Context(), w, "updating user", err)
+			return
+		}
+		if !found {
+			writeError(w, http.StatusNotFound, "user not found")
+			return
+		}
+		writeJSON(w, http.StatusOK, user)
+	}
+}
