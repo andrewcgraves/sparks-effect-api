@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -223,9 +222,12 @@ func (s *stubAuthDeps) FailRoutingJob(context.Context, string, string) error    
 func (s *stubAuthDeps) GetRoutingJobByID(context.Context, string) (transit.RoutingJob, bool, error) {
 	return transit.RoutingJob{}, false, nil
 }
+func (s *stubAuthDeps) FindReusableRoutingJob(context.Context, transit.RoutingJob) (transit.RoutingJob, bool, error) {
+	return transit.RoutingJob{}, false, nil
+}
 
 func (s *stubAuthDeps) MarkRoutingJobRunning(context.Context, string) error { return nil }
-func (s *stubAuthDeps) SucceedRoutingJob(context.Context, string, json.RawMessage) error {
+func (s *stubAuthDeps) SucceedRoutingJob(context.Context, string, handler.JobSucceededBody) error {
 	return nil
 }
 func (s *stubAuthDeps) GetIsochroneCache(context.Context, []handler.IsochroneKey) (map[handler.IsochroneKey]handler.CachedIsochrone, error) {

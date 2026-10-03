@@ -27,11 +27,25 @@ type RoutingStore interface {
 	CreateRoutingJob(ctx context.Context, j *transit.RoutingJob) error
 	GetRoutingJobByID(ctx context.Context, id string) (transit.RoutingJob, bool, error)
 	FailRoutingJob(ctx context.Context, id, errMsg string) error
+	FindReusableRoutingJob(ctx context.Context, want transit.RoutingJob) (transit.RoutingJob, bool, error)
 }
 
 func enqueueIsochrone(w http.ResponseWriter, r *http.Request, store RoutingStore,
 	publisher routing.Publisher, job transit.RoutingJob, graph *transit.TransitGraph) {
 	if !originInRange(w, job, graph) {
+		return
+	}
+
+	// A repeat is answered with the job that already answered it, so it costs
+	// no queue slot (SPA-331). The key and freshness rules are migration
+	// 00034's. 200 rather than 202: nothing was accepted for processing, and
+	// the job is already succeeded, so a caller that polls it anyway gets the
+	// same answer at once. A failed lookup only loses the shortcut.
+	if prior, ok, err := store.FindReusableRoutingJob(r.Context(), job); err != nil {
+		slog.ErrorContext(r.Context(), "routing: reuse lookup failed; enqueueing", "error", err)
+	} else if ok {
+		slog.Debug("routing job reused", "routing_job_id", prior.ID)
+		writeJSON(w, http.StatusOK, prior)
 		return
 	}
 

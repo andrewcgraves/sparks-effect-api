@@ -401,7 +401,7 @@ func TestSucceedRoutingJob(t *testing.T) {
 	}
 
 	want := json.RawMessage(`{"type":"FeatureCollection","features":[]}`)
-	if err := repo.SucceedRoutingJob(ctx, j.ID, want); err != nil {
+	if err := repo.SucceedRoutingJob(ctx, j.ID, handler.JobSucceededBody{Result: want}); err != nil {
 		t.Fatalf("SucceedRoutingJob: %v", err)
 	}
 	got, ok, err := repo.GetRoutingJobByID(ctx, j.ID)
