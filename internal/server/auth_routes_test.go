@@ -180,6 +180,21 @@ func (s *stubAuthDeps) GetServicePublicationBySlug(context.Context, string) (tra
 func (s *stubAuthDeps) GetSucceededCompileJob(context.Context, string) (transit.Job, bool, error) {
 	return transit.Job{}, false, nil
 }
+func (s *stubAuthDeps) HasPendingServiceHandover(context.Context, string) (bool, error) {
+	return false, nil
+}
+func (s *stubAuthDeps) OfferServiceHandover(context.Context, transit.ServiceHandover, time.Duration) (transit.ServiceHandover, error) {
+	return transit.ServiceHandover{}, nil
+}
+func (s *stubAuthDeps) ListPendingServiceHandovers(context.Context, string) ([]transit.ServiceHandover, error) {
+	return nil, nil
+}
+func (s *stubAuthDeps) CancelServiceHandover(context.Context, string, string) (transit.ServiceHandover, error) {
+	return transit.ServiceHandover{}, handler.ErrHandoverNotFound
+}
+func (s *stubAuthDeps) DeclineServiceHandover(context.Context, string, string) (transit.ServiceHandover, error) {
+	return transit.ServiceHandover{}, handler.ErrHandoverNotFound
+}
 func (s *stubAuthDeps) ListPublishedServiceSummaries(context.Context) ([]transit.PublishedServiceSummary, error) {
 	return s.published, nil
 }
@@ -302,6 +317,10 @@ func TestProtectedRoutesRejectAnonymousCallers(t *testing.T) {
 		{http.MethodPost, "/api/services/some-slug/isochrone"},
 		{http.MethodPut, "/api/services/some-slug/publication"},
 		{http.MethodDelete, "/api/services/some-slug/publication"},
+		{http.MethodPost, "/api/services/some-slug/handovers"},
+		{http.MethodGet, "/api/me/handovers"},
+		{http.MethodPost, "/api/handovers/some-id/cancel"},
+		{http.MethodPost, "/api/handovers/some-id/decline"},
 		{http.MethodPost, "/api/user-scenarios"},
 		{http.MethodGet, "/api/user-scenarios"},
 		{http.MethodGet, "/api/user-scenarios/some-slug"},
@@ -535,6 +554,10 @@ func TestAuthRoutesReportUnavailableWithoutADatabase(t *testing.T) {
 		{http.MethodDelete, "/api/services/some-slug/publication"},
 		{http.MethodGet, "/api/services/some-slug/publication"},
 		{http.MethodPost, "/api/services/some-slug/publication/isochrone"},
+		{http.MethodPost, "/api/services/some-slug/handovers"},
+		{http.MethodGet, "/api/me/handovers"},
+		{http.MethodPost, "/api/handovers/some-id/cancel"},
+		{http.MethodPost, "/api/handovers/some-id/decline"},
 		{http.MethodGet, "/api/internal/worker"},
 	} {
 		t.Run(p.method+" "+p.path, func(t *testing.T) {

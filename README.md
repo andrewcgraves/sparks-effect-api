@@ -443,6 +443,10 @@ scenario/route reads or `/api/internal/*`.
 | `GET`/`PUT /api/me/scenarios/{slug}/travel-times` | authenticated | Its segment run times, read and replaced whole |
 | `POST /api/me/services` | authenticated | Author a seeded service inside a scenario you own |
 | `GET`/`PUT`/`DELETE /api/me/services/{id}` | authenticated | Read, edit, or remove one |
+| `POST /api/services/{slug}/handovers` | authenticated | Offer your service to another account by `to_email`. 202 with the same body whether or not the address is an active account, and nothing recorded when it is not; 422 to the owner, 409 while one is pending |
+| `GET /api/me/handovers` | authenticated | Your pending handovers, `{incoming, outgoing}`, with the service and the other party's display name |
+| `POST /api/handovers/{id}/cancel` | authenticated | Withdraw a pending offer you sent |
+| `POST /api/handovers/{id}/decline` | authenticated | Refuse a pending offer sent to you |
 | `POST /api/admin/users` | admin | Provision an account with a password (for scripts) |
 | `POST /api/admin/invites` | admin | Create an account and return its one-time invite link |
 | `POST /api/admin/users/{id}/reset-link` | admin | Return a one-time password-reset link |
@@ -529,7 +533,7 @@ password through `POST /api/admin/users`.
 
 ### Authorization
 
-Four rules, all enforced server-side:
+Five rules, all enforced server-side:
 
 - **Admin gating** — `RequireAdmin` protects account provisioning and management and is the
   gate route-write endpoints register behind.
@@ -560,6 +564,14 @@ Four rules, all enforced server-side:
   still gets 404 there and an anonymous caller 401. The draft isochrone keeps
   plotting the owner's live graph and answering 409 `stale_graph`. See
   [ADR-0005](docs/adr/0005-publishing-an-authored-service.md).
+- **Handover** — offering a service goes through `CanAccess` like any other
+  write, so an admin may offer one on the owner's behalf (the owner stays the
+  sender). Deciding does not: only the sender may cancel and only the
+  recipient may decline, and everyone else, an admin included, gets 404. The
+  offer answers 202 with one body whether or not `to_email` belongs to an
+  active account, so it cannot be used to discover who has one. A pending
+  offer past `expires_at` (14 days) reads as expired and can no longer be
+  cancelled or declined. Accepting is not built yet (SPA-389).
 
 ### Database integration tests
 
