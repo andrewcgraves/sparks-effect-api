@@ -22,6 +22,20 @@ func TestHasherCostsStayPinned(t *testing.T) {
 	}
 }
 
+func TestVerifyNothingComparesAtTheProductionCost(t *testing.T) {
+	// VerifyNothing exists so an unknown email costs as much as a wrong
+	// password. That holds only if the stand-in hash is built at the
+	// production cost. Building it is one DefaultCost hash, which is the
+	// price of checking the hasher login actually uses.
+	got, err := auth.DummyCost(auth.DefaultHasher)
+	if err != nil {
+		t.Fatalf("DefaultHasher stand-in hash: %v", err)
+	}
+	if got != bcrypt.DefaultCost {
+		t.Errorf("DefaultHasher stand-in hash cost = %d, want bcrypt.DefaultCost (%d)", got, bcrypt.DefaultCost)
+	}
+}
+
 func TestHashPasswordVerifies(t *testing.T) {
 	hash, err := testHasher.Hash("correct horse battery staple")
 	if err != nil {
