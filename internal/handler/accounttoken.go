@@ -171,7 +171,7 @@ func AccountToken(store AccountTokenStore) http.HandlerFunc {
 func RedeemAccountToken(store AccountTokenStore, sessionTTL time.Duration, hasher auth.Hasher) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Public, like login, and bcrypt is the expensive part of it.
-		r.Body = http.MaxBytesReader(w, r.Body, maxLoginBodyBytes)
+		r.Body = http.MaxBytesReader(w, r.Body, maxAuthBodyBytes)
 
 		var req redeemRequest
 		if !decodeAccountBody(w, r, &req) {

@@ -69,6 +69,13 @@ func (s *stubAuthDeps) UserServiceIDsOwnedBy(context.Context, string, []string) 
 	return nil, nil
 }
 
+func (s *stubAuthDeps) UpdateUserName(context.Context, string, string) (account.User, bool, error) {
+	return account.User{}, false, nil
+}
+func (s *stubAuthDeps) ChangePassword(context.Context, account.PasswordChange) (bool, error) {
+	return false, nil
+}
+func (s *stubAuthDeps) DeleteUserSessions(context.Context, string) error       { return nil }
 func (s *stubAuthDeps) CreateSession(context.Context, account.Session) error   { return nil }
 func (s *stubAuthDeps) DeleteSession(context.Context, string) error            { return nil }
 func (s *stubAuthDeps) CreateUser(context.Context, account.User, string) error { return nil }
@@ -294,6 +301,9 @@ func TestProtectedRoutesRejectAnonymousCallers(t *testing.T) {
 	protected := []struct{ method, path string }{
 		{http.MethodGet, "/api/auth/me"},
 		{http.MethodPost, "/api/auth/logout"},
+		{http.MethodPatch, "/api/auth/me"},
+		{http.MethodPost, "/api/auth/password"},
+		{http.MethodPost, "/api/auth/sessions/revoke-all"},
 		{http.MethodGet, "/api/me/scenarios"},
 		{http.MethodGet, "/api/me/services"},
 		{http.MethodPost, "/api/admin/users"},
@@ -538,6 +548,9 @@ func TestAuthRoutesReportUnavailableWithoutADatabase(t *testing.T) {
 		{http.MethodGet, "/api/auth/tokens/some-token"},
 		{http.MethodPost, "/api/auth/tokens/some-token"},
 		{http.MethodGet, "/api/auth/me"},
+		{http.MethodPatch, "/api/auth/me"},
+		{http.MethodPost, "/api/auth/password"},
+		{http.MethodPost, "/api/auth/sessions/revoke-all"},
 		{http.MethodPost, "/api/admin/users"},
 		{http.MethodGet, "/api/me/scenarios"},
 		{http.MethodPost, "/api/scenarios/ca-hsr/compile"},

@@ -21,6 +21,7 @@ import (
 
 type AuthDeps interface {
 	handler.AuthStore
+	handler.AccountStore
 	handler.UserStore
 	handler.AdminUserStore
 	handler.OwnerStore
@@ -222,6 +223,7 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 	if deps == nil {
 		for _, pattern := range []string{
 			"/api/auth/login", "/api/auth/logout", "/api/auth/me",
+			"/api/auth/password", "/api/auth/sessions/revoke-all",
 			"/api/auth/tokens/",
 			"/api/me/scenarios", "/api/me/services",
 			// The owner-scoped seeded-model CRUD. Each collection needs its own
@@ -246,7 +248,7 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 	authenticated := auth.RequireAuth(deps.GetSessionUser)
 	adminOnly := auth.RequireAdmin(deps.GetSessionUser)
 
-	// One hasher for both password paths. Login's constant-time padding has to
+	// One hasher for every password path. Login's constant-time padding has to
 	// spend the same work provisioning does, so they must not be built with
 	// different costs. cfg.PasswordHashCost is zero everywhere but the tests,
 	// where it is bcrypt.MinCost.
@@ -264,6 +266,11 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 	// Authenticated.
 	mux.Handle("POST /api/auth/logout", authenticated(handler.Logout(deps)))
 	mux.Handle("GET /api/auth/me", authenticated(handler.Me()))
+	mux.Handle("PATCH /api/auth/me", authenticated(handler.UpdateMe(deps)))
+	// Shares login's limiter instance, not just its policy: each attempt runs
+	// bcrypt, and a separate bucket would double a caller's guessing allowance.
+	mux.Handle("POST /api/auth/password", authenticated(limitLogin(handler.ChangePassword(deps, hasher))))
+	mux.Handle("POST /api/auth/sessions/revoke-all", authenticated(handler.RevokeAllSessions(deps)))
 	mux.Handle("GET /api/me/scenarios", authenticated(handler.MyScenarios(deps)))
 	mux.Handle("GET /api/me/services", authenticated(handler.MyServices(deps, cfg.BoardingWait)))
 	// Async compile jobs: any authenticated caller may trigger a compile or

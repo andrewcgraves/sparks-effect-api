@@ -171,7 +171,7 @@ The four policies, overridable by env, are disabled only by `PER_MIN=0`
 | --- | --- | --- |
 | Isochrone | All `POST .../isochrone` (one shared limiter) | 10/min, burst 5 |
 | Snap-stops | `POST /api/routes/{slug}/snap-stops` | 30/min, burst 10 |
-| Login | `POST /api/auth/login`, `GET`/`POST /api/auth/tokens/{token}` (one shared limiter) | 5/min, burst 5 |
+| Login | `POST /api/auth/login`, `GET`/`POST /api/auth/tokens/{token}` and `POST /api/auth/password` (one shared limiter) | 5/min, burst 5 |
 | Compile | All three compile POSTs (one shared limiter) | 10/min, burst 3 |
 
 Ordinary CRUD, routing-job polling, public scenario/graph reads, `/healthz`,
@@ -431,6 +431,9 @@ scenario/route reads or `/api/internal/*`.
 | `POST /api/auth/tokens/{token}` | public | Set the password from a link and sign in |
 | `POST /api/auth/logout` | authenticated | Revoke the presented token |
 | `GET /api/auth/me` | authenticated | The caller's identity and admin flag |
+| `PATCH /api/auth/me` | authenticated | Set the caller's display name (`{name}`, 1–80 characters after trimming); nothing else on the account changes |
+| `POST /api/auth/password` | authenticated | Change the caller's password (`{current_password, new_password}`): `401` on a wrong current password, `422` `validation` on a weak new one, `409` if a concurrent change or revocation got there first. Revokes every other session; the presenting one keeps working |
+| `POST /api/auth/sessions/revoke-all` | authenticated | Revoke every session the caller has, the presenting one included. `204` |
 | `GET /api/me/scenarios` | authenticated | Seeded Scenarios the caller owns |
 | `GET /api/me/services` | authenticated | Seeded Services the caller owns, not UserServices |
 | `POST /api/me/routes` | authenticated | Author an alignment of your own |
