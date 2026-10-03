@@ -35,11 +35,14 @@ type Config struct {
 	BoardingWait           transit.BoardingWaitPolicy
 	WorkerToken            string
 	PasswordHashCost       int
+	WebsiteURL             string
 }
 
 const defaultSessionTTL = 24 * time.Hour
 
 const defaultRoutingQueue = "routing.jobs"
+
+const defaultWebsiteURL = "https://sparks-effect.app"
 
 const defaultMaxInFlightIsochrones = 20
 
@@ -90,6 +93,7 @@ func Load() Config {
 		RateLimitCompile:       loadRateLimit("COMPILE", defaultRateLimitCompile),
 		BoardingWait:           loadBoardingWait(),
 		WorkerToken:            os.Getenv("WORKER_TOKEN"),
+		WebsiteURL:             getEnv("WEBSITE_URL", defaultWebsiteURL),
 	}
 }
 

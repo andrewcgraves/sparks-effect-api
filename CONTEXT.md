@@ -93,6 +93,7 @@ type. `User` and `Session` live in `internal/account`.
 | **Prerendered isochrone** | An admin-curated, ready-to-display isochrone stored against a scenario, so a public page can show a result without enqueueing one. Also called a *curated* isochrone |
 | **User** | `account.User` — an authenticated person. Authored rows point at them through `owner_id`. `is_admin` is the only privilege bit: it gates curated writes and `/api/admin/users`. `disabled_at` (nullable timestamptz) removes sign-in without deleting the person or their authored rows; NULL means the account can sign in. Publications stay published; attribution still shows the display name |
 | **Session** | `account.Session` — a hashed bearer token bound to a User, with an expiry. The raw token is returned once at login and never stored |
+| **Account token** | `account.Token` — a one-time link that lets whoever holds it set a User's password. Purpose `invite` (made with the account, lasts 7 days) or `reset` (issued by an admin, lasts 1 hour, revokes the account's earlier unused reset). Stored only as a hash in `account_tokens`, like a Session. Redeeming one sets the password, marks it used, signs out every Session and starts a new one. A used, expired or disabled-account token answers exactly as an unknown one does |
 
 ## Terms of art
 
