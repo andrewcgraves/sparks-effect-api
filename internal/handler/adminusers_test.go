@@ -145,6 +145,22 @@ func TestPatchUserRefusesAnAdminDemotingOrDisablingThemselves(t *testing.T) {
 	}
 }
 
+func TestPatchUserSelfRefusalIgnoresIDCase(t *testing.T) {
+	self := account.User{ID: "0000000a-0000-4000-8000-00000000abcd", Email: "admin@example.com", IsAdmin: true}
+	store := &fakeAdminUserStore{users: map[string]account.User{}}
+	upper := strings.ToUpper(self.ID)
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/admin/users/"+upper, strings.NewReader(`{"disabled":true}`))
+	req.SetPathValue("id", upper)
+	req = req.WithContext(auth.WithUser(req.Context(), self))
+	rec := httptest.NewRecorder()
+	handler.PatchUser(store).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestPatchUserLetsAnAdminRestateTheirOwnAccess(t *testing.T) {
 	store := &fakeAdminUserStore{users: map[string]account.User{adminCaller.ID: adminCaller}}
 	rec := adminRequest(t, handler.PatchUser(store), http.MethodPatch,

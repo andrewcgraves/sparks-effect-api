@@ -117,11 +117,6 @@ func ListUsers(store AdminUserStore) http.HandlerFunc {
 	}
 }
 
-type patchUserRequest struct {
-	IsAdmin  *bool `json:"is_admin"`
-	Disabled *bool `json:"disabled"`
-}
-
 const maxPatchUserBodyBytes = 4 << 10
 
 func PatchUser(store AdminUserStore) http.HandlerFunc {
@@ -133,7 +128,7 @@ func PatchUser(store AdminUserStore) http.HandlerFunc {
 		}
 
 		r.Body = http.MaxBytesReader(w, r.Body, maxPatchUserBodyBytes)
-		var req patchUserRequest
+		var req account.UserPatch
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			var tooLarge *http.MaxBytesError
 			if errors.As(err, &tooLarge) {
@@ -151,7 +146,9 @@ func PatchUser(store AdminUserStore) http.HandlerFunc {
 		// An admin only loses their own access at another admin's hand, which
 		// is what keeps the last admin from locking everyone out.
 		id := r.PathValue("id")
-		if id == caller.ID {
+		// EqualFold so an upper-cased copy of the caller's own id is refused
+		// here rather than relying on how the store matches ids.
+		if strings.EqualFold(id, caller.ID) {
 			if req.IsAdmin != nil && !*req.IsAdmin {
 				writeError(w, http.StatusConflict, "an admin cannot demote themselves")
 				return
@@ -162,10 +159,7 @@ func PatchUser(store AdminUserStore) http.HandlerFunc {
 			}
 		}
 
-		user, found, err := store.PatchUser(r.Context(), id, account.UserPatch{
-			IsAdmin:  req.IsAdmin,
-			Disabled: req.Disabled,
-		})
+		user, found, err := store.PatchUser(r.Context(), id, req)
 		if err != nil {
 			writeInternalError(r.Context(), w, "updating user", err)
 			return

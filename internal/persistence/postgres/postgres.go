@@ -5,7 +5,6 @@ import (
 	"embed"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/account"
@@ -627,9 +626,9 @@ func scanUser(row pgx.Row) (account.User, bool, error) {
 	return u, true, nil
 }
 
-// The counts cover authored UserServices only: a publication hangs off a
-// user_services row, so seeded services an account owns are not counted.
 func (r *Repo) ListUsers(ctx context.Context) ([]account.UserSummary, error) {
+	// The counts cover authored UserServices only: a publication hangs off a
+	// user_services row, so seeded services an account owns are not counted.
 	rows, err := r.pool.Query(ctx,
 		`SELECT u.id, u.email, u.name, u.is_admin, u.created_at, u.disabled_at,
 		        c.service_count, c.published_count
@@ -676,9 +675,9 @@ func (r *Repo) SetUserDisabled(ctx context.Context, id string, disabled bool) er
 	return wrap("SetUserDisabled commit", tx.Commit(ctx))
 }
 
-// Disabling revokes every session in the caller's transaction, so no request
-// can authenticate between the flag landing and the sessions going.
 func setUserDisabled(ctx context.Context, tx pgx.Tx, id string, disabled bool) (bool, error) {
+	// Sessions are revoked in the caller's transaction, so no request can
+	// authenticate between the flag landing and the sessions going.
 	stmt := `UPDATE users SET disabled_at = NULL, updated_at = now() WHERE id = $1`
 	if disabled {
 		stmt = `UPDATE users SET disabled_at = COALESCE(disabled_at, now()), updated_at = now() WHERE id = $1`
@@ -699,30 +698,30 @@ func setUserDisabled(ctx context.Context, tx pgx.Tx, id string, disabled bool) (
 }
 
 func (r *Repo) PatchUser(ctx context.Context, id string, patch account.UserPatch) (account.User, bool, error) {
-	// A path id that is not a uuid names no user. Without this Postgres
-	// rejects the cast and the admin sees a 500 for a typo.
-	if !isUUID(id) {
-		return account.User{}, false, nil
-	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return account.User{}, false, wrap("PatchUser begin", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // rollback after commit is a no-op
 
+	// id::text, as ListUserServicesByIDs does, so a path id that is not a
+	// uuid names no user instead of failing the cast with a 500.
+	err = tx.QueryRow(ctx, `SELECT id FROM users WHERE id::text = $1 FOR UPDATE`, id).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return account.User{}, false, nil
+	}
+	if err != nil {
+		return account.User{}, false, wrap("PatchUser lock", err)
+	}
+
 	if patch.IsAdmin != nil {
-		tag, err := tx.Exec(ctx,
-			`UPDATE users SET is_admin = $2, updated_at = now() WHERE id = $1`, id, *patch.IsAdmin)
-		if err != nil {
+		if _, err := tx.Exec(ctx,
+			`UPDATE users SET is_admin = $2, updated_at = now() WHERE id = $1`, id, *patch.IsAdmin); err != nil {
 			return account.User{}, false, wrap("PatchUser is_admin", err)
-		}
-		if tag.RowsAffected() == 0 {
-			return account.User{}, false, nil
 		}
 	}
 	if patch.Disabled != nil {
-		found, err := setUserDisabled(ctx, tx, id, *patch.Disabled)
-		if err != nil || !found {
+		if _, err := setUserDisabled(ctx, tx, id, *patch.Disabled); err != nil {
 			return account.User{}, false, err
 		}
 	}
@@ -734,25 +733,6 @@ func (r *Repo) PatchUser(ctx context.Context, id string, patch account.UserPatch
 		return account.User{}, false, wrap("PatchUser commit", err)
 	}
 	return u, true, nil
-}
-
-func isUUID(s string) bool {
-	if len(s) != 36 {
-		return false
-	}
-	for i, c := range s {
-		switch i {
-		case 8, 13, 18, 23:
-			if c != '-' {
-				return false
-			}
-		default:
-			if !strings.ContainsRune("0123456789abcdefABCDEF", c) {
-				return false
-			}
-		}
-	}
-	return true
 }
 
 // --- Sessions ---
