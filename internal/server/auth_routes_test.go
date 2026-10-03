@@ -72,6 +72,17 @@ func (s *stubAuthDeps) UserServiceIDsOwnedBy(context.Context, string, []string) 
 func (s *stubAuthDeps) CreateSession(context.Context, account.Session) error   { return nil }
 func (s *stubAuthDeps) DeleteSession(context.Context, string) error            { return nil }
 func (s *stubAuthDeps) CreateUser(context.Context, account.User, string) error { return nil }
+func (s *stubAuthDeps) GetUserByID(_ context.Context, id string) (account.User, bool, error) {
+	return account.User{ID: id}, true, nil
+}
+func (s *stubAuthDeps) CreateInvite(context.Context, account.User, account.Token) error { return nil }
+func (s *stubAuthDeps) CreateResetToken(context.Context, account.Token) error           { return nil }
+func (s *stubAuthDeps) GetAccountToken(context.Context, string) (account.Token, account.User, bool, error) {
+	return account.Token{}, account.User{}, false, nil
+}
+func (s *stubAuthDeps) RedeemAccountToken(context.Context, string, string, account.Session) (account.User, bool, error) {
+	return account.User{}, false, nil
+}
 func (s *stubAuthDeps) GetUserByEmail(context.Context, string) (account.User, bool, error) {
 	return account.User{}, false, nil
 }
@@ -265,6 +276,8 @@ func TestProtectedRoutesRejectAnonymousCallers(t *testing.T) {
 		{http.MethodGet, "/api/me/scenarios"},
 		{http.MethodGet, "/api/me/services"},
 		{http.MethodPost, "/api/admin/users"},
+		{http.MethodPost, "/api/admin/invites"},
+		{http.MethodPost, "/api/admin/users/some-id/reset-link"},
 		{http.MethodPost, "/api/admin/routes"},
 		{http.MethodPost, "/api/scenarios/ca-hsr/compile"},
 		{http.MethodGet, "/api/jobs/some-id"},
@@ -309,6 +322,8 @@ func TestAdminRoutesRejectNonAdmins(t *testing.T) {
 
 	for _, path := range []string{
 		"/api/admin/users",
+		"/api/admin/invites",
+		"/api/admin/users/some-id/reset-link",
 		"/api/admin/routes",
 		// Not under /api/admin/, so nothing about its path says it is gated —
 		// which is exactly why it is asserted here.
@@ -483,6 +498,8 @@ func TestAuthRoutesReportUnavailableWithoutADatabase(t *testing.T) {
 
 	for _, p := range []struct{ method, path string }{
 		{http.MethodPost, "/api/auth/login"},
+		{http.MethodGet, "/api/auth/tokens/some-token"},
+		{http.MethodPost, "/api/auth/tokens/some-token"},
 		{http.MethodGet, "/api/auth/me"},
 		{http.MethodPost, "/api/admin/users"},
 		{http.MethodGet, "/api/me/scenarios"},
