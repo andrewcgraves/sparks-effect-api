@@ -129,7 +129,7 @@ func (r *Repo) ListPublishedServiceSummaries(ctx context.Context, after *transit
 	//
 	// By first publication, newest first. Slug breaks a tie, so the order is
 	// total, and neither key changes while a service stays published, so a
-	// keyset cursor over it never skips or repeats a row (00032).
+	// keyset cursor over it never skips or repeats a row (00033).
 	//
 	// A limit of zero or less reads everything. Otherwise one row more than
 	// the limit is read: it is the evidence that a next page exists, so the

@@ -12,12 +12,12 @@ func TestFirstPublishedAtMigrationBackfillsFromPublishedAt(t *testing.T) {
 	createIndexedServices(t, repo, ctx, svc)
 	publishIndexed(t, repo, ctx, svc.ID, idxJobA)
 
-	// A publication that exists before 00032: take the column away so the row
+	// A publication that exists before 00033: take the column away so the row
 	// is in the shape a deployed database holds today.
 	exec(t, url,
 		`UPDATE service_publications SET published_at = '2001-05-01T00:00:00Z'`,
 		`ALTER TABLE service_publications DROP COLUMN first_published_at`)
-	rewindTo(t, url, 32)
+	rewindTo(t, url, 33)
 
 	if err := postgres.Migrate(ctx, url); err != nil {
 		t.Fatalf("Migrate: %v", err)
@@ -35,9 +35,9 @@ func TestFirstPublishedAtMigrationIsSafeToReRun(t *testing.T) {
 	publishIndexed(t, repo, ctx, svc.ID, idxJobA)
 	pinFirstPublished(t, url, map[string]string{svc.ID: "2001-01-01T00:00:00Z"})
 
-	rewindTo(t, url, 32)
+	rewindTo(t, url, 33)
 	if err := postgres.Migrate(ctx, url); err != nil {
-		t.Fatalf("re-running 00032 over the column it already added: %v", err)
+		t.Fatalf("re-running 00033 over the column it already added: %v", err)
 	}
 	// The backfill must not overwrite a first-publish time with a later
 	// republish's published_at.

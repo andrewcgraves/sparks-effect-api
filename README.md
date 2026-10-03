@@ -171,7 +171,7 @@ The four policies, overridable by env, are disabled only by `PER_MIN=0`
 | --- | --- | --- |
 | Isochrone | All `POST .../isochrone` (one shared limiter) | 10/min, burst 5 |
 | Snap-stops | `POST /api/routes/{slug}/snap-stops` | 30/min, burst 10 |
-| Login | `POST /api/auth/login`, `GET`/`POST /api/auth/tokens/{token}` (one shared limiter) | 5/min, burst 5 |
+| Login | `POST /api/auth/login`, `GET`/`POST /api/auth/tokens/{token}` and `POST /api/auth/password` (one shared limiter) | 5/min, burst 5 |
 | Compile | All three compile POSTs (one shared limiter) | 10/min, burst 3 |
 
 Ordinary CRUD, routing-job polling, public scenario/graph reads, `/healthz`,
@@ -431,6 +431,9 @@ scenario/route reads or `/api/internal/*`.
 | `POST /api/auth/tokens/{token}` | public | Set the password from a link and sign in |
 | `POST /api/auth/logout` | authenticated | Revoke the presented token |
 | `GET /api/auth/me` | authenticated | The caller's identity and admin flag |
+| `PATCH /api/auth/me` | authenticated | Set the caller's display name (`{name}`, 1–80 characters after trimming); nothing else on the account changes |
+| `POST /api/auth/password` | authenticated | Change the caller's password (`{current_password, new_password}`): `401` on a wrong current password, `422` `validation` on a weak new one, `409` if a concurrent change or revocation got there first. Revokes every other session; the presenting one keeps working |
+| `POST /api/auth/sessions/revoke-all` | authenticated | Revoke every session the caller has, the presenting one included. `204` |
 | `GET /api/me/scenarios` | authenticated | Seeded Scenarios the caller owns |
 | `GET /api/me/services` | authenticated | Seeded Services the caller owns, not UserServices |
 | `POST /api/me/routes` | authenticated | Author an alignment of your own |
@@ -443,6 +446,10 @@ scenario/route reads or `/api/internal/*`.
 | `GET`/`PUT /api/me/scenarios/{slug}/travel-times` | authenticated | Its segment run times, read and replaced whole |
 | `POST /api/me/services` | authenticated | Author a seeded service inside a scenario you own |
 | `GET`/`PUT`/`DELETE /api/me/services/{id}` | authenticated | Read, edit, or remove one |
+| `POST /api/services/{slug}/handovers` | authenticated | Offer your service to another account by `to_email`. 202 with the same body whether or not the address is an active account, and nothing recorded when it is not; 422 to the owner, 409 while one is pending |
+| `GET /api/me/handovers` | authenticated | Your pending handovers, `{incoming, outgoing}`, with the service and the other party's display name |
+| `POST /api/handovers/{id}/cancel` | authenticated | Withdraw a pending offer you sent |
+| `POST /api/handovers/{id}/decline` | authenticated | Refuse a pending offer sent to you |
 | `POST /api/admin/users` | admin | Provision an account with a password (for scripts) |
 | `POST /api/admin/invites` | admin | Create an account and return its one-time invite link |
 | `POST /api/admin/users/{id}/reset-link` | admin | Return a one-time password-reset link |
@@ -498,13 +505,13 @@ under `/api/admin/`.
 `GET /api/published-services` lists every published `UserService` as a card:
 `slug`, `name`, `subtext` and `description`, by first publication, newest
 first, with slug breaking a tie. Republishing keeps a service's place, so a
-paged walk never skips one (migration 00032). It is unauthenticated, and the
+paged walk never skips one (migration 00033). It is unauthenticated, and the
 answer is the same for every caller, so an owner does not see their own
 unpublished drafts there either
 ([ADR-0005](docs/adr/0005-publishing-an-authored-service.md)). The prose is the
 publication's frozen copy, so a draft edit does not show until it is
 republished. `ListPublishedServiceSummaries` selects neither the stops or
-vehicle documents nor the publication's routes, and migration 00032 indexes
+vehicle documents nor the publication's routes, and migration 00033 indexes
 `first_published_at` for its sort.
 
 It pages with a keyset cursor (SPA-434). `?limit=` asks for up to that many
@@ -546,7 +553,7 @@ password through `POST /api/admin/users`.
 
 ### Authorization
 
-Four rules, all enforced server-side:
+Five rules, all enforced server-side:
 
 - **Admin gating** — `RequireAdmin` protects account provisioning and management and is the
   gate route-write endpoints register behind.
@@ -577,6 +584,14 @@ Four rules, all enforced server-side:
   still gets 404 there and an anonymous caller 401. The draft isochrone keeps
   plotting the owner's live graph and answering 409 `stale_graph`. See
   [ADR-0005](docs/adr/0005-publishing-an-authored-service.md).
+- **Handover** — offering a service goes through `CanAccess` like any other
+  write, so an admin may offer one on the owner's behalf (the owner stays the
+  sender). Deciding does not: only the sender may cancel and only the
+  recipient may decline, and everyone else, an admin included, gets 404. The
+  offer answers 202 with one body whether or not `to_email` belongs to an
+  active account, so it cannot be used to discover who has one. A pending
+  offer past `expires_at` (14 days) reads as expired and can no longer be
+  cancelled or declined. Accepting is not built yet (SPA-389).
 
 ### Database integration tests
 

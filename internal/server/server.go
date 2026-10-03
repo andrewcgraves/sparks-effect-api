@@ -21,6 +21,7 @@ import (
 
 type AuthDeps interface {
 	handler.AuthStore
+	handler.AccountStore
 	handler.UserStore
 	handler.AdminUserStore
 	handler.OwnerStore
@@ -40,6 +41,7 @@ type AuthDeps interface {
 	handler.PublicationStore
 	handler.ServicePublicationStore
 	handler.PublishedServiceStore
+	handler.HandoverStore
 	handler.AccountTokenStore
 	GetSessionUser(ctx context.Context, tokenHash string) (account.User, bool, error)
 }
@@ -221,6 +223,7 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 	if deps == nil {
 		for _, pattern := range []string{
 			"/api/auth/login", "/api/auth/logout", "/api/auth/me",
+			"/api/auth/password", "/api/auth/sessions/revoke-all",
 			"/api/auth/tokens/",
 			"/api/me/scenarios", "/api/me/services",
 			// The owner-scoped seeded-model CRUD. Each collection needs its own
@@ -235,6 +238,7 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 			"/api/scenarios/{slug}/compile", "/api/jobs/{id}",
 			"/api/services", "/api/services/",
 			"/api/user-scenarios", "/api/user-scenarios/",
+			"/api/me/handovers", "/api/handovers/",
 		} {
 			mux.HandleFunc(pattern, noDatabase("authentication is unavailable"))
 		}
@@ -244,7 +248,7 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 	authenticated := auth.RequireAuth(deps.GetSessionUser)
 	adminOnly := auth.RequireAdmin(deps.GetSessionUser)
 
-	// One hasher for both password paths. Login's constant-time padding has to
+	// One hasher for every password path. Login's constant-time padding has to
 	// spend the same work provisioning does, so they must not be built with
 	// different costs. cfg.PasswordHashCost is zero everywhere but the tests,
 	// where it is bcrypt.MinCost.
@@ -262,6 +266,11 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 	// Authenticated.
 	mux.Handle("POST /api/auth/logout", authenticated(handler.Logout(deps)))
 	mux.Handle("GET /api/auth/me", authenticated(handler.Me()))
+	mux.Handle("PATCH /api/auth/me", authenticated(handler.UpdateMe(deps)))
+	// Shares login's limiter instance, not just its policy: each attempt runs
+	// bcrypt, and a separate bucket would double a caller's guessing allowance.
+	mux.Handle("POST /api/auth/password", authenticated(limitLogin(handler.ChangePassword(deps, hasher))))
+	mux.Handle("POST /api/auth/sessions/revoke-all", authenticated(handler.RevokeAllSessions(deps)))
 	mux.Handle("GET /api/me/scenarios", authenticated(handler.MyScenarios(deps)))
 	mux.Handle("GET /api/me/services", authenticated(handler.MyServices(deps, cfg.BoardingWait)))
 	// Async compile jobs: any authenticated caller may trigger a compile or
@@ -366,6 +375,17 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 	mux.Handle("POST /api/services/{slug}/publication/isochrone",
 		limitIso(requirePublisher(publisher,
 			capBacklog(handler.PublicationIsochrone(deps, publisher, lg)))))
+
+	// Handing a service over to another account (SPA-388). The offer answers
+	// 202 with one body whether or not the address is an account, so it
+	// cannot be used to probe for them. Only the sender may cancel and only
+	// the recipient may decline; anyone else, an admin included, gets 404.
+	// Accepting is SPA-389. The database-less 503 for the offer comes from
+	// the "/api/services/" entry.
+	mux.Handle("POST /api/services/{slug}/handovers", authenticated(handler.OfferHandover(deps)))
+	mux.Handle("GET /api/me/handovers", authenticated(handler.MyHandovers(deps)))
+	mux.Handle("POST /api/handovers/{id}/cancel", authenticated(handler.CancelHandover(deps)))
+	mux.Handle("POST /api/handovers/{id}/decline", authenticated(handler.DeclineHandover(deps)))
 
 	// User-owned scenarios: owner-scoped CRUD over a curated set of UserService
 	// ids. Named /api/user-scenarios, distinct from the public /api/scenarios

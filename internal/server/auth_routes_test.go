@@ -69,6 +69,13 @@ func (s *stubAuthDeps) UserServiceIDsOwnedBy(context.Context, string, []string) 
 	return nil, nil
 }
 
+func (s *stubAuthDeps) UpdateUserName(context.Context, string, string) (account.User, bool, error) {
+	return account.User{}, false, nil
+}
+func (s *stubAuthDeps) ChangePassword(context.Context, account.PasswordChange) (bool, error) {
+	return false, nil
+}
+func (s *stubAuthDeps) DeleteUserSessions(context.Context, string) error       { return nil }
 func (s *stubAuthDeps) CreateSession(context.Context, account.Session) error   { return nil }
 func (s *stubAuthDeps) DeleteSession(context.Context, string) error            { return nil }
 func (s *stubAuthDeps) CreateUser(context.Context, account.User, string) error { return nil }
@@ -180,6 +187,21 @@ func (s *stubAuthDeps) GetServicePublicationBySlug(context.Context, string) (tra
 func (s *stubAuthDeps) GetSucceededCompileJob(context.Context, string) (transit.Job, bool, error) {
 	return transit.Job{}, false, nil
 }
+func (s *stubAuthDeps) HasPendingServiceHandover(context.Context, string) (bool, error) {
+	return false, nil
+}
+func (s *stubAuthDeps) OfferServiceHandover(context.Context, transit.ServiceHandover, time.Duration) (transit.ServiceHandover, error) {
+	return transit.ServiceHandover{}, nil
+}
+func (s *stubAuthDeps) ListPendingServiceHandovers(context.Context, string) ([]transit.ServiceHandover, error) {
+	return nil, nil
+}
+func (s *stubAuthDeps) CancelServiceHandover(context.Context, string, string) (transit.ServiceHandover, error) {
+	return transit.ServiceHandover{}, handler.ErrHandoverNotFound
+}
+func (s *stubAuthDeps) DeclineServiceHandover(context.Context, string, string) (transit.ServiceHandover, error) {
+	return transit.ServiceHandover{}, handler.ErrHandoverNotFound
+}
 func (s *stubAuthDeps) ListPublishedServiceSummaries(context.Context, *transit.PublishedIndexKey, int) (transit.PublishedIndexPage, error) {
 	return transit.PublishedIndexPage{Items: s.published}, nil
 }
@@ -279,6 +301,9 @@ func TestProtectedRoutesRejectAnonymousCallers(t *testing.T) {
 	protected := []struct{ method, path string }{
 		{http.MethodGet, "/api/auth/me"},
 		{http.MethodPost, "/api/auth/logout"},
+		{http.MethodPatch, "/api/auth/me"},
+		{http.MethodPost, "/api/auth/password"},
+		{http.MethodPost, "/api/auth/sessions/revoke-all"},
 		{http.MethodGet, "/api/me/scenarios"},
 		{http.MethodGet, "/api/me/services"},
 		{http.MethodPost, "/api/admin/users"},
@@ -302,6 +327,10 @@ func TestProtectedRoutesRejectAnonymousCallers(t *testing.T) {
 		{http.MethodPost, "/api/services/some-slug/isochrone"},
 		{http.MethodPut, "/api/services/some-slug/publication"},
 		{http.MethodDelete, "/api/services/some-slug/publication"},
+		{http.MethodPost, "/api/services/some-slug/handovers"},
+		{http.MethodGet, "/api/me/handovers"},
+		{http.MethodPost, "/api/handovers/some-id/cancel"},
+		{http.MethodPost, "/api/handovers/some-id/decline"},
 		{http.MethodPost, "/api/user-scenarios"},
 		{http.MethodGet, "/api/user-scenarios"},
 		{http.MethodGet, "/api/user-scenarios/some-slug"},
@@ -519,6 +548,9 @@ func TestAuthRoutesReportUnavailableWithoutADatabase(t *testing.T) {
 		{http.MethodGet, "/api/auth/tokens/some-token"},
 		{http.MethodPost, "/api/auth/tokens/some-token"},
 		{http.MethodGet, "/api/auth/me"},
+		{http.MethodPatch, "/api/auth/me"},
+		{http.MethodPost, "/api/auth/password"},
+		{http.MethodPost, "/api/auth/sessions/revoke-all"},
 		{http.MethodPost, "/api/admin/users"},
 		{http.MethodGet, "/api/me/scenarios"},
 		{http.MethodPost, "/api/scenarios/ca-hsr/compile"},
@@ -535,6 +567,10 @@ func TestAuthRoutesReportUnavailableWithoutADatabase(t *testing.T) {
 		{http.MethodDelete, "/api/services/some-slug/publication"},
 		{http.MethodGet, "/api/services/some-slug/publication"},
 		{http.MethodPost, "/api/services/some-slug/publication/isochrone"},
+		{http.MethodPost, "/api/services/some-slug/handovers"},
+		{http.MethodGet, "/api/me/handovers"},
+		{http.MethodPost, "/api/handovers/some-id/cancel"},
+		{http.MethodPost, "/api/handovers/some-id/decline"},
 		{http.MethodGet, "/api/internal/worker"},
 	} {
 		t.Run(p.method+" "+p.path, func(t *testing.T) {

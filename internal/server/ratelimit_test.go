@@ -154,6 +154,21 @@ func TestLoginSecondRequestFromSameIPIsRateLimited(t *testing.T) {
 	assertRateLimited(t, second)
 }
 
+// Each change-password attempt runs bcrypt, so it spends from the login
+// bucket rather than a separate, fresh allowance.
+func TestChangePasswordSharesTheLoginLimiter(t *testing.T) {
+	h := newRateLimitedServer(t, newStubDeps(), config.Config{
+		RateLimitLogin: tinyPolicy(),
+	})
+
+	first := request(t, h, http.MethodPost, "/api/auth/login", "", loginBody)
+	if first.Code == http.StatusTooManyRequests {
+		t.Fatalf("first request was 429; body %s", first.Body.String())
+	}
+	assertRateLimited(t, request(t, h, http.MethodPost, "/api/auth/password", userToken,
+		`{"current_password":"x","new_password":"y"}`))
+}
+
 func TestAccountTokenRoutesShareTheLoginLimiter(t *testing.T) {
 	for _, method := range []string{http.MethodGet, http.MethodPost} {
 		t.Run(method, func(t *testing.T) {
