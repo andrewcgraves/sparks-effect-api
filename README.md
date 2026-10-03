@@ -456,6 +456,7 @@ scenario/route reads or `/api/internal/*`.
 | `GET /api/admin/users` | admin | Every account, oldest first, with `disabled_at` and how many UserServices it authored (`service_count`) and has published (`published_count`) |
 | `PATCH /api/admin/users/{id}` | admin | Set `is_admin` and/or `disabled`; disabling revokes the account's sessions. An admin demoting or disabling themselves gets 409 |
 | `POST /api/admin/routes` | admin | Ingest a curated alignment |
+| `POST /api/admin/retention` | admin | Dry-run (empty body or `{"apply":false}`) or apply (`{"apply":true}`) isochrone-cache and routing-job-result retention. See [`docs/retention.md`](docs/retention.md) |
 | `POST /api/scenarios/{slug}/prerendered-isochrones` | admin | Curate a ready-to-display isochrone for a scenario |
 
 ### Owning the seeded models
