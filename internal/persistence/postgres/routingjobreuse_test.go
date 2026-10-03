@@ -53,7 +53,7 @@ func reuseRepo(t *testing.T) *postgres.Repo {
 }
 
 // succeededJob inserts j and completes it with done, the way the worker would.
-func succeededJob(t *testing.T, repo *postgres.Repo, id string, j transit.RoutingJob, done handler.JobSucceeded) {
+func succeededJob(t *testing.T, repo *postgres.Repo, id string, j transit.RoutingJob, done handler.JobSucceededBody) {
 	t.Helper()
 	ctx := context.Background()
 	j.ID = id
@@ -69,8 +69,8 @@ func succeededJob(t *testing.T, repo *postgres.Repo, id string, j transit.Routin
 	}
 }
 
-func stamped() handler.JobSucceeded {
-	return handler.JobSucceeded{TilesetAt: reuseTileset}
+func stamped() handler.JobSucceededBody {
+	return handler.JobSucceededBody{TilesetAt: reuseTileset}
 }
 
 func findReusable(t *testing.T, repo *postgres.Repo, want transit.RoutingJob) (transit.RoutingJob, bool) {
@@ -194,7 +194,7 @@ func TestFindReusableRoutingJob_requiresTheNewestKnownTileset(t *testing.T) {
 	elsewhere := reuseRequest()
 	elsewhere.Lat = 37.5
 	succeededJob(t, repo, "00000000-0000-400b-8002-000000000002", elsewhere,
-		handler.JobSucceeded{TilesetAt: reuseNewerTileset})
+		handler.JobSucceededBody{TilesetAt: reuseNewerTileset})
 
 	if _, ok := findReusable(t, repo, reuseRequest()); ok {
 		t.Error("a result cut from a superseded tileset was reused")
@@ -205,7 +205,7 @@ func TestFindReusableRoutingJob_neverReusesAnUnstampedJob(t *testing.T) {
 	repo := reuseRepo(t)
 	// What an older worker, a synthetic one, or one whose /status call failed
 	// reports: no tileset at all.
-	succeededJob(t, repo, routingJobID, reuseRequest(), handler.JobSucceeded{})
+	succeededJob(t, repo, routingJobID, reuseRequest(), handler.JobSucceededBody{})
 
 	if _, ok := findReusable(t, repo, reuseRequest()); ok {
 		t.Error("a job with no tileset stamp was reused; its freshness cannot be verified")

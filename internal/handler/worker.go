@@ -13,11 +13,11 @@ var ErrJobNotFound = errors.New("routing job not found")
 
 type IsochroneKey = store.IsochroneKey
 type CachedIsochrone = store.CachedIsochrone
-type JobSucceeded = store.JobSucceededBody
+type JobSucceededBody = store.JobSucceededBody
 
 type WorkerStore interface {
 	MarkRoutingJobRunning(ctx context.Context, id string) error
-	SucceedRoutingJob(ctx context.Context, id string, done JobSucceeded) error
+	SucceedRoutingJob(ctx context.Context, id string, done JobSucceededBody) error
 	FailRoutingJob(ctx context.Context, id, errMsg string) error
 	GetIsochroneCache(ctx context.Context, keys []IsochroneKey) (map[IsochroneKey]CachedIsochrone, error)
 	PutIsochroneCache(ctx context.Context, entries []CachedIsochrone) error
@@ -44,7 +44,7 @@ func WorkerMarkSucceeded(ws WorkerStore) http.HandlerFunc {
 		// tileset_at and reusable_until are what let a repeat request be
 		// answered from this job (SPA-331). An older worker sends neither, and
 		// its jobs are simply never reused.
-		var body JobSucceeded
+		var body JobSucceededBody
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			writeError(w, http.StatusBadRequest, "malformed request body")
 			return

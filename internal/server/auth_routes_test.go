@@ -227,7 +227,7 @@ func (s *stubAuthDeps) FindReusableRoutingJob(context.Context, transit.RoutingJo
 }
 
 func (s *stubAuthDeps) MarkRoutingJobRunning(context.Context, string) error { return nil }
-func (s *stubAuthDeps) SucceedRoutingJob(context.Context, string, handler.JobSucceeded) error {
+func (s *stubAuthDeps) SucceedRoutingJob(context.Context, string, handler.JobSucceededBody) error {
 	return nil
 }
 func (s *stubAuthDeps) GetIsochroneCache(context.Context, []handler.IsochroneKey) (map[handler.IsochroneKey]handler.CachedIsochrone, error) {

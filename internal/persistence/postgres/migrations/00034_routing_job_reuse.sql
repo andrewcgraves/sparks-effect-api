@@ -46,8 +46,10 @@
 --   reuse succeeds against the new tiles, and none are served after it. A
 --   rollback to older tiles is correct but uncached for reuse, as for the
 --   egress cache (00024's SPA-325 amendment), until the map moves forward.
---   A NULL stamp — an older worker, a synthetic one, or a /status outage —
---   is never reused, for SPA-325's reason: it cannot be verified.
+--   A NULL stamp — an older worker, a synthetic one, or one whose /status
+--   has not answered since boot — is never reused, for SPA-325's reason: it
+--   cannot be verified. A /status outage later in a worker's life is not
+--   NULL: SPA-324 keeps the last stamp it saw, and reports that.
 --
 -- ## Deploy order
 --

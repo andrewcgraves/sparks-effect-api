@@ -22,7 +22,7 @@ type fakeWorkerStore struct {
 
 	runningID   string
 	succeededID string
-	succeeded   handler.JobSucceeded
+	succeeded   handler.JobSucceededBody
 	failedID    string
 	errMsg      string
 	gotKeys     []handler.IsochroneKey
@@ -35,7 +35,7 @@ func (f *fakeWorkerStore) MarkRoutingJobRunning(_ context.Context, id string) er
 	return f.runningErr
 }
 
-func (f *fakeWorkerStore) SucceedRoutingJob(_ context.Context, id string, done handler.JobSucceeded) error {
+func (f *fakeWorkerStore) SucceedRoutingJob(_ context.Context, id string, done handler.JobSucceededBody) error {
 	f.succeededID = id
 	f.succeeded = done
 	return f.succeededErr

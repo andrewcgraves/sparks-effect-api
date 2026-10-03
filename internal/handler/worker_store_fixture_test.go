@@ -286,13 +286,13 @@ func TestWorkerJobTransitions_acceptTheGoldenEnvelope(t *testing.T) {
 type goldenWorkerStore struct {
 	cache      map[IsochroneKey]CachedIsochrone
 	putEntries []CachedIsochrone
-	done       JobSucceeded
+	done       JobSucceededBody
 	errMsg     string
 }
 
 func (g *goldenWorkerStore) MarkRoutingJobRunning(context.Context, string) error { return nil }
 
-func (g *goldenWorkerStore) SucceedRoutingJob(_ context.Context, _ string, done JobSucceeded) error {
+func (g *goldenWorkerStore) SucceedRoutingJob(_ context.Context, _ string, done JobSucceededBody) error {
 	g.done = done
 	return nil
 }
