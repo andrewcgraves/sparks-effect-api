@@ -255,6 +255,10 @@ func (s *stubAuthDeps) CreatePrerenderedIsochrone(context.Context, *transit.Prer
 	return nil
 }
 
+func (s *stubAuthDeps) ApplyRetention(context.Context, bool) (handler.RetentionReport, error) {
+	return handler.RetentionReport{}, nil
+}
+
 const (
 	adminToken  = "admin-token"
 	userToken   = "user-token"
@@ -312,6 +316,7 @@ func TestProtectedRoutesRejectAnonymousCallers(t *testing.T) {
 		{http.MethodPost, "/api/admin/invites"},
 		{http.MethodPost, "/api/admin/users/some-id/reset-link"},
 		{http.MethodPost, "/api/admin/routes"},
+		{http.MethodPost, "/api/admin/retention"},
 		{http.MethodPost, "/api/scenarios/ca-hsr/compile"},
 		{http.MethodGet, "/api/jobs/some-id"},
 		// The authored draft surface. GET .../publication and POST
@@ -364,6 +369,7 @@ func TestAdminRoutesRejectNonAdmins(t *testing.T) {
 		{http.MethodPost, "/api/admin/invites"},
 		{http.MethodPost, "/api/admin/users/some-id/reset-link"},
 		{http.MethodPost, "/api/admin/routes"},
+		{http.MethodPost, "/api/admin/retention"},
 		// Not under /api/admin/, so nothing about its path says it is gated —
 		// which is exactly why it is asserted here.
 		{http.MethodPost, "/api/scenarios/ca-hsr/prerendered-isochrones"},

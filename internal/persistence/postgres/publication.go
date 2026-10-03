@@ -194,7 +194,7 @@ func (q txPublicationRead) LatestSucceededCompileJob(ctx context.Context, servic
 	row := q.tx.QueryRow(ctx,
 		`SELECT `+jobColumns+` FROM jobs
 		  WHERE user_service_id = $1 AND kind = $2 AND status = $3
-		  ORDER BY created_at DESC
+		  ORDER BY created_at DESC, id DESC
 		  LIMIT 1`,
 		serviceID, transit.JobKindCompileUserService, transit.JobStatusSucceeded)
 	return scanJob(row)

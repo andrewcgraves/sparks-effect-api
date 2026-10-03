@@ -184,6 +184,26 @@ through a node both of them touch.
   different word. An outdated entry is still served; `outdated` is a boolean on
   the read, not a refusal. Say *stale* about graphs and *outdated* about
   prerendered isochrones, and neither about the other.
+- **Cache generation rotated** — the log line `CompileSeededIfNeeded` writes
+  when a seeded scenario already had a succeeded compile and a new one is
+  stored. The previous job is the superseded compile. The new compile job id
+  does not exist until that compile is recorded, and a first compile has no
+  previous generation, so it does not log the line. A newer running or failed
+  compile does not supersede.
+- **Retention** — housekeeping an admin runs by hand with
+  `POST /api/admin/retention`. Nothing runs at boot, and a deploy deletes
+  nothing: the call dry-runs unless the body is `{"apply":true}`. It deletes
+  isochrone cache rows whose compile job is a superseded compile (not the
+  latest succeeded compile for that scenario, user scenario, or user service,
+  and not a publication's pinned compile, which stays live for this rule; a
+  target set NULL is not live) and transit rows outside the service-date
+  window of 7 calendar days, including rows on a live compile and on a pin.
+  Walk, bike and drive store a NULL service date and are not swept by that
+  window. It NULLs a routing job result older than 30 days and keeps the row.
+  SPA-331's reuse window is still open; 30 days sits well outside a
+  service-date reuse clock of a few days, and a NULL result must be treated
+  as a miss by that lookup.
+  Prerendered isochrones are never swept.
 - **Backlog** / **in-flight** — in-flight routing jobs are those `queued` or
   `running` and younger than `handler.RoutingJobStaleAfter`; the age bound is
   what stops a dead worker's abandoned rows wedging the cap shut forever. The

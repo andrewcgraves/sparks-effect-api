@@ -1,8 +1,11 @@
 package transit
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
+	"strings"
 	"testing"
 )
 
@@ -215,6 +218,82 @@ func TestCompileSeededIfNeeded_recompilesAfterAStationMoves(t *testing.T) {
 		return
 	}
 	t.Fatalf("no %q node in the recompiled graph", moved.Slug)
+}
+
+func TestCompileSeededIfNeeded_logsCacheGenerationRotated(t *testing.T) {
+	ctx := context.Background()
+	fake := newSeededCompileFake(t)
+
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	// The database as it stood before SPA-222: the city-centroid geocode.
+	fake.moveStation(t, "las-vegas", -115.136, 36.174)
+	if _, err := CompileSeededIfNeeded(ctx, fake, DefaultBoardingWaitPolicy()); err != nil {
+		t.Fatalf("CompileSeededIfNeeded: %v", err)
+	}
+	if strings.Contains(logs.String(), "cache generation rotated") {
+		t.Fatalf("first compile logged a rotation, and there is no previous generation: %s", logs.String())
+	}
+
+	const slug = "ca-hsr"
+	moved := Node{Slug: "las-vegas", Lat: 36.0545, Lng: -115.1778}
+	fake.moveStation(t, moved.Slug, moved.Lng, moved.Lat)
+	logs.Reset()
+
+	if _, err := CompileSeededIfNeeded(ctx, fake, DefaultBoardingWaitPolicy()); err != nil {
+		t.Fatalf("CompileSeededIfNeeded after move: %v", err)
+	}
+
+	sc, ok := fake.store.GetScenarioBySlug(slug)
+	if !ok {
+		t.Fatalf("no scenario %q", slug)
+	}
+	var cahsr []Job
+	for _, j := range fake.jobs {
+		if j.ScenarioID != nil && *j.ScenarioID == sc.ID && j.Status == JobStatusSucceeded {
+			cahsr = append(cahsr, j)
+		}
+	}
+	if len(cahsr) != 2 {
+		t.Fatalf("succeeded compiles for %s = %d, want 2", slug, len(cahsr))
+	}
+	supersededID := cahsr[0].ID
+	newID := cahsr[len(cahsr)-1].ID
+
+	var rotated, recompiling int
+	for _, line := range strings.Split(logs.String(), "\n") {
+		if line == "" {
+			continue
+		}
+		var rec map[string]any
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("log line %q: %v", line, err)
+		}
+		switch rec["msg"] {
+		case "transit: cache generation rotated":
+			rotated++
+			if rec["scenario_slug"] != slug ||
+				rec["superseded_compile_job_id"] != supersededID ||
+				rec["compile_job_id"] != newID {
+				t.Errorf("rotation log = %s, want scenario %s superseded %s new %s",
+					line, slug, supersededID, newID)
+			}
+		case "transit: stored graph no longer matches its source data, recompiling":
+			recompiling++
+			if rec["superseded_compile_job_id"] != supersededID {
+				t.Errorf("recompile log = %s, want superseded %s", line, supersededID)
+			}
+		}
+	}
+	if rotated != 1 {
+		t.Errorf("rotation logs = %d, want 1; logs:\n%s", rotated, logs.String())
+	}
+	if recompiling != 1 {
+		t.Errorf("recompile logs = %d, want 1; logs:\n%s", recompiling, logs.String())
+	}
 }
 
 func TestCompileSeededIfNeeded_skipsAlreadyCompiledScenarios(t *testing.T) {
