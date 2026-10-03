@@ -888,7 +888,7 @@ func (r *Repo) latestSucceededJobBySlug(ctx context.Context, targetTable, fkColu
 		`SELECT `+jobColumnsQualified+`
 		 FROM jobs j JOIN `+targetTable+` t ON t.id = j.`+fkColumn+`
 		 WHERE t.slug = $1 AND j.kind = $2 AND j.status = $3
-		 ORDER BY j.created_at DESC LIMIT 1`,
+		 ORDER BY j.created_at DESC, j.id DESC LIMIT 1`,
 		slug, kind, transit.JobStatusSucceeded)
 	return scanJob(row)
 }

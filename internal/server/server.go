@@ -43,6 +43,7 @@ type AuthDeps interface {
 	handler.PublishedServiceStore
 	handler.HandoverStore
 	handler.AccountTokenStore
+	handler.RetentionStore
 	GetSessionUser(ctx context.Context, tokenHash string) (account.User, bool, error)
 }
 
@@ -414,6 +415,10 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 	mux.Handle("POST /api/admin/invites", adminOnly(handler.CreateInvite(deps, cfg.WebsiteURL)))
 	mux.Handle("POST /api/admin/users/{id}/reset-link", adminOnly(handler.CreateResetLink(deps, cfg.WebsiteURL)))
 	mux.Handle("POST /api/admin/routes", adminOnly(handler.CreateRoute(deps)))
+	// A human dry-runs this against production and then sends apply. It does
+	// not run at boot: DeleteExpiredSessions can, because a missed session
+	// prune is harmless, and a missed dry-run here is not.
+	mux.Handle("POST /api/admin/retention", adminOnly(handler.Retention(deps)))
 	// Curating a prerendered isochrone is editorial content on a public page,
 	// so it sits behind the same admin gate — even though it hangs off the
 	// public /api/scenarios path rather than /api/admin. Its two sibling reads

@@ -90,8 +90,17 @@ func CompileSeededIfNeeded(ctx context.Context, store SeededCompileStore, boardi
 				"scenario_slug", sc.Slug, "superseded_compile_job_id", job.ID)
 		}
 
-		if err := recordCompiled(ctx, store, sc, graph); err != nil {
+		newID, err := recordCompiled(ctx, store, sc, graph)
+		if err != nil {
 			return compiled, err
+		}
+		// The new id does not exist until recordCompiled stores it. A first
+		// compile (!found) has no previous generation, so it does not log.
+		if found {
+			slog.Info("transit: cache generation rotated",
+				"scenario_slug", sc.Slug,
+				"superseded_compile_job_id", job.ID,
+				"compile_job_id", newID)
 		}
 		compiled++
 	}
@@ -110,10 +119,10 @@ func sameCompiledGraph(stored, fresh TransitGraph) (bool, error) {
 	return bytes.Equal(a, b), nil
 }
 
-func recordCompiled(ctx context.Context, store SeededCompileStore, sc Scenario, graph TransitGraph) error {
+func recordCompiled(ctx context.Context, store SeededCompileStore, sc Scenario, graph TransitGraph) (string, error) {
 	id, err := ids.NewUUID()
 	if err != nil {
-		return err
+		return "", err
 	}
 	scenarioID := sc.ID
 	job := Job{
@@ -123,10 +132,10 @@ func recordCompiled(ctx context.Context, store SeededCompileStore, sc Scenario, 
 		ScenarioID: &scenarioID,
 	}
 	if err := store.CreateJob(ctx, job); err != nil {
-		return fmt.Errorf("transit: creating compile job for %q: %w", sc.Slug, err)
+		return "", fmt.Errorf("transit: creating compile job for %q: %w", sc.Slug, err)
 	}
 	if err := store.CompleteJob(ctx, id, graph, CompiledServiceIDs(graph)); err != nil {
-		return fmt.Errorf("transit: recording compiled graph for %q: %w", sc.Slug, err)
+		return "", fmt.Errorf("transit: recording compiled graph for %q: %w", sc.Slug, err)
 	}
-	return nil
+	return id, nil
 }
