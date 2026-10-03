@@ -14,7 +14,7 @@ import (
 
 // A broker that accepts the TCP connection and then says nothing: the case a
 // dial can only escape by timing out.
-func blackholeBroker(t *testing.T) string {
+func blackholeBroker(t *testing.T) (string, func()) {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -33,20 +33,29 @@ func blackholeBroker(t *testing.T) string {
 			mu.Unlock()
 		}
 	}()
-	t.Cleanup(func() {
-		_ = ln.Close()
-		mu.Lock()
-		defer mu.Unlock()
-		for _, c := range held {
-			_ = c.Close()
-		}
-	})
-	return "amqp://guest:guest@" + ln.Addr().String() + "/"
+	var once sync.Once
+	stop := func() {
+		once.Do(func() {
+			_ = ln.Close()
+			mu.Lock()
+			defer mu.Unlock()
+			for _, c := range held {
+				_ = c.Close()
+			}
+		})
+	}
+	t.Cleanup(stop)
+	return "amqp://guest:guest@" + ln.Addr().String() + "/", stop
 }
 
 func TestPingAgainstASilentBrokerNeitherPilesUpNorStarvesPublish(t *testing.T) {
-	pub := routing.NewAMQPPublisher(blackholeBroker(t), "unused", logger.Discard())
+	url, stop := blackholeBroker(t)
+	pub := routing.NewAMQPPublisher(url, "unused", logger.Discard())
+	// Close waits on the publisher lock. The abandoned dial holds that lock
+	// until the handshake deadline (dialTimeout), so closing the socket first
+	// lets the dial return instead of cleanup waiting the deadline out.
 	defer pub.Close()
+	defer stop()
 
 	baseline := runtime.NumGoroutine()
 	for i := range 20 {

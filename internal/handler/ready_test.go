@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/logger"
 )
@@ -54,13 +55,23 @@ func TestReady(t *testing.T) {
 
 func TestReady_boundsASlowComponent(t *testing.T) {
 	// A check that never returns on its own: only the handler's deadline ends it.
+	// The production bound is a second; shorten it here so the suite is not
+	// waiting that second out. The assertion below fails if Ready stops
+	// consulting readyTimeout.
+	readyTimeout = 25 * time.Millisecond
+	t.Cleanup(func() { readyTimeout = time.Second })
+
 	hang := pingerFunc(func(ctx context.Context) error {
 		<-ctx.Done()
 		return ctx.Err()
 	})
 
 	rec := httptest.NewRecorder()
+	start := time.Now()
 	Ready(hang, nil, logger.Discard())(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+		t.Fatalf("readyz returned after %s; the handler deadline did not bound the check", elapsed)
+	}
 
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("status: want 503, got %d", rec.Code)

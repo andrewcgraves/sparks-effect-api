@@ -4,7 +4,6 @@ import (
 	"context"
 	"embed"
 	"fmt"
-	"io/fs"
 
 	"gopkg.in/yaml.v3"
 )
@@ -23,25 +22,20 @@ type Store struct {
 }
 
 func NewStore(boardingWait BoardingWaitPolicy) (*Store, error) {
-	s := &Store{
-		travelTimes: make(map[string]TravelTimes),
-		graphs:      make(map[string]*TransitGraph),
-	}
-
-	entries, err := fs.ReadDir(dataFS, "data/scenarios")
+	seeds, err := loadEmbeddedScenarios()
 	if err != nil {
-		return nil, fmt.Errorf("transit: reading scenarios dir: %w", err)
+		return nil, err
 	}
 
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		if err := s.loadScenario(e.Name(), boardingWait); err != nil {
-			return nil, fmt.Errorf("transit: loading scenario %q: %w", e.Name(), err)
+	s := &Store{
+		travelTimes: make(map[string]TravelTimes, len(seeds)),
+		graphs:      make(map[string]*TransitGraph, len(seeds)),
+	}
+	for _, seed := range seeds {
+		if err := s.addScenario(seed, boardingWait); err != nil {
+			return nil, fmt.Errorf("transit: loading scenario %q: %w", seed.scenario.Slug, err)
 		}
 	}
-
 	return s, nil
 }
 
@@ -98,62 +92,19 @@ func LoadStore(ctx context.Context, src StoreSource) (*Store, error) {
 	return s, nil
 }
 
-func (s *Store) loadScenario(slug string, boardingWait BoardingWaitPolicy) error {
-	base := "data/scenarios/" + slug
+func (s *Store) addScenario(seed embeddedScenario, boardingWait BoardingWaitPolicy) error {
+	s.scenarios = append(s.scenarios, seed.scenario)
+	s.vehicleTypes = append(s.vehicleTypes, seed.vehicleTypes...)
+	s.routes = append(s.routes, seed.routes...)
+	s.stations = append(s.stations, seed.stations...)
+	s.services = append(s.services, seed.services...)
+	s.travelTimes[seed.scenario.Slug] = seed.travelTimes
 
-	var sc Scenario
-	if err := unmarshalFile(dataFS, base+"/scenario.yaml", &sc); err != nil {
-		return err
-	}
-	s.scenarios = append(s.scenarios, sc)
-
-	var vts []VehicleType
-	if err := unmarshalFile(dataFS, base+"/vehicle_types.yaml", &vts); err != nil {
-		return err
-	}
-	s.vehicleTypes = append(s.vehicleTypes, vts...)
-
-	var routes []Route
-	if err := unmarshalFile(dataFS, base+"/routes.yaml", &routes); err != nil {
-		return err
-	}
-	s.routes = append(s.routes, routes...)
-
-	var stations []Station
-	if err := unmarshalFile(dataFS, base+"/stations.yaml", &stations); err != nil {
-		return err
-	}
-	s.stations = append(s.stations, stations...)
-
-	var services []Service
-	if err := unmarshalFile(dataFS, base+"/services.yaml", &services); err != nil {
-		return err
-	}
-	for i, svc := range services {
-		if svc.BoardingWait != nil {
-			if _, err := svc.BoardingWait.Parse(); err != nil {
-				return fmt.Errorf("service %q: %w", svc.ID, err)
-			}
-		}
-		services[i] = svc
-	}
-	s.services = append(s.services, services...)
-
-	var tt TravelTimes
-	if err := unmarshalFile(dataFS, base+"/segment_run_times.yaml", &tt); err != nil {
-		return err
-	}
-	if err := validateSegmentRoutes(routes, tt); err != nil {
-		return err
-	}
-	s.travelTimes[slug] = tt
-
-	g, err := Compile(sc, routes, stations, services, vts, tt, boardingWait)
+	g, err := Compile(seed.scenario, seed.routes, seed.stations, seed.services, seed.vehicleTypes, seed.travelTimes, boardingWait)
 	if err != nil {
 		return err
 	}
-	s.graphs[slug] = g
-
+	s.graphs[seed.scenario.Slug] = g
 	return nil
 }
 

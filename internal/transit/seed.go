@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"slices"
+	"sync"
 )
 
 type SeedSink interface {
@@ -53,7 +55,29 @@ type embeddedScenario struct {
 	travelTimes  TravelTimes
 }
 
+var (
+	embeddedOnce   sync.Once
+	embeddedParsed []embeddedScenario
+	embeddedErr    error
+)
+
 func loadEmbeddedScenarios() ([]embeddedScenario, error) {
+	// The scenario YAML is compiled into the binary, and routes.yaml alone is
+	// hundreds of kilobytes. Decoding it dominates every NewStore, seed, and
+	// reconcile call, and tests do those on nearly every case. Parse once per
+	// process and hand each caller a copy: compilation writes the resolved
+	// boarding wait onto the services it was given, and a later call may pass
+	// a different policy.
+	embeddedOnce.Do(func() {
+		embeddedParsed, embeddedErr = readEmbeddedScenarios()
+	})
+	if embeddedErr != nil {
+		return nil, embeddedErr
+	}
+	return cloneEmbeddedScenarios(embeddedParsed), nil
+}
+
+func readEmbeddedScenarios() ([]embeddedScenario, error) {
 	entries, err := fs.ReadDir(dataFS, "data/scenarios")
 	if err != nil {
 		return nil, fmt.Errorf("transit: reading scenarios dir: %w", err)
@@ -157,4 +181,156 @@ func validateSegmentRoutes(routes []Route, tt TravelTimes) error {
 		}
 	}
 	return nil
+}
+
+func cloneEmbeddedScenarios(in []embeddedScenario) []embeddedScenario {
+	out := make([]embeddedScenario, len(in))
+	for i := range in {
+		out[i] = cloneEmbeddedScenario(in[i])
+	}
+	return out
+}
+
+func cloneEmbeddedScenario(in embeddedScenario) embeddedScenario {
+	return embeddedScenario{
+		scenario:     cloneScenario(in.scenario),
+		vehicleTypes: slices.Clone(in.vehicleTypes),
+		routes:       cloneRoutes(in.routes),
+		stations:     cloneStations(in.stations),
+		services:     cloneServices(in.services),
+		travelTimes:  cloneTravelTimes(in.travelTimes),
+	}
+}
+
+func cloneScenario(sc Scenario) Scenario {
+	sc.OwnerID = cloneStringPtr(sc.OwnerID)
+	return sc
+}
+
+func cloneRoutes(in []Route) []Route {
+	if in == nil {
+		return nil
+	}
+	out := make([]Route, len(in))
+	for i := range in {
+		out[i] = cloneRoute(in[i])
+	}
+	return out
+}
+
+func cloneRoute(r Route) Route {
+	r.ScenarioID = cloneStringPtr(r.ScenarioID)
+	r.OwnerID = cloneStringPtr(r.OwnerID)
+	r.Geometry = cloneLine(r.Geometry)
+	r.Segments = slices.Clone(r.Segments)
+	return r
+}
+
+func cloneStations(in []Station) []Station {
+	if in == nil {
+		return nil
+	}
+	out := make([]Station, len(in))
+	for i := range in {
+		out[i] = cloneStation(in[i])
+	}
+	return out
+}
+
+func cloneStation(st Station) Station {
+	st.OwnerID = cloneStringPtr(st.OwnerID)
+	st.Location = cloneGeoPoint(st.Location)
+	if st.RoutingLocation != nil {
+		p := cloneGeoPoint(*st.RoutingLocation)
+		st.RoutingLocation = &p
+	}
+	return st
+}
+
+func cloneServices(in []Service) []Service {
+	if in == nil {
+		return nil
+	}
+	out := make([]Service, len(in))
+	for i := range in {
+		out[i] = cloneService(in[i])
+	}
+	return out
+}
+
+func cloneService(svc Service) Service {
+	svc.OwnerID = cloneStringPtr(svc.OwnerID)
+	svc.Stops = cloneStops(svc.Stops)
+	svc.FrequencyWindows = slices.Clone(svc.FrequencyWindows)
+	svc.BoardingWait = cloneBoardingWait(svc.BoardingWait)
+	return svc
+}
+
+func cloneStops(in []ServiceStop) []ServiceStop {
+	if in == nil {
+		return nil
+	}
+	out := make([]ServiceStop, len(in))
+	for i := range in {
+		out[i] = in[i]
+		out[i].DwellS = cloneIntPtr(in[i].DwellS)
+	}
+	return out
+}
+
+func cloneTravelTimes(tt TravelTimes) TravelTimes {
+	if tt.Segments == nil {
+		return tt
+	}
+	tt.Segments = slices.Clone(tt.Segments)
+	for i := range tt.Segments {
+		tt.Segments[i].ReverseRunSeconds = cloneIntPtr(tt.Segments[i].ReverseRunSeconds)
+	}
+	return tt
+}
+
+func cloneLine(g GeoLineString) GeoLineString {
+	g.Coordinates = cloneMatrix(g.Coordinates)
+	return g
+}
+
+func cloneGeoPoint(p GeoPoint) GeoPoint {
+	p.Coordinates = slices.Clone(p.Coordinates)
+	return p
+}
+
+func cloneMatrix(in [][]float64) [][]float64 {
+	if in == nil {
+		return nil
+	}
+	out := make([][]float64, len(in))
+	for i := range in {
+		out[i] = slices.Clone(in[i])
+	}
+	return out
+}
+
+func cloneBoardingWait(p *BoardingWaitOverride) *BoardingWaitOverride {
+	if p == nil {
+		return nil
+	}
+	c := *p
+	c.Secs = cloneIntPtr(p.Secs)
+	return &c
+}
+
+func cloneStringPtr(p *string) *string {
+	if p == nil {
+		return nil
+	}
+	s := *p
+	return &s
+}
+
+func cloneIntPtr(p *int) *int {
+	if p == nil {
+		return nil
+	}
+	n := *p
+	return &n
 }
