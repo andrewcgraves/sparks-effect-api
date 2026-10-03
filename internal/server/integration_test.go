@@ -173,7 +173,7 @@ func TestIntegration_OwnershipScopingIsEnforcedServerSide(t *testing.T) {
 	memberIDs := map[string]string{}
 	for _, email := range []string{"a@example.com", "b@example.com"} {
 		req := httptest.NewRequest(http.MethodPost, "/api/admin/users",
-			strings.NewReader(`{"email":"`+email+`","password":"pw"}`))
+			strings.NewReader(`{"email":"`+email+`","password":"their-password"}`))
 		req.Header.Set("Authorization", "Bearer "+adminToken)
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
@@ -199,8 +199,8 @@ func TestIntegration_OwnershipScopingIsEnforcedServerSide(t *testing.T) {
 		}
 	}
 
-	tokenA, _ := login(t, h, "a@example.com", "pw")
-	tokenB, _ := login(t, h, "b@example.com", "pw")
+	tokenA, _ := login(t, h, "a@example.com", "their-password")
+	tokenB, _ := login(t, h, "b@example.com", "their-password")
 
 	assertOwnScenarios := func(token, wantSlug string) {
 		t.Helper()

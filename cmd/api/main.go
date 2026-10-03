@@ -177,7 +177,14 @@ func loadStore(ctx context.Context, cfg config.Config, lg *slog.Logger) (*transi
 	return store, repo, repo.Close, nil
 }
 
-func bootstrapAdmin(ctx context.Context, cfg config.Config, repo *postgres.Repo, lg *slog.Logger) error {
+// bootstrapUserStore is the persistence bootstrapAdmin needs. *postgres.Repo
+// satisfies it; tests pass a fake so a rejected password never needs a database.
+type bootstrapUserStore interface {
+	GetUserByEmail(ctx context.Context, email string) (account.User, bool, error)
+	CreateUser(ctx context.Context, u account.User, passwordHash string) error
+}
+
+func bootstrapAdmin(ctx context.Context, cfg config.Config, repo bootstrapUserStore, lg *slog.Logger) error {
 	email := strings.ToLower(strings.TrimSpace(cfg.BootstrapAdminEmail))
 	if email == "" || cfg.BootstrapAdminPassword == "" {
 		return nil
@@ -188,6 +195,10 @@ func bootstrapAdmin(ctx context.Context, cfg config.Config, repo *postgres.Repo,
 	} else if exists {
 		lg.Info("bootstrap admin already exists; leaving it unchanged", "email", email)
 		return nil
+	}
+
+	if err := auth.ValidatePassword(cfg.BootstrapAdminPassword, email); err != nil {
+		return err
 	}
 
 	hash, err := auth.NewHasher(cfg.PasswordHashCost).Hash(cfg.BootstrapAdminPassword)

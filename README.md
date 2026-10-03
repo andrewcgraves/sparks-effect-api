@@ -481,7 +481,10 @@ lists both calls both and merges them. There is no pagination yet.
 
 Set both variables and boot once; the account is created if that email does not
 already exist, and is never overwritten on later boots (so leaving the variables
-in place cannot silently reset a password).
+in place cannot silently reset a password). The password must be at least 12
+characters, at most 72 bytes, not the same as the email, and not a common
+password, and a weak value fails the boot that would create the account.
+Existing accounts are left unchanged.
 
 ```sh
 BOOTSTRAP_ADMIN_EMAIL=you@example.com
