@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"testing"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
@@ -119,6 +120,35 @@ func TestIntegration_PublishedServicesIndexListsOnlyPublications(t *testing.T) {
 	publish(second)
 	if _, items := index(""); len(items) != 2 || items[0]["slug"] != second.Slug || items[1]["slug"] != first.Slug {
 		t.Fatalf("index = %v, want [%s %s]", slugs(items), second.Slug, first.Slug)
+	}
+
+	// Paged, one at a time: the cursor walks the same order and ends with a
+	// null next_cursor rather than an empty page.
+	var walked []any
+	cursor := ""
+	for pages := 0; ; pages++ {
+		if pages > 3 {
+			t.Fatalf("paged walk did not end; so far %v", walked)
+		}
+		rec := request(t, h, http.MethodGet, "/api/published-services?limit=1&cursor="+url.QueryEscape(cursor), "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("paged index: status %d, body %s", rec.Code, rec.Body.String())
+		}
+		var page struct {
+			Items      []map[string]any `json:"items"`
+			NextCursor *string          `json:"next_cursor"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
+			t.Fatalf("decode paged index: %v", err)
+		}
+		walked = append(walked, slugs(page.Items)...)
+		if page.NextCursor == nil {
+			break
+		}
+		cursor = *page.NextCursor
+	}
+	if len(walked) != 2 || walked[0] != second.Slug || walked[1] != first.Slug {
+		t.Fatalf("paged walk = %v, want [%s %s]", walked, second.Slug, first.Slug)
 	}
 
 	// A draft edit does not reach the index until it is republished.

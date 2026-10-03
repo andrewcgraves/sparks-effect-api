@@ -18,3 +18,13 @@ type PublishedServiceSummary struct {
 	Subtext     string `json:"subtext,omitempty"`
 	Description string `json:"description,omitempty"`
 }
+
+type PublishedIndexKey struct {
+	FirstPublishedAt time.Time
+	Slug             string
+}
+
+type PublishedIndexPage struct {
+	Items []PublishedServiceSummary
+	Next  *PublishedIndexKey
+}

@@ -202,8 +202,8 @@ func (s *stubAuthDeps) CancelServiceHandover(context.Context, string, string) (t
 func (s *stubAuthDeps) DeclineServiceHandover(context.Context, string, string) (transit.ServiceHandover, error) {
 	return transit.ServiceHandover{}, handler.ErrHandoverNotFound
 }
-func (s *stubAuthDeps) ListPublishedServiceSummaries(context.Context) ([]transit.PublishedServiceSummary, error) {
-	return s.published, nil
+func (s *stubAuthDeps) ListPublishedServiceSummaries(context.Context, *transit.PublishedIndexKey, int) (transit.PublishedIndexPage, error) {
+	return transit.PublishedIndexPage{Items: s.published}, nil
 }
 func (s *stubAuthDeps) ListUserServicesByIDs(context.Context, []string) ([]transit.UserService, error) {
 	return nil, nil

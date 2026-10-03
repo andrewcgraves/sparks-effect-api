@@ -503,18 +503,35 @@ under `/api/admin/`.
 ### The published index
 
 `GET /api/published-services` lists every published `UserService` as a card:
-`slug`, `name`, `subtext` and `description`, most recently published first,
-with slug breaking a tie. It is unauthenticated, and the answer is the same for
-every caller, so an owner does not see their own unpublished drafts there either
+`slug`, `name`, `subtext` and `description`, by first publication, newest
+first, with slug breaking a tie. Republishing keeps a service's place, so a
+paged walk never skips one (migration 00033). It is unauthenticated, and the
+answer is the same for every caller, so an owner does not see their own
+unpublished drafts there either
 ([ADR-0005](docs/adr/0005-publishing-an-authored-service.md)). The prose is the
 publication's frozen copy, so a draft edit does not show until it is
 republished. `ListPublishedServiceSummaries` selects neither the stops or
-vehicle documents nor the publication's routes, and migration 00027 indexes
-`published_at` for its sort.
+vehicle documents nor the publication's routes, and migration 00033 indexes
+`first_published_at` for its sort.
+
+It pages with a keyset cursor (SPA-434). `?limit=` asks for up to that many
+cards (default 50, capped at 100; anything that is not a positive integer is a
+`400`), and `?cursor=` continues after the page whose `next_cursor` it is; an
+empty cursor is the first page. Either parameter switches the response to
+`{"items": [...], "next_cursor": "..." | null}`, and `next_cursor` is `null` on
+the last page. The cursor is opaque URL-safe base64 of the last card's
+first-publish time and slug, so it depends on nothing about the caller and the
+pages stay cacheable; a malformed one is a `400`. A service published after a
+walk starts lands on page one, ahead of the cursor, and that walk does not see
+it.
+
+With neither parameter the endpoint still answers the bare array of every card,
+for websites built before SPA-434. It goes once the website's production tag
+reads pages.
 
 It is not `GET /api/services`, which stays the caller's own drafts. Curated
 scenarios stay at `GET /api/scenarios`: the two models differ, so a page that
-lists both calls both and merges them. There is no pagination yet.
+lists both calls both and merges them.
 
 ### Bootstrapping the first admin
 

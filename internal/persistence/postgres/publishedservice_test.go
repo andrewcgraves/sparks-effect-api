@@ -18,9 +18,13 @@ const (
 	idxServiceA = "00000000-0000-4008-8003-000000000011"
 	idxServiceB = "00000000-0000-4008-8003-000000000012"
 	idxServiceC = "00000000-0000-4008-8003-000000000013"
+	idxServiceD = "00000000-0000-4008-8003-000000000014"
+	idxServiceE = "00000000-0000-4008-8003-000000000015"
 	idxJobA     = "00000000-0000-400a-8003-000000000011"
 	idxJobB     = "00000000-0000-400a-8003-000000000012"
 	idxJobC     = "00000000-0000-400a-8003-000000000013"
+	idxJobD     = "00000000-0000-400a-8003-000000000014"
+	idxJobE     = "00000000-0000-400a-8003-000000000015"
 )
 
 func indexedService(id, slug, name string) transit.UserService {
@@ -52,11 +56,14 @@ func publishIndexed(t *testing.T, repo *postgres.Repo, ctx context.Context, serv
 
 func listIndex(t *testing.T, repo *postgres.Repo, ctx context.Context) []transit.PublishedServiceSummary {
 	t.Helper()
-	got, err := repo.ListPublishedServiceSummaries(ctx)
+	page, err := repo.ListPublishedServiceSummaries(ctx, nil, 0)
 	if err != nil {
 		t.Fatalf("ListPublishedServiceSummaries: %v", err)
 	}
-	return got
+	if page.Next != nil {
+		t.Fatalf("unlimited read returned a next key %+v", page.Next)
+	}
+	return page.Items
 }
 
 func indexSlugs(items []transit.PublishedServiceSummary) []string {
@@ -114,7 +121,7 @@ func TestListPublishedServiceSummariesListsOnlyPublicationsAndTheirProse(t *test
 	}
 }
 
-func TestListPublishedServiceSummariesOrdersMostRecentlyPublishedFirst(t *testing.T) {
+func TestListPublishedServiceSummariesOrdersMostRecentlyFirstPublishedFirst(t *testing.T) {
 	repo, ctx, dbURL := userServiceFixture(t)
 	a := indexedService(idxServiceA, "middle-line", "Middle Line")
 	b := indexedService(idxServiceB, "zeta-line", "Zeta Line")
@@ -124,13 +131,14 @@ func TestListPublishedServiceSummariesOrdersMostRecentlyPublishedFirst(t *testin
 	publishIndexed(t, repo, ctx, b.ID, idxJobB)
 	publishIndexed(t, repo, ctx, c.ID, idxJobC)
 
-	// Pin the publish times so the order does not depend on how quickly the
-	// three publishes above ran. b and c share an instant. All three are in
-	// the past, so the republish below lands after them.
-	exec(t, dbURL,
-		`UPDATE service_publications SET published_at = '2001-01-01T00:00:00Z' WHERE user_service_id = '`+a.ID+`'`,
-		`UPDATE service_publications SET published_at = '2001-02-01T00:00:00Z' WHERE user_service_id = '`+b.ID+`'`,
-		`UPDATE service_publications SET published_at = '2001-02-01T00:00:00Z' WHERE user_service_id = '`+c.ID+`'`)
+	// Pin the first-publish times so the order does not depend on how quickly
+	// the three publishes above ran. b and c share an instant. All three are
+	// in the past, so the republish below lands after them.
+	pinFirstPublished(t, dbURL, map[string]string{
+		a.ID: "2001-01-01T00:00:00Z",
+		b.ID: "2001-02-01T00:00:00Z",
+		c.ID: "2001-02-01T00:00:00Z",
+	})
 
 	got := indexSlugs(listIndex(t, repo, ctx))
 	want := []string{"alpha-line", "zeta-line", "middle-line"}
@@ -138,15 +146,96 @@ func TestListPublishedServiceSummariesOrdersMostRecentlyPublishedFirst(t *testin
 		t.Fatalf("order = %v, want %v (newest first, slug breaking the tie)", got, want)
 	}
 
-	// Republishing is publishing again, so it moves to the front.
+	// Republishing keeps a service's place. A cursor walk depends on it: a
+	// service that jumped ahead of the cursor would be skipped (SPA-434).
 	if _, err := publishUserService(ctx, repo, a.ID); err != nil {
 		t.Fatalf("republish: %v", err)
 	}
-	got = indexSlugs(listIndex(t, repo, ctx))
-	want = []string{"middle-line", "alpha-line", "zeta-line"}
-	if fmt.Sprint(got) != fmt.Sprint(want) {
-		t.Fatalf("order after republish = %v, want %v", got, want)
+	if got := indexSlugs(listIndex(t, repo, ctx)); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("order after republish = %v, want unchanged %v", got, want)
 	}
+}
+
+func TestListPublishedServiceSummariesPagesThroughEveryServiceOnce(t *testing.T) {
+	repo, ctx, dbURL := userServiceFixture(t)
+	svcs := []transit.UserService{
+		indexedService(idxServiceA, "line-a", "Line A"),
+		indexedService(idxServiceB, "line-b", "Line B"),
+		indexedService(idxServiceC, "line-c", "Line C"),
+		indexedService(idxServiceD, "line-d", "Line D"),
+		indexedService(idxServiceE, "line-e", "Line E"),
+	}
+	createIndexedServices(t, repo, ctx, svcs...)
+	for i, job := range []string{idxJobA, idxJobB, idxJobC, idxJobD, idxJobE} {
+		publishIndexed(t, repo, ctx, svcs[i].ID, job)
+	}
+	// e is newest; c and d share an instant, so a page boundary falls inside
+	// a tie and slug must break it.
+	pinFirstPublished(t, dbURL, map[string]string{
+		svcs[0].ID: "2001-01-01T00:00:00Z",
+		svcs[1].ID: "2001-02-01T00:00:00Z",
+		svcs[2].ID: "2001-03-01T00:00:00Z",
+		svcs[3].ID: "2001-03-01T00:00:00Z",
+		svcs[4].ID: "2001-04-01T00:00:00Z",
+	})
+
+	var walked []string
+	var after *transit.PublishedIndexKey
+	for pages := 0; ; pages++ {
+		if pages > 5 {
+			t.Fatalf("walk did not end; so far %v", walked)
+		}
+		page, err := repo.ListPublishedServiceSummaries(ctx, after, 2)
+		if err != nil {
+			t.Fatalf("ListPublishedServiceSummaries page %d: %v", pages, err)
+		}
+		if len(page.Items) > 2 {
+			t.Fatalf("page %d has %d items, want at most 2", pages, len(page.Items))
+		}
+		walked = append(walked, indexSlugs(page.Items)...)
+		if pages == 0 {
+			// line-a has not been reached yet. Republishing it must not move
+			// it ahead of the cursor, where the rest of the walk would miss it.
+			if _, err := publishUserService(ctx, repo, svcs[0].ID); err != nil {
+				t.Fatalf("republish mid-walk: %v", err)
+			}
+		}
+		if page.Next == nil {
+			break
+		}
+		after = page.Next
+	}
+
+	want := []string{"line-e", "line-c", "line-d", "line-b", "line-a"}
+	if fmt.Sprint(walked) != fmt.Sprint(want) {
+		t.Fatalf("walk = %v, want every service once in order %v", walked, want)
+	}
+}
+
+func TestListPublishedServiceSummariesEndsWithoutAnEmptyPage(t *testing.T) {
+	repo, ctx, _ := userServiceFixture(t)
+	a := indexedService(idxServiceA, "line-a", "Line A")
+	b := indexedService(idxServiceB, "line-b", "Line B")
+	createIndexedServices(t, repo, ctx, a, b)
+	publishIndexed(t, repo, ctx, a.ID, idxJobA)
+	publishIndexed(t, repo, ctx, b.ID, idxJobB)
+
+	page, err := repo.ListPublishedServiceSummaries(ctx, nil, 2)
+	if err != nil {
+		t.Fatalf("ListPublishedServiceSummaries: %v", err)
+	}
+	if len(page.Items) != 2 || page.Next != nil {
+		t.Fatalf("page = %d items, next %+v; want both items and no next key", len(page.Items), page.Next)
+	}
+}
+
+func pinFirstPublished(t *testing.T, dbURL string, at map[string]string) {
+	t.Helper()
+	stmts := make([]string, 0, len(at))
+	for id, ts := range at {
+		stmts = append(stmts, `UPDATE service_publications SET first_published_at = '`+ts+`' WHERE user_service_id = '`+id+`'`)
+	}
+	exec(t, dbURL, stmts...)
 }
 
 // The index is a list of cards. It must not read the draft's stops or vehicle
@@ -163,7 +252,7 @@ func TestListPublishedServiceSummariesReadsOnlyCardColumns(t *testing.T) {
 	exec(t, dbURL,
 		`CREATE ROLE `+role+` LOGIN PASSWORD 'index-reader'`,
 		`GRANT SELECT (id, slug) ON user_services TO `+role,
-		`GRANT SELECT (user_service_id, name, subtext, description, published_at)
+		`GRANT SELECT (user_service_id, name, subtext, description, first_published_at)
 		   ON service_publications TO `+role)
 	// Registered before the restricted pool's Close, so it runs after it:
 	// the role's privileges live in this database, and DROP OWNED clears them
@@ -193,11 +282,11 @@ func TestListPublishedServiceSummariesReadsOnlyCardColumns(t *testing.T) {
 	}
 	t.Cleanup(restricted.Close)
 
-	got, err := restricted.ListPublishedServiceSummaries(ctx)
+	page, err := restricted.ListPublishedServiceSummaries(ctx, nil, 1)
 	if err != nil {
 		t.Fatalf("ListPublishedServiceSummaries as a card-columns-only role: %v", err)
 	}
-	if len(got) != 1 || got[0].Slug != "card-line" || got[0].Name != "Card Line" {
+	if got := page.Items; len(got) != 1 || got[0].Slug != "card-line" || got[0].Name != "Card Line" {
 		t.Fatalf("index = %+v, want card-line", got)
 	}
 
