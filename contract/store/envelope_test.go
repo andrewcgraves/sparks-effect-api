@@ -45,6 +45,10 @@ func goldenTilesetAt() time.Time {
 	return time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
 }
 
+func goldenReusableUntil() time.Time {
+	return time.Date(2026, 9, 3, 7, 0, 0, 0, time.UTC)
+}
+
 func goldenEnvelope() workerStoreEnvelope {
 	key := goldenIsochroneKey()
 	geom := goldenGeometry()
@@ -60,8 +64,12 @@ func goldenEnvelope() workerStoreEnvelope {
 				TilesetAt: goldenTilesetAt(),
 			}},
 		},
-		JobSucceeded: store.JobSucceededBody{Result: geom},
-		JobFailed:    store.JobFailedBody{Error: "valhalla unreachable"},
+		// tileset_at and reusable_until are omitzero; a zero here would leave
+		// SPA-331's reuse fields out of the fixture and unguarded.
+		JobSucceeded: store.JobSucceededBody{
+			Result: geom, TilesetAt: goldenTilesetAt(), ReusableUntil: goldenReusableUntil(),
+		},
+		JobFailed: store.JobFailedBody{Error: "valhalla unreachable"},
 	}
 }
 

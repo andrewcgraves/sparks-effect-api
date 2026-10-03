@@ -22,7 +22,7 @@ type fakeWorkerStore struct {
 
 	runningID   string
 	succeededID string
-	result      json.RawMessage
+	succeeded   handler.JobSucceeded
 	failedID    string
 	errMsg      string
 	gotKeys     []handler.IsochroneKey
@@ -35,9 +35,9 @@ func (f *fakeWorkerStore) MarkRoutingJobRunning(_ context.Context, id string) er
 	return f.runningErr
 }
 
-func (f *fakeWorkerStore) SucceedRoutingJob(_ context.Context, id string, result json.RawMessage) error {
+func (f *fakeWorkerStore) SucceedRoutingJob(_ context.Context, id string, done handler.JobSucceeded) error {
 	f.succeededID = id
-	f.result = result
+	f.succeeded = done
 	return f.succeededErr
 }
 
@@ -117,11 +117,48 @@ func TestWorkerMarkSucceeded(t *testing.T) {
 		t.Errorf("id = %q, want job-1", store.succeededID)
 	}
 	var got map[string]any
-	if err := json.Unmarshal(store.result, &got); err != nil {
+	if err := json.Unmarshal(store.succeeded.Result, &got); err != nil {
 		t.Fatalf("result: %v", err)
 	}
 	if got["type"] != "FeatureCollection" {
 		t.Errorf("result = %v", got)
+	}
+}
+
+func TestWorkerMarkSucceeded_passesOnWhatReuseNeeds(t *testing.T) {
+	store := &fakeWorkerStore{}
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/internal/routing-jobs/{id}/succeeded", handler.WorkerMarkSucceeded(store))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/internal/routing-jobs/job-1/succeeded",
+		bytes.NewReader([]byte(`{"result":{},"tileset_at":"2026-09-01T03:00:00Z","reusable_until":"2026-09-02T07:00:00Z"}`)))
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body %s", rec.Code, rec.Body.String())
+	}
+	if want := time.Date(2026, 9, 1, 3, 0, 0, 0, time.UTC); !store.succeeded.TilesetAt.Equal(want) {
+		t.Errorf("tileset_at = %v, want %v", store.succeeded.TilesetAt, want)
+	}
+	if want := time.Date(2026, 9, 2, 7, 0, 0, 0, time.UTC); !store.succeeded.ReusableUntil.Equal(want) {
+		t.Errorf("reusable_until = %v, want %v", store.succeeded.ReusableUntil, want)
+	}
+}
+
+func TestWorkerMarkSucceeded_anOlderWorkersBodyStillSucceeds(t *testing.T) {
+	store := &fakeWorkerStore{}
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/internal/routing-jobs/{id}/succeeded", handler.WorkerMarkSucceeded(store))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/internal/routing-jobs/job-1/succeeded",
+		bytes.NewReader([]byte(`{"result":{}}`)))
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body %s", rec.Code, rec.Body.String())
+	}
+	if !store.succeeded.TilesetAt.IsZero() || !store.succeeded.ReusableUntil.IsZero() {
+		t.Errorf("an unstamped body arrived stamped: %+v", store.succeeded)
 	}
 }
 

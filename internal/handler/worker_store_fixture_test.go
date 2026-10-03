@@ -53,6 +53,10 @@ func goldenTilesetAt() time.Time {
 	return time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
 }
 
+func goldenReusableUntil() time.Time {
+	return time.Date(2026, 9, 3, 7, 0, 0, 0, time.UTC)
+}
+
 func goldenEnvelope() workerStoreEnvelope {
 	key := goldenIsochroneKey()
 	geom := goldenGeometry()
@@ -68,8 +72,12 @@ func goldenEnvelope() workerStoreEnvelope {
 				TilesetAt: goldenTilesetAt(),
 			}},
 		},
-		JobSucceeded: store.JobSucceededBody{Result: geom},
-		JobFailed:    store.JobFailedBody{Error: "valhalla unreachable"},
+		// tileset_at and reusable_until are omitzero; a zero here would leave
+		// SPA-331's reuse fields out of the fixture and unguarded.
+		JobSucceeded: store.JobSucceededBody{
+			Result: geom, TilesetAt: goldenTilesetAt(), ReusableUntil: goldenReusableUntil(),
+		},
+		JobFailed: store.JobFailedBody{Error: "valhalla unreachable"},
 	}
 }
 
@@ -253,8 +261,12 @@ func TestWorkerJobTransitions_acceptTheGoldenEnvelope(t *testing.T) {
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("succeeded status = %d, want 204; body %s", rec.Code, rec.Body.String())
 	}
-	if !bytes.Equal(compactJSON(t, store.result), compactJSON(t, env.JobSucceeded.Result)) {
-		t.Errorf("result = %s, want %s", store.result, env.JobSucceeded.Result)
+	if !bytes.Equal(compactJSON(t, store.done.Result), compactJSON(t, env.JobSucceeded.Result)) {
+		t.Errorf("result = %s, want %s", store.done.Result, env.JobSucceeded.Result)
+	}
+	if !store.done.TilesetAt.Equal(goldenTilesetAt()) || !store.done.ReusableUntil.Equal(goldenReusableUntil()) {
+		t.Errorf("tileset_at/reusable_until = %v/%v, want %v/%v",
+			store.done.TilesetAt, store.done.ReusableUntil, goldenTilesetAt(), goldenReusableUntil())
 	}
 
 	failed, err := json.Marshal(env.JobFailed)
@@ -274,14 +286,14 @@ func TestWorkerJobTransitions_acceptTheGoldenEnvelope(t *testing.T) {
 type goldenWorkerStore struct {
 	cache      map[IsochroneKey]CachedIsochrone
 	putEntries []CachedIsochrone
-	result     json.RawMessage
+	done       JobSucceeded
 	errMsg     string
 }
 
 func (g *goldenWorkerStore) MarkRoutingJobRunning(context.Context, string) error { return nil }
 
-func (g *goldenWorkerStore) SucceedRoutingJob(_ context.Context, _ string, result json.RawMessage) error {
-	g.result = result
+func (g *goldenWorkerStore) SucceedRoutingJob(_ context.Context, _ string, done JobSucceeded) error {
+	g.done = done
 	return nil
 }
 
