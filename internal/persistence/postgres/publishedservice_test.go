@@ -66,6 +66,14 @@ func listIndex(t *testing.T, repo *postgres.Repo, ctx context.Context) []transit
 	return page.Items
 }
 
+// cardProse drops a card's byline, which its own test covers, leaving what
+// the publication froze.
+func cardProse(s transit.PublishedServiceSummary) transit.PublishedServiceSummary {
+	s.AuthorName = ""
+	s.PublishedAt = time.Time{}
+	return s
+}
+
 func indexSlugs(items []transit.PublishedServiceSummary) []string {
 	out := make([]string, 0, len(items))
 	for _, it := range items {
@@ -93,7 +101,7 @@ func TestListPublishedServiceSummariesListsOnlyPublicationsAndTheirProse(t *test
 		Slug: "published-line", Name: "Published Line",
 		Subtext: "Published Line subtext", Description: "Published Line description",
 	}
-	if got := listIndex(t, repo, ctx); len(got) != 1 || got[0] != want {
+	if got := listIndex(t, repo, ctx); len(got) != 1 || cardProse(got[0]) != want {
 		t.Fatalf("index = %+v, want only %+v", got, want)
 	}
 
@@ -109,7 +117,7 @@ func TestListPublishedServiceSummariesListsOnlyPublicationsAndTheirProse(t *test
 	if err := repo.UpdateUserService(ctx, draft); err != nil {
 		t.Fatalf("UpdateUserService: %v", err)
 	}
-	if got := listIndex(t, repo, ctx); len(got) != 1 || got[0] != want {
+	if got := listIndex(t, repo, ctx); len(got) != 1 || cardProse(got[0]) != want {
 		t.Fatalf("index after a draft edit = %+v, want the published prose %+v", got, want)
 	}
 
@@ -153,6 +161,51 @@ func TestListPublishedServiceSummariesOrdersMostRecentlyFirstPublishedFirst(t *t
 	}
 	if got := indexSlugs(listIndex(t, repo, ctx)); fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("order after republish = %v, want unchanged %v", got, want)
+	}
+}
+
+// A card carries its byline: the owner's current name, read live, and when the
+// publication now showing was published. That date is the latest publish, the
+// same one the detail page shows, even though the order stays on the first.
+func TestListPublishedServiceSummariesCarryAuthorAndPublishDate(t *testing.T) {
+	repo, ctx, dbURL := userServiceFixture(t)
+	svc := indexedService(idxServiceA, "byline-line", "Byline Line")
+	createIndexedServices(t, repo, ctx, svc)
+	publishIndexed(t, repo, ctx, svc.ID, idxJobA)
+	pinFirstPublished(t, dbURL, map[string]string{svc.ID: "2001-01-01T00:00:00Z"})
+
+	card := func() transit.PublishedServiceSummary {
+		t.Helper()
+		got := listIndex(t, repo, ctx)
+		if len(got) != 1 {
+			t.Fatalf("index = %+v, want one card", got)
+		}
+		return got[0]
+	}
+
+	republished, err := publishUserService(ctx, repo, svc.ID)
+	if err != nil {
+		t.Fatalf("republish: %v", err)
+	}
+	got := card()
+	if got.AuthorName != "Owner" {
+		t.Fatalf("author = %q, want %q", got.AuthorName, "Owner")
+	}
+	if !got.PublishedAt.Equal(republished.PublishedAt) {
+		t.Fatalf("published_at = %v, want the latest publish %v", got.PublishedAt, republished.PublishedAt)
+	}
+
+	if _, _, err := repo.UpdateUserName(ctx, usOwnerID, "Renamed Owner"); err != nil {
+		t.Fatalf("UpdateUserName: %v", err)
+	}
+	if got := card().AuthorName; got != "Renamed Owner" {
+		t.Fatalf("author after rename = %q, want %q", got, "Renamed Owner")
+	}
+
+	// Accepting a handover moves owner_id; that is all this needs from it.
+	execSQL(t, dbURL, `UPDATE user_services SET owner_id = $1 WHERE id = $2`, usStrangerID, svc.ID)
+	if got := card().AuthorName; got != "Stranger" {
+		t.Fatalf("author after transfer = %q, want %q", got, "Stranger")
 	}
 }
 
@@ -251,8 +304,9 @@ func TestListPublishedServiceSummariesReadsOnlyCardColumns(t *testing.T) {
 	role := fmt.Sprintf("spa_index_reader_%d", time.Now().UnixNano())
 	exec(t, dbURL,
 		`CREATE ROLE `+role+` LOGIN PASSWORD 'index-reader'`,
-		`GRANT SELECT (id, slug) ON user_services TO `+role,
-		`GRANT SELECT (user_service_id, name, subtext, description, first_published_at)
+		`GRANT SELECT (id, slug, owner_id) ON user_services TO `+role,
+		`GRANT SELECT (id, name) ON users TO `+role,
+		`GRANT SELECT (user_service_id, name, subtext, description, published_at, first_published_at)
 		   ON service_publications TO `+role)
 	// Registered before the restricted pool's Close, so it runs after it:
 	// the role's privileges live in this database, and DROP OWNED clears them
@@ -302,6 +356,7 @@ func TestListPublishedServiceSummariesReadsOnlyCardColumns(t *testing.T) {
 		`SELECT vehicle FROM user_services`,
 		`SELECT name FROM user_services`,
 		`SELECT routes FROM service_publications`,
+		`SELECT email FROM users`,
 	} {
 		var pgErr *pgconn.PgError
 		_, err := conn.Exec(ctx, q)

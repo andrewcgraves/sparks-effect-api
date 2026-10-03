@@ -256,6 +256,14 @@ on `transit.Scenario` and the seed YAML, and the `status` key on
   curated alignment does not reach existing publications until their owners
   republish. That is the same trade the pinned graph already makes, and the two
   must not disagree.
+- **The author is live, not frozen** (SPA-426). The byline's `author_name` is
+  the owner's current `users.name`, joined through `user_services.owner_id` on
+  every public read, not a column copied at publish. A rename (SPA-385) or a
+  transfer (SPA-389) then changes the byline without a republish, which is what
+  attribution should do: the snapshot freezes what the *author* chose to show,
+  and who the author is was never one of those choices. It is the one thing a
+  public read takes through the draft row besides the slug, and like the slug
+  it carries no unpublished edit. The owner's email and id are never selected.
 
 ## Considered and rejected
 

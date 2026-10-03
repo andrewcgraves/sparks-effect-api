@@ -619,6 +619,46 @@ func TestGetServicePublicationBySlug(t *testing.T) {
 	}
 }
 
+// The author is read live through the draft's owner, not frozen with the
+// snapshot: a rename or a transfer changes the byline without a republish.
+func TestGetServicePublicationBySlugNamesTheCurrentOwner(t *testing.T) {
+	repo, ctx, url := userServiceFixture(t)
+	svc := sampleUserService()
+	if err := repo.CreateUserService(ctx, svc); err != nil {
+		t.Fatalf("CreateUserService: %v", err)
+	}
+	succeedUserServiceCompile(t, repo, ctx, svc.ID, pubJobID, nil)
+	if _, err := publishUserService(ctx, repo, svc.ID); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	authorName := func() string {
+		t.Helper()
+		got, found, err := repo.GetServicePublicationBySlug(ctx, svc.Slug)
+		if err != nil || !found {
+			t.Fatalf("GetServicePublicationBySlug: found=%v err=%v", found, err)
+		}
+		return got.AuthorName
+	}
+
+	if got := authorName(); got != "Owner" {
+		t.Fatalf("author = %q, want %q", got, "Owner")
+	}
+
+	if _, _, err := repo.UpdateUserName(ctx, usOwnerID, "Renamed Owner"); err != nil {
+		t.Fatalf("UpdateUserName: %v", err)
+	}
+	if got := authorName(); got != "Renamed Owner" {
+		t.Fatalf("author after rename = %q, want %q", got, "Renamed Owner")
+	}
+
+	// Accepting a handover moves owner_id; that is all this needs from it.
+	execSQL(t, url, `UPDATE user_services SET owner_id = $1 WHERE id = $2`, usStrangerID, svc.ID)
+	if got := authorName(); got != "Stranger" {
+		t.Fatalf("author after transfer = %q, want %q", got, "Stranger")
+	}
+}
+
 func TestGetSucceededCompileJob(t *testing.T) {
 	repo, ctx, _ := userServiceFixture(t)
 	svc := sampleUserService()

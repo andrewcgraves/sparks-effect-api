@@ -65,6 +65,10 @@ One more overload, on the same models. Every seeded-model row (`scenarios`,
   `first_published_at`, set on publishing and kept by every republish until the
   service is unpublished. The published index orders by it, newest first, so a
   republish keeps a service's place. *Published at* is the last publish.
+- **Byline** — who made a publication and when: `author_name`, the owner's
+  current display name (`users.name`, read live through `owner_id`, so a rename
+  or a transfer changes it without a republish), and `published_at`. Both public
+  reads carry it; neither carries the owner's email or id.
 
 **Public** is the adjective for what anyone may read: curated rows, and
 publications.
