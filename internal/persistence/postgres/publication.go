@@ -28,8 +28,10 @@ func (r *Repo) PublishUserService(ctx context.Context, serviceID string, decide 
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // rollback after commit is a no-op
 
+	// OF s keeps the lock on the draft. The join exists so the column list,
+	// which also reads the route, still scans; it must not lock the route.
 	svc, err := scanUserService(tx.QueryRow(ctx,
-		`SELECT `+userServiceColumns+` FROM user_services WHERE id = $1 FOR UPDATE`, serviceID))
+		`SELECT `+userServiceColumns+` FROM `+userServiceFrom+` WHERE s.id = $1 FOR UPDATE OF s`, serviceID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return transit.ServicePublication{}, fmt.Errorf("postgres: PublishUserService: no service with id %q", serviceID)
 	}

@@ -12,8 +12,14 @@ import (
 
 // --- User services (embedded stops, inline vehicle params) ---
 
-const userServiceColumns = `id, slug, route_id, owner_id, name, subtext, description,
-	vehicle, stops, boarding_wait_policy, boarding_wait_fixed_secs, created_at, updated_at`
+// r.slug and r.name are the route this service points at. They are not columns
+// of user_services; the join is what lets a list return them without a query
+// per row.
+const userServiceColumns = `s.id, s.slug, s.route_id, s.owner_id, s.name, s.subtext, s.description,
+	s.vehicle, s.stops, s.boarding_wait_policy, s.boarding_wait_fixed_secs, s.created_at, s.updated_at,
+	r.slug, r.name`
+
+const userServiceFrom = `user_services AS s JOIN routes AS r ON r.id = s.route_id`
 
 func (r *Repo) CreateUserService(ctx context.Context, svc transit.UserService) error {
 	vehicle, stops, err := marshalUserServiceDocs(svc)
@@ -96,12 +102,12 @@ func (r *Repo) DeleteUserService(ctx context.Context, id string) error {
 
 func (r *Repo) GetUserServiceByID(ctx context.Context, id string) (transit.UserService, bool, error) {
 	return r.getUserServiceBy(ctx, "GetUserServiceByID",
-		`SELECT `+userServiceColumns+` FROM user_services WHERE id = $1`, id)
+		`SELECT `+userServiceColumns+` FROM `+userServiceFrom+` WHERE s.id = $1`, id)
 }
 
 func (r *Repo) GetUserServiceBySlug(ctx context.Context, slug string) (transit.UserService, bool, error) {
 	return r.getUserServiceBy(ctx, "GetUserServiceBySlug",
-		`SELECT `+userServiceColumns+` FROM user_services WHERE slug = $1`, slug)
+		`SELECT `+userServiceColumns+` FROM `+userServiceFrom+` WHERE s.slug = $1`, slug)
 }
 
 func (r *Repo) getUserServiceBy(ctx context.Context, op, query, arg string) (transit.UserService, bool, error) {
@@ -123,8 +129,8 @@ func (r *Repo) getUserServiceBy(ctx context.Context, op, query, arg string) (tra
 
 func (r *Repo) ListUserServicesByOwner(ctx context.Context, ownerID string) ([]transit.UserService, error) {
 	rows, err := r.pool.Query(ctx,
-		`SELECT `+userServiceColumns+` FROM user_services
-		 WHERE owner_id = $1 ORDER BY created_at, id`, ownerID)
+		`SELECT `+userServiceColumns+` FROM `+userServiceFrom+`
+		 WHERE s.owner_id = $1 ORDER BY s.created_at, s.id`, ownerID)
 	if err != nil {
 		return nil, wrap("ListUserServicesByOwner", err)
 	}
@@ -163,8 +169,8 @@ func (r *Repo) ListUserServicesByIDs(ctx context.Context, ids []string) ([]trans
 	// id::text = ANY($1): consistent with UserServiceIDsOwnedBy, and tolerant of
 	// a value that is not a well-formed uuid rather than failing the query.
 	rows, err := r.pool.Query(ctx,
-		`SELECT `+userServiceColumns+` FROM user_services
-		 WHERE id::text = ANY($1) ORDER BY created_at, id`, ids)
+		`SELECT `+userServiceColumns+` FROM `+userServiceFrom+`
+		 WHERE s.id::text = ANY($1) ORDER BY s.created_at, s.id`, ids)
 	if err != nil {
 		return nil, wrap("ListUserServicesByIDs", err)
 	}
@@ -232,7 +238,8 @@ func scanUserService(row pgx.Row) (transit.UserService, error) {
 		secs           *int
 	)
 	if err := row.Scan(&svc.ID, &svc.Slug, &svc.RouteID, &svc.OwnerID, &svc.Name,
-		&svc.Subtext, &svc.Description, &vehicle, &stops, &kind, &secs, &svc.CreatedAt, &svc.UpdatedAt); err != nil {
+		&svc.Subtext, &svc.Description, &vehicle, &stops, &kind, &secs, &svc.CreatedAt, &svc.UpdatedAt,
+		&svc.RouteSlug, &svc.RouteName); err != nil {
 		return transit.UserService{}, err
 	}
 	svc.BoardingWait = scanBoardingWait(kind, secs)
