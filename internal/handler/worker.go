@@ -36,10 +36,11 @@ const maxWorkerFailedBodyBytes = 64 << 10
 
 type IsochroneKey = store.IsochroneKey
 type CachedIsochrone = store.CachedIsochrone
+type JobSucceededBody = store.JobSucceededBody
 
 type WorkerStore interface {
 	MarkRoutingJobRunning(ctx context.Context, id string) error
-	SucceedRoutingJob(ctx context.Context, id string, result json.RawMessage) error
+	SucceedRoutingJob(ctx context.Context, id string, done JobSucceededBody) error
 	FailRoutingJob(ctx context.Context, id, errMsg string) error
 	GetIsochroneCache(ctx context.Context, keys []IsochroneKey) (map[IsochroneKey]CachedIsochrone, error)
 	PutIsochroneCache(ctx context.Context, entries []CachedIsochrone) error
@@ -63,11 +64,14 @@ func WorkerMarkRunning(ws WorkerStore) http.HandlerFunc {
 
 func WorkerMarkSucceeded(ws WorkerStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var body store.JobSucceededBody
+		// tileset_at and reusable_until are what let a repeat request be
+		// answered from this job (SPA-331). An older worker sends neither, and
+		// its jobs are simply never reused.
+		var body JobSucceededBody
 		if !decodeWorkerBody(w, r, maxWorkerPolygonBodyBytes, &body) {
 			return
 		}
-		if err := ws.SucceedRoutingJob(r.Context(), r.PathValue("id"), body.Result); err != nil {
+		if err := ws.SucceedRoutingJob(r.Context(), r.PathValue("id"), body); err != nil {
 			writeWorkerStoreError(r, w, "marking routing job succeeded", err)
 			return
 		}

@@ -23,12 +23,21 @@ func (r *Repo) MarkRoutingJobRunning(ctx context.Context, id string) error {
 		id, transit.JobStatusRunning, transit.JobStatusSucceeded, transit.JobStatusFailed)
 }
 
-func (r *Repo) SucceedRoutingJob(ctx context.Context, id string, result json.RawMessage) error {
+func (r *Repo) SucceedRoutingJob(ctx context.Context, id string, done handler.JobSucceededBody) error {
 	return r.execRoutingJob(ctx, "SucceedRoutingJob", id,
 		`UPDATE routing_jobs
-		    SET status = $2, result = $3, error = '', updated_at = now()
+		    SET status = $2, result = $3, error = '', updated_at = now(),
+		        tileset_at = $4, reusable_until = $5
 		  WHERE id = $1`,
-		id, transit.JobStatusSucceeded, []byte(result))
+		id, transit.JobStatusSucceeded, []byte(done.Result),
+		nullTime(done.TilesetAt), nullTime(done.ReusableUntil))
+}
+
+func nullTime(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	return &t
 }
 
 func (r *Repo) execRoutingJob(ctx context.Context, op, id, sql string, args ...any) error {
@@ -129,14 +138,9 @@ func (r *Repo) PutIsochroneCache(ctx context.Context, entries []handler.CachedIs
 	// while losing the put costs one recompute on the next request.
 	batch := &pgx.Batch{}
 	for _, e := range entries {
-		var tilesetAt *time.Time
-		if !e.TilesetAt.IsZero() {
-			at := e.TilesetAt
-			tilesetAt = &at
-		}
 		batch.Queue(putIsochroneCacheSQL,
 			e.Key.CompileJobID, e.Key.StationSlug, e.Key.Mode, e.Key.ContourMins,
-			[]byte(e.Geometry), tilesetAt, e.Key.DepartsOn, e.Key.BudgetMins)
+			[]byte(e.Geometry), nullTime(e.TilesetAt), e.Key.DepartsOn, e.Key.BudgetMins)
 	}
 
 	if err := r.pool.SendBatch(ctx, batch).Close(); err != nil {

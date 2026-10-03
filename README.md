@@ -26,9 +26,10 @@ Compile() → TransitGraph, stored as a succeeded compile job
   • nodes (position + names) so the graph plots on its own
         │
         ▼
-POST /api/isochrone  →  202 + routing job
+POST /api/isochrone  →  202 + routing job (200 + an earlier one, on a repeat)
   • resolves auth, ownership, target slug, and the stale-graph check
-  • publishes { graph, lat, lng, budget_mins, mode } with publisher confirms
+  • answers a repeat with the earlier succeeded job, publishing nothing
+  • otherwise publishes { graph, lat, lng, budget_mins, mode } with publisher confirms
         │
         ▼
 routing worker (separate repo, inside the cluster)
@@ -159,6 +160,20 @@ Since SPA-357 anyone on the internet can spend it, through a publication's
 isochrone as well as `POST /api/isochrone`, so an anonymous flood fills the
 same backlog an owner's draft isochrone waits on; the per-IP limit below is
 what keeps one caller from doing that alone.
+
+### Reusing a previous job
+
+Since SPA-331 an isochrone request that repeats one already answered is
+answered with that earlier routing job: `200` with the succeeded job, no new
+row, no queue message, nothing counted against the backlog. A repeat means the
+same compiled graph, mode, budget and owner, at an origin equal to five decimal
+places, and the earlier result still fresh: not past the service date the
+worker computed it for (`reusable_until`), and cut from the newest tileset any
+job has reported (`tileset_at`). The rules and their reasoning are in migration
+`00034`; the word is defined in [`CONTEXT.md`](CONTEXT.md).
+
+The backlog cap above still runs first, so at a full backlog a repeat is
+refused with `429` like any other request.
 
 ### Per-caller rate limits
 
@@ -342,7 +357,8 @@ message for any isochrone the request enqueues, so one request's logs can be
 followed across both services in Grafana.
 
 Sample request for San Jose downtown, walk 90 min, ca-hsr scenario. It answers
-202 with a routing job; poll that job for the result.
+202 with a routing job; poll that job for the result. Sent again, it answers 200
+with the same, already succeeded, job.
 
 ```sh
 JOB=$(curl -s -X POST http://localhost:8080/api/isochrone \
@@ -472,6 +488,7 @@ scenario/route reads or `/api/internal/*`.
 | `GET /api/admin/users` | admin | Every account, oldest first, with `disabled_at` and how many UserServices it authored (`service_count`) and has published (`published_count`) |
 | `PATCH /api/admin/users/{id}` | admin | Set `is_admin` and/or `disabled`; disabling revokes the account's sessions. An admin demoting or disabling themselves gets 409 |
 | `POST /api/admin/routes` | admin | Ingest a curated alignment |
+| `POST /api/admin/retention` | admin | Dry-run (empty body or `{"apply":false}`) or apply (`{"apply":true}`) isochrone-cache and routing-job-result retention. See [`docs/retention.md`](docs/retention.md) |
 | `POST /api/scenarios/{slug}/prerendered-isochrones` | admin | Curate a ready-to-display isochrone for a scenario |
 
 ### Owning the seeded models

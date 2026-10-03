@@ -888,7 +888,7 @@ func (r *Repo) latestSucceededJobBySlug(ctx context.Context, targetTable, fkColu
 		`SELECT `+jobColumnsQualified+`
 		 FROM jobs j JOIN `+targetTable+` t ON t.id = j.`+fkColumn+`
 		 WHERE t.slug = $1 AND j.kind = $2 AND j.status = $3
-		 ORDER BY j.created_at DESC LIMIT 1`,
+		 ORDER BY j.created_at DESC, j.id DESC LIMIT 1`,
 		slug, kind, transit.JobStatusSucceeded)
 	return scanJob(row)
 }
@@ -930,15 +930,42 @@ func (r *Repo) CreateRoutingJob(ctx context.Context, j *transit.RoutingJob) erro
 }
 
 func (r *Repo) GetRoutingJobByID(ctx context.Context, id string) (transit.RoutingJob, bool, error) {
+	return r.queryRoutingJob(ctx, "GetRoutingJobByID",
+		`SELECT `+routingJobColumns+` FROM routing_jobs WHERE id = $1`, id)
+}
+
+// The key, quantisation and freshness rules are migration 00034's. The
+// round(..., 5) expressions and the status literal must match
+// routing_jobs_reuse_idx for the index to serve this.
+func (r *Repo) FindReusableRoutingJob(ctx context.Context, want transit.RoutingJob) (transit.RoutingJob, bool, error) {
+	return r.queryRoutingJob(ctx, "FindReusableRoutingJob", findReusableRoutingJobSQL,
+		want.CompileJobID, string(want.Mode), want.BudgetMins, want.Lat, want.Lng, want.OwnerID)
+}
+
+const findReusableRoutingJobSQL = `SELECT ` + routingJobColumns + `
+		   FROM routing_jobs
+		  WHERE status = 'succeeded'
+		    AND compile_job_id = $1
+		    AND mode = $2
+		    AND budget_mins = $3
+		    AND round(lat::numeric, 5) = round($4::float8::numeric, 5)
+		    AND round(lng::numeric, 5) = round($5::float8::numeric, 5)
+		    AND owner_id IS NOT DISTINCT FROM $6::uuid
+		    AND (reusable_until IS NULL OR reusable_until > now())
+		    AND tileset_at = (SELECT max(tileset_at) FROM routing_jobs WHERE status = 'succeeded')
+		  ORDER BY updated_at DESC
+		  LIMIT 1`
+
+func (r *Repo) queryRoutingJob(ctx context.Context, op, sql string, args ...any) (transit.RoutingJob, bool, error) {
 	var j transit.RoutingJob
-	err := r.pool.QueryRow(ctx, `SELECT `+routingJobColumns+` FROM routing_jobs WHERE id = $1`, id).
+	err := r.pool.QueryRow(ctx, sql, args...).
 		Scan(&j.ID, &j.Status, &j.CompileJobID, &j.OwnerID, &j.Lat, &j.Lng,
 			&j.BudgetMins, &j.Mode, &j.Result, &j.Error, &j.CreatedAt, &j.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return transit.RoutingJob{}, false, nil
 	}
 	if err != nil {
-		return transit.RoutingJob{}, false, wrap("GetRoutingJobByID", err)
+		return transit.RoutingJob{}, false, wrap(op, err)
 	}
 	return j, true, nil
 }

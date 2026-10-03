@@ -47,6 +47,10 @@ CREATE TABLE routing_jobs (
 );
 
 -- The worker claims queued work by status; nothing else scans this table.
+--
+-- Amended by SPA-331: no longer true. Migration 00034 adds a lookup by graph,
+-- mode, budget and origin, so a repeated isochrone request can be answered
+-- from a succeeded job, and indexes it there.
 CREATE INDEX routing_jobs_status_idx ON routing_jobs (status);
 
 -- Valhalla's per-station isochrone polygons, cached so the same station at the

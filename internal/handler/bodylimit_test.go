@@ -215,7 +215,7 @@ func TestWorkerMarkSucceeded_413_recordsNothing(t *testing.T) {
 	big := `{"result":{"pad":"` + strings.Repeat("x", 9<<20) + `"}}`
 
 	assertTooLarge(t, postJSON(t, handler.WorkerMarkSucceeded(store), "/api/internal/routing-jobs/j/succeeded", big))
-	if store.result != nil {
+	if store.succeededID != "" {
 		t.Error("an oversized result reached the store")
 	}
 }
