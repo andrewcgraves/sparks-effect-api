@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/ids"
@@ -117,6 +118,11 @@ func GetService(store ServiceStore, boardingWait transit.BoardingWaitPolicy) htt
 	}
 }
 
+type ownerServiceView struct {
+	transit.UserService
+	PublishedAt *time.Time `json:"published_at"`
+}
+
 func MyUserServices(store ServiceStore, boardingWait transit.BoardingWaitPolicy) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := auth.UserFrom(r.Context())
@@ -133,7 +139,14 @@ func MyUserServices(store ServiceStore, boardingWait transit.BoardingWaitPolicy)
 		if services == nil {
 			services = []transit.UserService{}
 		}
-		writeJSON(w, http.StatusOK, withBoardingWaits(r.Context(), services, nil, boardingWait))
+		services = withBoardingWaits(r.Context(), services, nil, boardingWait)
+		// The outer field shadows UserService.PublishedAt (json:"-"), so the
+		// list emits the key once and a missing publication stays null.
+		views := make([]ownerServiceView, len(services))
+		for i, svc := range services {
+			views[i] = ownerServiceView{UserService: svc, PublishedAt: svc.PublishedAt}
+		}
+		writeJSON(w, http.StatusOK, views)
 	}
 }
 

@@ -117,7 +117,7 @@ func (r *Repo) getUserScenarioBy(ctx context.Context, op, query, arg string) (tr
 func (r *Repo) ListUserScenariosByOwner(ctx context.Context, ownerID string) ([]transit.UserScenario, error) {
 	rows, err := r.pool.Query(ctx,
 		`SELECT `+userScenarioColumns+` FROM user_scenarios
-		 WHERE owner_id = $1 ORDER BY created_at, id`, ownerID)
+		 WHERE owner_id = $1 ORDER BY updated_at DESC, id`, ownerID)
 	if err != nil {
 		return nil, wrap("ListUserScenariosByOwner", err)
 	}
