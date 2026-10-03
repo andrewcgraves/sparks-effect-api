@@ -163,7 +163,7 @@ func TestListPublishedServiceSummariesOrdersMostRecentlyFirstPublishedFirst(t *t
 
 // A card's date is the latest publish, the same instant the public page shows,
 // while its place in the index stays at the first. Its byline is joined on
-// read, so a rename or a transfer reaches it without a republish.
+// read, so a rename or a handover reaches it without a republish.
 func TestListPublishedServiceSummariesCardDateAndBylineAreCurrent(t *testing.T) {
 	repo, ctx, dbURL := userServiceFixture(t)
 	svc := indexedService(idxServiceA, "card-line", "Card Line")
@@ -195,7 +195,7 @@ func TestListPublishedServiceSummariesCardDateAndBylineAreCurrent(t *testing.T) 
 	}
 	execSQL(t, dbURL, `UPDATE user_services SET owner_id = $1 WHERE id = $2`, usStrangerID, svc.ID)
 	if got := card().AuthorName; got != "Stranger" {
-		t.Fatalf("author_name after a transfer = %q, want %q", got, "Stranger")
+		t.Fatalf("author_name after a handover = %q, want %q", got, "Stranger")
 	}
 }
 

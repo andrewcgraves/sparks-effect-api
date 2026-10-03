@@ -67,8 +67,8 @@ One more overload, on the same models. Every seeded-model row (`scenarios`,
   republish keeps a service's place. *Published at* is the last publish.
 - **Author** — who a publication is credited to: the service's current owner,
   shown publicly by display name only (`author_name`). It is the one part of a
-  publication that is live rather than frozen, so a rename or a transfer
-  reaches the byline without a republish.
+  publication that is live rather than frozen, so a rename or a handover
+  reaches the attribution without a republish.
 
 **Public** is the adjective for what anyone may read: curated rows, and
 publications.

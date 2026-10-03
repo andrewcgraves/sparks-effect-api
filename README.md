@@ -514,8 +514,11 @@ unpublished drafts there either
 ([ADR-0005](docs/adr/0005-publishing-an-authored-service.md)). The prose is the
 publication's frozen copy, so a draft edit does not show until it is
 republished. `author_name` is not frozen: it is the owner's current display
-name, joined on read, so renaming the author or transferring the service
+name, joined on read, so renaming the author or handing the service over
 changes the byline without a republish. Their email and id are never selected.
+`author_name` is always present but may be empty — an account provisioned
+without a display name that has not set one through `PATCH /api/auth/me` — so a
+client omits the "by …" part rather than printing an empty one.
 `ListPublishedServiceSummaries` selects neither the stops or
 vehicle documents nor the publication's routes, and migration 00033 indexes
 `first_published_at` for its sort.

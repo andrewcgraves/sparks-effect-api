@@ -100,7 +100,7 @@ func TestIntegration_PublishedServicesIndexListsOnlyPublications(t *testing.T) {
 	}
 	publish(first)
 
-	anonBody, items := index("")
+	_, items := index("")
 	if len(items) != 1 {
 		t.Fatalf("index = %v, want only %s", slugs(items), first.Slug)
 	}
@@ -140,7 +140,7 @@ func TestIntegration_PublishedServicesIndexListsOnlyPublications(t *testing.T) {
 	if err := json.Unmarshal(pubRec.Body.Bytes(), &pub); err != nil || pub["author_name"] != "Ida Renamed" {
 		t.Fatalf("publication after rename: author_name %v, err %v", pub["author_name"], err)
 	}
-	anonBody, _ = index("")
+	anonBody, _ := index("")
 
 	// The owner of an unpublished draft does not see it listed: the index is
 	// the same for everyone who asks.

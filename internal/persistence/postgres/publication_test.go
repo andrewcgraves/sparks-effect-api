@@ -660,7 +660,7 @@ func TestPublicationAuthorNameIsLive(t *testing.T) {
 
 	execSQL(t, dbURL, `UPDATE user_services SET owner_id = $1 WHERE id = $2`, usStrangerID, svc.ID)
 	if got := authorName(); got != "Stranger" {
-		t.Fatalf("author_name after a transfer = %q, want %q", got, "Stranger")
+		t.Fatalf("author_name after a handover = %q, want %q", got, "Stranger")
 	}
 }
 

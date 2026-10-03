@@ -261,7 +261,7 @@ on `transit.Scenario` and the seed YAML, and the `status` key on
   `user_services.owner_id` → `users.name`, rather than a column copied at
   publish. Attribution is a fact about who stands behind the page now, not part
   of what the author previewed: a frozen name would keep crediting the previous
-  owner after a transfer (SPA-389) and keep showing a name the author has since
+  owner after a handover (SPA-389) and keep showing a name the author has since
   changed (SPA-385). This is the one deliberate exception to section 3's "a
   public read never reads the draft row", and it is narrow: the read takes the
   owner reference, which an edit to the draft cannot change, and the owner's

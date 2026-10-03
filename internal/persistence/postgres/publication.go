@@ -12,11 +12,10 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// The author's name is the one live part of a publication: it is the owner's
-// current display name, joined on read, so a rename or a transfer reaches the
-// byline without a republish (ADR-0005). Only the name is selected; the
-// owner's id and email never leave the database on a public read. Qualified
-// by p so the same list serves a SELECT and the upsert's RETURNING.
+// The last column is the owner's current name, live rather than frozen
+// (ADR-0005 consequences); nothing else of theirs is selected. A correlated
+// subquery rather than a join, and qualified by p, so the same list serves a
+// SELECT and the upsert's RETURNING.
 const publicationColumns = `p.user_service_id, p.compile_job_id, p.name, p.subtext, p.description, p.routes, p.published_at,
 	(SELECT u.name FROM user_services s JOIN users u ON u.id = s.owner_id WHERE s.id = p.user_service_id)`
 
