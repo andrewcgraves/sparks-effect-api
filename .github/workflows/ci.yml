@@ -45,6 +45,9 @@ jobs:
         run: golangci-lint run ./...
         working-directory: contract
 
+      - name: Vulnerability scan
+        run: make vulncheck
+
   # The golden fixtures are duplicated in the routing-worker repo. Drift is a
   # contract break, not a test failure — keep this job separate so a red
   # light reads as "the contract moved" rather than "a test broke".

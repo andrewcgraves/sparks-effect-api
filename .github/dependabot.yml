@@ -1,0 +1,33 @@
+# Weekly update PRs (SPA-435). Minor and patch updates are grouped into one PR
+# per ecosystem; a major update gets a PR of its own, because that is where
+# breaking changes live. Nothing auto-merges: every PR goes through CI and a
+# human, the same as any other change to main.
+version: 2
+updates:
+  # contract/ is a module of its own, and Dependabot only reads the go.mod in
+  # the directories it is given.
+  - package-ecosystem: gomod
+    directories: [/, /contract]
+    schedule:
+      interval: weekly
+    groups:
+      gomod-minor-patch:
+        update-types: [minor, patch]
+
+  # Both stages of the Dockerfile: the golang build image and the
+  # digest-pinned distroless runtime image.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      docker-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions-minor-patch:
+        update-types: [minor, patch]
