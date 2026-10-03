@@ -93,6 +93,7 @@ type. `User` and `Session` live in `internal/account`.
 | **Prerendered isochrone** | An admin-curated, ready-to-display isochrone stored against a scenario, so a public page can show a result without enqueueing one. Also called a *curated* isochrone |
 | **User** | `account.User` — an authenticated person. Authored rows point at them through `owner_id`. `is_admin` is the only privilege bit: it gates curated writes and `/api/admin/users`. `disabled_at` (nullable timestamptz) removes sign-in without deleting the person or their authored rows; NULL means the account can sign in. Publications stay published; attribution still shows the display name |
 | **Session** | `account.Session` — a hashed bearer token bound to a User, with an expiry. The raw token is returned once at login and never stored |
+| **Handover** | `transit.ServiceHandover` — moving a `UserService`, with its publication and compile history, from one owner to another. **Offered** by the owner (or an admin, on the owner's behalf) to another account by email, then **accepted** or **declined** by the recipient, or **cancelled** by the owner while it is **pending**. A pending offer past `expires_at` (14 days) reads as **expired**, though nothing rewrites the row: expiry is lazy. A service has at most one pending handover, and its slug and public URL survive one. Table `service_handovers`, routes under `/api/.../handovers`. Not a *transfer*: see [interchange](#interchange) |
 
 ## Terms of art
 
@@ -143,6 +144,10 @@ everyday one.
   when present), and what `SegmentTime.RunSeconds` holds.
 
 ### Interchange
+
+**Transfer** is reserved for this sense, a rider changing service (SPA-225,
+SPA-347), and is otherwise not a domain word here. Moving a service between
+owners is a [handover](#core-nouns).
 
 **There is no transfer edge.** The whole of interchange is *two services
 emitting an edge under one node key*. Nothing in the graph represents changing

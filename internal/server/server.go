@@ -39,6 +39,7 @@ type AuthDeps interface {
 	handler.PublicationStore
 	handler.ServicePublicationStore
 	handler.PublishedServiceStore
+	handler.HandoverStore
 	GetSessionUser(ctx context.Context, tokenHash string) (account.User, bool, error)
 }
 
@@ -232,6 +233,7 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 			"/api/scenarios/{slug}/compile", "/api/jobs/{id}",
 			"/api/services", "/api/services/",
 			"/api/user-scenarios", "/api/user-scenarios/",
+			"/api/me/handovers", "/api/handovers/",
 		} {
 			mux.HandleFunc(pattern, noDatabase("authentication is unavailable"))
 		}
@@ -358,6 +360,17 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 	mux.Handle("POST /api/services/{slug}/publication/isochrone",
 		limitIso(requirePublisher(publisher,
 			capBacklog(handler.PublicationIsochrone(deps, publisher, lg)))))
+
+	// Handing a service over to another account (SPA-388). The offer answers
+	// 202 with one body whether or not the address is an account, so it
+	// cannot be used to probe for them. Only the sender may cancel and only
+	// the recipient may decline; anyone else, an admin included, gets 404.
+	// Accepting is SPA-389. The database-less 503 for the offer comes from
+	// the "/api/services/" entry.
+	mux.Handle("POST /api/services/{slug}/handovers", authenticated(handler.OfferHandover(deps)))
+	mux.Handle("GET /api/me/handovers", authenticated(handler.MyHandovers(deps)))
+	mux.Handle("POST /api/handovers/{id}/cancel", authenticated(handler.CancelHandover(deps)))
+	mux.Handle("POST /api/handovers/{id}/decline", authenticated(handler.DeclineHandover(deps)))
 
 	// User-owned scenarios: owner-scoped CRUD over a curated set of UserService
 	// ids. Named /api/user-scenarios, distinct from the public /api/scenarios
