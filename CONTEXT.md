@@ -189,8 +189,9 @@ through a node both of them touch.
   `rate_limited`.
 - **Park** / **parked** — `Service.Active = false`. A parked service stays in the
   seed and in the database, documented, but is skipped by the compiler. It is how
-  a stopping pattern is retired without deleting it. (CA HSR's HSR Express is the
-  standing example.)
+  a stopping pattern is retired without deleting it. Un-parking reaches a
+  deployed database through `ReconcileSeed`, since `active` is seed content.
+  (CA HSR's HSR Express was parked from SPA-223 until SPA-464.)
 - **Provenance tier** — how a service's timings were arrived at, and therefore
   which editor levers are honest: `computed` (physics-compiled, all levers),
   `calibrated` (imported timetable run times; dwell, frequency and stops

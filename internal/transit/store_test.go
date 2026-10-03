@@ -211,19 +211,15 @@ func TestGetServicesByScenario(t *testing.T) {
 	services := store.GetServicesByScenario(sc.ID)
 
 	// Named rather than counted, so this says which services the store is meant
-	// to hand out — and, in the case of the parked express pattern, which it is
-	// meant to withhold.
+	// to hand out.
 	served := make(map[string]bool, len(services))
 	for _, svc := range services {
 		served[svc.Name] = true
 	}
-	for _, want := range []string{"HSR Local", "Merced Shuttle", "Brightline West"} {
+	for _, want := range []string{"HSR Express", "HSR Local", "Merced Shuttle", "Brightline West"} {
 		if !served[want] {
 			t.Errorf("expected active service %q", want)
 		}
-	}
-	if served["HSR Express"] {
-		t.Error("HSR Express is seeded active: false and must not be served")
 	}
 
 	for _, svc := range services {
@@ -419,21 +415,25 @@ func sumStopToStop(t *testing.T, adj map[string]int, name string, stops []string
 
 func TestTravelTimeBetween_caHSRCorridorDirectionsDiffer(t *testing.T) {
 	store := mustNewStore(t)
+	allStop := compileCAHSR(t, store, withoutExpress)
 
-	got, _, _, ok := store.TravelTimeBetween("ca-hsr", "sf", "anaheim")
-	if !ok {
-		t.Fatal("TravelTimeBetween: sf→anaheim not found")
-	}
-	if got != 18300 {
-		t.Errorf("sf→anaheim: want 18300 (run sum 17310 + 11×dwell 90), got %d", got)
-	}
-
-	got, _, _, ok = store.TravelTimeBetween("ca-hsr", "anaheim", "sf")
-	if !ok {
-		t.Fatal("TravelTimeBetween: anaheim→sf not found")
-	}
-	if got != 18180 {
-		t.Errorf("anaheim→sf: want 18180 (run sum 17190 + 11×dwell 90), got %d", got)
+	// The Local calls at 11 stations after its origin; the Express at 9.
+	for _, tc := range []struct {
+		from, to string
+		local    int
+		fastest  int
+	}{
+		{"sf", "anaheim", 17310 + 11*90, 17310 + 9*90},
+		{"anaheim", "sf", 17190 + 11*90, 17190 + 9*90},
+	} {
+		got, _, _, ok := graphDijkstra(allStop, tc.from, tc.to)
+		if !ok || got != tc.local {
+			t.Errorf("%s→%s all-stop: want %d, got %d (found %v)", tc.from, tc.to, tc.local, got, ok)
+		}
+		got, _, _, ok = store.TravelTimeBetween("ca-hsr", tc.from, tc.to)
+		if !ok || got != tc.fastest {
+			t.Errorf("%s→%s via HSR Express: want %d, got %d (found %v)", tc.from, tc.to, tc.fastest, got, ok)
+		}
 	}
 }
 
