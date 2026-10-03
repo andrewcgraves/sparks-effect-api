@@ -36,18 +36,21 @@ func (f *fakeAuthStore) UpdateUserName(_ context.Context, id, name string) (acco
 	return rec.user, true, nil
 }
 
-func (f *fakeAuthStore) ChangePassword(_ context.Context, id, hash, keepTokenHash string) (bool, error) {
+func (f *fakeAuthStore) ChangePassword(_ context.Context, c account.PasswordChange) (bool, error) {
 	if f.failWith != nil {
 		return false, f.failWith
 	}
-	email, rec, ok := f.recordByID(id)
-	if !ok {
+	email, rec, ok := f.recordByID(c.UserID)
+	if !ok || rec.hash != c.CurrentHash {
 		return false, nil
 	}
-	rec.hash = hash
+	if _, live := f.sessions[c.KeepTokenHash]; !live {
+		return false, nil
+	}
+	rec.hash = c.NewHash
 	f.users[email] = rec
 	for h, s := range f.sessions {
-		if s.UserID == id && h != keepTokenHash {
+		if s.UserID == c.UserID && h != c.KeepTokenHash {
 			delete(f.sessions, h)
 		}
 	}
@@ -148,6 +151,26 @@ func TestChangePasswordStoresTheNewHashAndKeepsOnlyThePresentingSession(t *testi
 	}
 	if _, ok := store.sessions[second]; ok {
 		t.Error("a second session survived the password change")
+	}
+}
+
+func TestChangePasswordAnswersConflictWhenTheStoreRefuses(t *testing.T) {
+	store := newFakeAuthStore(t)
+	// A token with no live session behind it, as when a concurrent revoke-all
+	// lands between authentication and the change.
+	token, _, err := auth.NewToken()
+	if err != nil {
+		t.Fatalf("NewToken: %v", err)
+	}
+
+	rec := callAs(t, handler.ChangePassword(store, testHasher), http.MethodPost, "/api/auth/password", token, signedInUser,
+		`{"current_password":"correct-password","new_password":"`+strongPassword+`"}`)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body %s", rec.Code, rec.Body.String())
+	}
+	if !auth.VerifyPassword(store.users[signedInUser.Email].hash, "correct-password") {
+		t.Error("password changed although the store refused")
 	}
 }
 

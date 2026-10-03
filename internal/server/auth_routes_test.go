@@ -72,7 +72,7 @@ func (s *stubAuthDeps) UserServiceIDsOwnedBy(context.Context, string, []string) 
 func (s *stubAuthDeps) UpdateUserName(context.Context, string, string) (account.User, bool, error) {
 	return account.User{}, false, nil
 }
-func (s *stubAuthDeps) ChangePassword(context.Context, string, string, string) (bool, error) {
+func (s *stubAuthDeps) ChangePassword(context.Context, account.PasswordChange) (bool, error) {
 	return false, nil
 }
 func (s *stubAuthDeps) DeleteUserSessions(context.Context, string) error       { return nil }

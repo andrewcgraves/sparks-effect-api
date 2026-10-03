@@ -18,3 +18,14 @@ type Session struct {
 	CreatedAt time.Time
 	ExpiresAt time.Time
 }
+
+// CurrentHash is the hash the caller's current password was verified
+// against. The change applies only while it is still the stored one, so two
+// concurrent changes cannot both win, and only while KeepTokenHash is still a
+// live session of the user's.
+type PasswordChange struct {
+	UserID        string
+	CurrentHash   string
+	NewHash       string
+	KeepTokenHash string
+}

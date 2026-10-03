@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -41,7 +42,7 @@ func Login(store AuthStore, ttl time.Duration, hasher auth.Hasher) http.HandlerF
 		// The body is capped before the decode: this route is public, and the
 		// credential lookup and bcrypt comparison below are the expensive part.
 		var req loginRequest
-		if !decodeSmallBody(w, r, &req) {
+		if !decodeAuthBody(w, r, &req) {
 			return
 		}
 
@@ -120,7 +121,7 @@ func Me() http.HandlerFunc {
 type AccountStore interface {
 	GetUserCredentialsByEmail(ctx context.Context, email string) (account.User, string, bool, error)
 	UpdateUserName(ctx context.Context, id, name string) (account.User, bool, error)
-	ChangePassword(ctx context.Context, id, passwordHash, keepTokenHash string) (bool, error)
+	ChangePassword(ctx context.Context, c account.PasswordChange) (bool, error)
 	DeleteUserSessions(ctx context.Context, userID string) error
 }
 
@@ -140,7 +141,7 @@ func UpdateMe(store AccountStore) http.HandlerFunc {
 			return
 		}
 		var req updateMeRequest
-		if !decodeSmallBody(w, r, &req) {
+		if !decodeAuthBody(w, r, &req) {
 			return
 		}
 
@@ -156,7 +157,7 @@ func UpdateMe(store AccountStore) http.HandlerFunc {
 			return
 		case utf8.RuneCountInString(name) > maxNameRunes:
 			writeUnprocessable(w, fault.ValidationFaults{
-				fault.Whole("name", fault.RuleMaxLength, "name must be at most 80 characters"),
+				fault.Whole("name", fault.RuleMaxLength, fmt.Sprintf("name must be at most %d characters", maxNameRunes)),
 			}.Err())
 			return
 		}
@@ -189,7 +190,7 @@ func ChangePassword(store AccountStore, hasher auth.Hasher) http.HandlerFunc {
 			return
 		}
 		var req changePasswordRequest
-		if !decodeSmallBody(w, r, &req) {
+		if !decodeAuthBody(w, r, &req) {
 			return
 		}
 
@@ -217,14 +218,21 @@ func ChangePassword(store AccountStore, hasher auth.Hasher) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
-		changed, err := store.ChangePassword(r.Context(), user.ID, newHash, auth.HashToken(token))
+		changed, err := store.ChangePassword(r.Context(), account.PasswordChange{
+			UserID:        user.ID,
+			CurrentHash:   hash,
+			NewHash:       newHash,
+			KeepTokenHash: auth.HashToken(token),
+		})
 		if err != nil {
 			slog.ErrorContext(r.Context(), "handler: changing password failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
 		if !changed {
-			writeError(w, http.StatusUnauthorized, "authentication required")
+			// A concurrent change, a revoked session or a disable got there
+			// first; none of those leaves this caller entitled to retry as-is.
+			writeError(w, http.StatusConflict, "the account changed during the request; sign in again")
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -247,7 +255,7 @@ func RevokeAllSessions(store AccountStore) http.HandlerFunc {
 	}
 }
 
-func decodeSmallBody(w http.ResponseWriter, r *http.Request, dst any) bool {
+func decodeAuthBody(w http.ResponseWriter, r *http.Request, dst any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, maxAuthBodyBytes)
 	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
 		var tooLarge *http.MaxBytesError

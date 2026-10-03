@@ -672,14 +672,15 @@ func (r *Repo) SetUserDisabled(ctx context.Context, id string, disabled bool) er
 
 func (r *Repo) UpdateUserName(ctx context.Context, id, name string) (account.User, bool, error) {
 	return scanUser(r.pool.QueryRow(ctx,
-		`UPDATE users SET name = $2, updated_at = now() WHERE id = $1 RETURNING `+userColumns, id, name))
+		`UPDATE users SET name = $2, updated_at = now() WHERE id = $1 AND disabled_at IS NULL RETURNING `+userColumns, id, name))
 }
 
-// ChangePassword answers false, changing nothing, for a user that is missing
-// or disabled. The hash update and the revocation of every other session share
-// one transaction, so a stolen session cannot outlive the password change that
-// was meant to end it.
-func (r *Repo) ChangePassword(ctx context.Context, id, passwordHash, keepTokenHash string) (bool, error) {
+// ChangePassword answers false, changing nothing, when the user is missing or
+// disabled, the stored hash is no longer c.CurrentHash, or the presenting
+// session is gone. The hash update and the revocation of every other session
+// share one transaction, so a stolen session cannot outlive the password
+// change that was meant to end it.
+func (r *Repo) ChangePassword(ctx context.Context, c account.PasswordChange) (bool, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return false, wrap("ChangePassword begin", err)
@@ -687,8 +688,10 @@ func (r *Repo) ChangePassword(ctx context.Context, id, passwordHash, keepTokenHa
 	defer tx.Rollback(ctx) //nolint:errcheck // rollback after commit is a no-op
 
 	tag, err := tx.Exec(ctx,
-		`UPDATE users SET password_hash = $2, updated_at = now() WHERE id = $1 AND disabled_at IS NULL`,
-		id, passwordHash)
+		`UPDATE users SET password_hash = $2, updated_at = now()
+		 WHERE id = $1 AND password_hash = $3 AND disabled_at IS NULL
+		   AND EXISTS (SELECT 1 FROM sessions WHERE token_hash = $4 AND user_id = $1 AND expires_at > now())`,
+		c.UserID, c.NewHash, c.CurrentHash, c.KeepTokenHash)
 	if err != nil {
 		return false, wrap("ChangePassword", err)
 	}
@@ -696,7 +699,7 @@ func (r *Repo) ChangePassword(ctx context.Context, id, passwordHash, keepTokenHa
 		return false, nil
 	}
 	if _, err := tx.Exec(ctx,
-		`DELETE FROM sessions WHERE user_id = $1 AND token_hash <> $2`, id, keepTokenHash); err != nil {
+		`DELETE FROM sessions WHERE user_id = $1 AND token_hash <> $2`, c.UserID, c.KeepTokenHash); err != nil {
 		return false, wrap("ChangePassword sessions", err)
 	}
 	if err := tx.Commit(ctx); err != nil {

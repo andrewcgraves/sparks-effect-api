@@ -404,7 +404,7 @@ scenario/route reads or `/api/internal/*`.
 | `POST /api/auth/logout` | authenticated | Revoke the presented token |
 | `GET /api/auth/me` | authenticated | The caller's identity and admin flag |
 | `PATCH /api/auth/me` | authenticated | Set the caller's display name (`{name}`, 1–80 characters after trimming); nothing else on the account changes |
-| `POST /api/auth/password` | authenticated | Change the caller's password (`{current_password, new_password}`): `401` on a wrong current password, `422` `validation` on a weak new one. Revokes every other session; the presenting one keeps working |
+| `POST /api/auth/password` | authenticated | Change the caller's password (`{current_password, new_password}`): `401` on a wrong current password, `422` `validation` on a weak new one, `409` if a concurrent change or revocation got there first. Revokes every other session; the presenting one keeps working |
 | `POST /api/auth/sessions/revoke-all` | authenticated | Revoke every session the caller has, the presenting one included. `204` |
 | `GET /api/me/scenarios` | authenticated | Seeded Scenarios the caller owns |
 | `GET /api/me/services` | authenticated | Seeded Services the caller owns, not UserServices |

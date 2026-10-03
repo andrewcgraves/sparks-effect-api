@@ -39,11 +39,10 @@ func TestChangePasswordKeepsOnlyThePresentingSession(t *testing.T) {
 	second := mustCreateSession(t, repo, u.ID)
 	othersSession := mustCreateSession(t, repo, other.ID)
 
-	newHash, err := auth.NewHasher(bcrypt.MinCost).Hash("brand-new-password")
-	if err != nil {
-		t.Fatalf("Hash: %v", err)
-	}
-	ok, err := repo.ChangePassword(ctx, u.ID, newHash, presenting)
+	ok, err := repo.ChangePassword(ctx, account.PasswordChange{
+		UserID: u.ID, CurrentHash: storedHash(t, repo, u.Email),
+		NewHash: mustHash(t, "brand-new-password"), KeepTokenHash: presenting,
+	})
 	if err != nil || !ok {
 		t.Fatalf("ChangePassword: ok=%v err=%v", ok, err)
 	}
@@ -66,22 +65,94 @@ func TestChangePasswordKeepsOnlyThePresentingSession(t *testing.T) {
 	}
 }
 
-func TestChangePasswordRefusesADisabledOrMissingUser(t *testing.T) {
+func mustHash(t *testing.T, password string) string {
+	t.Helper()
+	h, err := auth.NewHasher(bcrypt.MinCost).Hash(password)
+	if err != nil {
+		t.Fatalf("Hash: %v", err)
+	}
+	return h
+}
+
+func storedHash(t *testing.T, repo interface {
+	GetUserCredentialsByEmail(context.Context, string) (account.User, string, bool, error)
+}, email string) string {
+	t.Helper()
+	_, h, ok, err := repo.GetUserCredentialsByEmail(context.Background(), email)
+	if err != nil || !ok {
+		t.Fatalf("GetUserCredentialsByEmail: ok=%v err=%v", ok, err)
+	}
+	return h
+}
+
+func TestChangePasswordRefusesWhenItsPreconditionsNoLongerHold(t *testing.T) {
 	ctx := context.Background()
-	repo, _ := freshRepo(t)
 
-	u := account.User{ID: ownerAID, Email: "owner@example.com"}
-	mustCreateUser(t, repo, u, "old-password")
-	if err := repo.SetUserDisabled(ctx, u.ID, true); err != nil {
-		t.Fatalf("SetUserDisabled: %v", err)
-	}
+	t.Run("stored hash moved on", func(t *testing.T) {
+		repo, _ := freshRepo(t)
+		u := account.User{ID: ownerAID, Email: "owner@example.com"}
+		mustCreateUser(t, repo, u, "old-password")
+		other := mustCreateSession(t, repo, u.ID)
+		stale := storedHash(t, repo, u.Email)
 
-	if ok, err := repo.ChangePassword(ctx, u.ID, "x", "keep"); ok || err != nil {
-		t.Errorf("disabled user: ok=%v err=%v, want false/nil", ok, err)
-	}
-	if ok, err := repo.ChangePassword(ctx, ownerBID, "x", "keep"); ok || err != nil {
-		t.Errorf("missing user: ok=%v err=%v, want false/nil", ok, err)
-	}
+		if ok, err := repo.ChangePassword(ctx, account.PasswordChange{
+			UserID: u.ID, CurrentHash: stale, NewHash: mustHash(t, "first-new-password"), KeepTokenHash: other,
+		}); !ok || err != nil {
+			t.Fatalf("first change: ok=%v err=%v", ok, err)
+		}
+		// A fresh live session, so only the stale hash is at fault.
+		keep := mustCreateSession(t, repo, u.ID)
+		if ok, err := repo.ChangePassword(ctx, account.PasswordChange{
+			UserID: u.ID, CurrentHash: stale, NewHash: mustHash(t, "second-new-password"), KeepTokenHash: keep,
+		}); ok || err != nil {
+			t.Errorf("change against a stale hash: ok=%v err=%v, want false/nil", ok, err)
+		}
+		if !auth.VerifyPassword(storedHash(t, repo, u.Email), "first-new-password") {
+			t.Error("a change against a stale hash overwrote the newer password")
+		}
+	})
+
+	t.Run("presenting session revoked", func(t *testing.T) {
+		repo, _ := freshRepo(t)
+		u := account.User{ID: ownerAID, Email: "owner@example.com"}
+		mustCreateUser(t, repo, u, "old-password")
+		gone := mustCreateSession(t, repo, u.ID)
+		other := mustCreateSession(t, repo, u.ID)
+		if err := repo.DeleteSession(ctx, gone); err != nil {
+			t.Fatalf("DeleteSession: %v", err)
+		}
+
+		if ok, err := repo.ChangePassword(ctx, account.PasswordChange{
+			UserID: u.ID, CurrentHash: storedHash(t, repo, u.Email), NewHash: mustHash(t, "brand-new-password"), KeepTokenHash: gone,
+		}); ok || err != nil {
+			t.Errorf("revoked presenting session: ok=%v err=%v, want false/nil", ok, err)
+		}
+		if _, ok, _ := repo.GetSessionUser(ctx, other); !ok {
+			t.Error("a refused change still revoked another session")
+		}
+	})
+
+	t.Run("disabled or missing user", func(t *testing.T) {
+		repo, _ := freshRepo(t)
+		u := account.User{ID: ownerAID, Email: "owner@example.com"}
+		mustCreateUser(t, repo, u, "old-password")
+		hash := storedHash(t, repo, u.Email)
+		keep := mustCreateSession(t, repo, u.ID)
+		if err := repo.SetUserDisabled(ctx, u.ID, true); err != nil {
+			t.Fatalf("SetUserDisabled: %v", err)
+		}
+
+		if ok, err := repo.ChangePassword(ctx, account.PasswordChange{
+			UserID: u.ID, CurrentHash: hash, NewHash: "x", KeepTokenHash: keep,
+		}); ok || err != nil {
+			t.Errorf("disabled user: ok=%v err=%v, want false/nil", ok, err)
+		}
+		if ok, err := repo.ChangePassword(ctx, account.PasswordChange{
+			UserID: ownerBID, CurrentHash: hash, NewHash: "x", KeepTokenHash: keep,
+		}); ok || err != nil {
+			t.Errorf("missing user: ok=%v err=%v, want false/nil", ok, err)
+		}
+	})
 }
 
 func TestDeleteUserSessionsRevokesEveryOneOfTheirs(t *testing.T) {
