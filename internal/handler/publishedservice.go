@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/httpcache"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
@@ -26,7 +27,7 @@ type publishedIndexPage struct {
 	NextCursor *string                           `json:"next_cursor"`
 }
 
-func PublishedServices(store PublishedServiceStore) http.HandlerFunc {
+func PublishedServices(store PublishedServiceStore, tags httpcache.Tagger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// No identity is read. The index answers the same for every caller,
 		// owner included, so an owner's unpublished drafts are no more listed
@@ -72,7 +73,7 @@ func PublishedServices(store PublishedServiceStore) http.HandlerFunc {
 			items = []transit.PublishedServiceSummary{}
 		}
 		if !paged {
-			writeJSON(w, http.StatusOK, items)
+			writePublicJSON(w, r, tags, items)
 			return
 		}
 		out := publishedIndexPage{Items: items}
@@ -80,7 +81,7 @@ func PublishedServices(store PublishedServiceStore) http.HandlerFunc {
 			c := encodePublishedIndexCursor(*page.Next)
 			out.NextCursor = &c
 		}
-		writeJSON(w, http.StatusOK, out)
+		writePublicJSON(w, r, tags, out)
 	}
 }
 

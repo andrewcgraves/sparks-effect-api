@@ -40,7 +40,7 @@ func listPublishedServices(t *testing.T, store handler.PublishedServiceStore) *h
 func getPublishedServices(t *testing.T, store handler.PublishedServiceStore, query string) *httptest.ResponseRecorder {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	handler.PublishedServices(store).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/published-services"+query, nil))
+	handler.PublishedServices(store, testTags).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/published-services"+query, nil))
 	return rec
 }
 

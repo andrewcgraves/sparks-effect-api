@@ -36,7 +36,13 @@ type Config struct {
 	WorkerToken            string
 	PasswordHashCost       int
 	WebsiteURL             string
+	BuildSHA               string
 }
+
+// Stamped by the image build (`-ldflags -X`, see the Dockerfile) rather than
+// read from the environment: the image is promoted to production by re-tagging,
+// never rebuilt, so the commit it was built from is a property of the binary.
+var buildSHA string
 
 const defaultSessionTTL = 24 * time.Hour
 
@@ -94,6 +100,7 @@ func Load() Config {
 		BoardingWait:           loadBoardingWait(),
 		WorkerToken:            os.Getenv("WORKER_TOKEN"),
 		WebsiteURL:             getEnv("WEBSITE_URL", defaultWebsiteURL),
+		BuildSHA:               buildSHA,
 	}
 }
 
