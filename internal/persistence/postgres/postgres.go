@@ -1017,6 +1017,21 @@ func (r *Repo) CountInFlightRoutingJobs(ctx context.Context, within time.Duratio
 	return n, nil
 }
 
+func (r *Repo) CountRoutingJobsAhead(ctx context.Context, createdAt time.Time, within time.Duration) (int, error) {
+	var n int
+	err := r.pool.QueryRow(ctx,
+		`SELECT count(*) FROM routing_jobs
+		 WHERE status = ANY($1) AND created_at > $2 AND created_at < $3`,
+		[]string{transit.JobStatusQueued, transit.JobStatusRunning},
+		time.Now().Add(-within),
+		createdAt,
+	).Scan(&n)
+	if err != nil {
+		return 0, wrap("CountRoutingJobsAhead", err)
+	}
+	return n, nil
+}
+
 func (r *Repo) FailRoutingJob(ctx context.Context, id, errMsg string) error {
 	return r.execRoutingJob(ctx, "FailRoutingJob", id,
 		`UPDATE routing_jobs SET status = $2, error = $3, updated_at = now() WHERE id = $1`,

@@ -28,6 +28,7 @@ type RoutingStore interface {
 	GetRoutingJobByID(ctx context.Context, id string) (transit.RoutingJob, bool, error)
 	FailRoutingJob(ctx context.Context, id, errMsg string) error
 	FindReusableRoutingJob(ctx context.Context, want transit.RoutingJob) (transit.RoutingJob, bool, error)
+	CountRoutingJobsAhead(ctx context.Context, createdAt time.Time, within time.Duration) (int, error)
 }
 
 func enqueueIsochrone(w http.ResponseWriter, r *http.Request, store RoutingStore,
@@ -126,8 +127,32 @@ func RoutingJobStatus(store RoutingStore) http.HandlerFunc {
 
 		job = failIfStale(r.Context(), store, job)
 
-		writeJSON(w, http.StatusOK, job)
+		writeJSON(w, http.StatusOK, routingJobPoll{
+			RoutingJob:    job,
+			QueuePosition: queuePosition(r.Context(), store, job),
+		})
 	}
+}
+
+type routingJobPoll struct {
+	transit.RoutingJob
+	QueuePosition *int `json:"queue_position,omitempty"`
+}
+
+// The worker takes one job at a time, oldest first, so a queued job waits
+// behind every in-flight job created before it (SPA-437). A failed count only
+// loses the courtesy, not the poll.
+func queuePosition(ctx context.Context, store RoutingStore, job transit.RoutingJob) *int {
+	if job.Status != transit.JobStatusQueued {
+		return nil
+	}
+	ahead, err := store.CountRoutingJobsAhead(ctx, job.CreatedAt, RoutingJobStaleAfter)
+	if err != nil {
+		slog.ErrorContext(ctx, "routing: could not count jobs ahead; omitting queue position",
+			"routing_job_id", job.ID, "error", err)
+		return nil
+	}
+	return &ahead
 }
 
 const RoutingJobStaleAfter = 90 * time.Second
