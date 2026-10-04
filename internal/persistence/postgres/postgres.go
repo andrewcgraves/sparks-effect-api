@@ -853,6 +853,23 @@ func (r *Repo) CompleteJob(ctx context.Context, id string, result transit.Transi
 	return nil
 }
 
+const InterruptedJobError = "interrupted by restart"
+
+// Compiles run in-process, so a job still unfinished from before this process
+// started has no goroutine left to finish it (SPA-431). The cutoff keeps the
+// sweep off jobs this process has already enqueued.
+func (r *Repo) FailInterruptedJobs(ctx context.Context, createdBefore time.Time) (int64, error) {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE jobs SET status = $1, error = $2, updated_at = now()
+		 WHERE status = ANY($3) AND created_at < $4`,
+		transit.JobStatusFailed, InterruptedJobError,
+		[]string{transit.JobStatusQueued, transit.JobStatusRunning}, createdBefore)
+	if err != nil {
+		return 0, wrap("FailInterruptedJobs", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 func (r *Repo) ListJobs(ctx context.Context) ([]transit.Job, error) {
 	rows, err := r.pool.Query(ctx, `SELECT `+jobColumns+` FROM jobs ORDER BY created_at DESC`)
 	if err != nil {

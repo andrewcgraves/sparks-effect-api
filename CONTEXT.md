@@ -319,6 +319,14 @@ The four values of `transit.JobStatus*`, shared by compile jobs and routing jobs
 missing *or* already terminal — which is how a job the API gave up on and failed
 stops a late worker from reviving it.
 
+An **interrupted** compile job is one left `queued` or `running` with no
+goroutine left to finish it, because compiles run inside the API process and
+that process exited mid-compile. Shutdown waits for in-flight compiles up to
+its grace period. Boot fails any job created before the process started, with
+`error = "interrupted by restart"`. `GET /api/jobs/{id}` fails one older than
+`handler.CompileJobInterruptedAfter`. Say *interrupted* about compile jobs, not
+*stale*: that word belongs to graphs.
+
 ## Where the rest of the vocabulary lives
 
 | Repository | Owns |

@@ -10,6 +10,7 @@ import (
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
+	"github.com/andrewcgraves/sparks-effect-api/internal/compile"
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/persistence/postgres"
@@ -56,7 +57,7 @@ var (
 	_ handler.Pinger = (*routing.AMQPPublisher)(nil)
 )
 
-func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routing.Publisher, lg *slog.Logger) *http.Server {
+func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routing.Publisher, compiles *compile.Runner, lg *slog.Logger) *http.Server {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", handler.Health)
@@ -98,7 +99,7 @@ func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routi
 	registerCompileRoutes(mux, deps, publisher, capBacklog, limitIso, lg)
 	registerPrerenderedRoutes(mux, deps)
 	registerPublishedServiceRoutes(mux, deps)
-	registerAuthRoutes(mux, cfg, deps, publisher, capBacklog, limitLogin, limitIso, limitCompile, lg)
+	registerAuthRoutes(mux, cfg, deps, publisher, compiles, capBacklog, limitLogin, limitIso, limitCompile, lg)
 	registerWorkerRoutes(mux, cfg, deps)
 
 	h := cors(mux, cfg.AllowLocalhostCORS)
@@ -219,7 +220,7 @@ func requirePublisher(publisher routing.Publisher, h http.Handler) http.Handler 
 	return h
 }
 
-func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, publisher routing.Publisher,
+func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, publisher routing.Publisher, compiles *compile.Runner,
 	capBacklog, limitLogin, limitIso, limitCompile func(http.Handler) http.Handler, lg *slog.Logger) {
 	if deps == nil {
 		for _, pattern := range []string{
@@ -277,7 +278,7 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 	// Async compile jobs: any authenticated caller may trigger a compile or
 	// poll a job. JobStatus enforces ownership itself (see its doc comment),
 	// since "not found" there means something different from "not admin".
-	mux.Handle("POST /api/scenarios/{slug}/compile", authenticated(limitCompile(handler.CompileScenario(deps, cfg.BoardingWait))))
+	mux.Handle("POST /api/scenarios/{slug}/compile", authenticated(limitCompile(handler.CompileScenario(deps, compiles))))
 	mux.Handle("GET /api/jobs/{id}", authenticated(handler.JobStatus(deps)))
 
 	// Owner-scoped CRUD over the seeded route model. Distinct from the public
@@ -347,7 +348,7 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 	mux.Handle("DELETE /api/services/{slug}", authenticated(handler.DeleteService(deps)))
 	// Compiling a single service is the degenerate scenario compile; owner-scoped
 	// like the rest of the authored surface.
-	mux.Handle("POST /api/services/{slug}/compile", authenticated(limitCompile(handler.CompileUserService(deps, cfg.BoardingWait))))
+	mux.Handle("POST /api/services/{slug}/compile", authenticated(limitCompile(handler.CompileUserService(deps, compiles))))
 	// Read that compile back, and plot over it, without wrapping the service in
 	// a scenario first (SPA-140). Twins of the /api/user-scenarios pair below,
 	// owner-scoped identically. The database-less 503 list above needs no entry
@@ -399,7 +400,7 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 	mux.Handle("DELETE /api/user-scenarios/{slug}", authenticated(handler.DeleteUserScenario(deps)))
 	// Compile a user scenario's curated members into one graph, then read it back
 	// by slug. Both owner-scoped, unlike the public seeded /api/scenarios/{slug}/graph.
-	mux.Handle("POST /api/user-scenarios/{slug}/compile", authenticated(limitCompile(handler.CompileUserScenario(deps, cfg.BoardingWait))))
+	mux.Handle("POST /api/user-scenarios/{slug}/compile", authenticated(limitCompile(handler.CompileUserScenario(deps, compiles))))
 	mux.Handle("GET /api/user-scenarios/{slug}/graph", authenticated(handler.UserScenarioGraph(deps)))
 	// The user-authored counterpart to POST /api/isochrone (SPA-83): computes
 	// over the scenario's compiled graph rather than the seeded store, and

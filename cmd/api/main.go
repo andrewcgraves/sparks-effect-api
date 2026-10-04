@@ -13,6 +13,7 @@ import (
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
+	"github.com/andrewcgraves/sparks-effect-api/internal/compile"
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
 	"github.com/andrewcgraves/sparks-effect-api/internal/ids"
 	internlog "github.com/andrewcgraves/sparks-effect-api/internal/logger"
@@ -24,6 +25,7 @@ import (
 )
 
 func main() {
+	startedAt := time.Now()
 	_ = godotenv.Load()
 	cfg := config.Load()
 
@@ -37,7 +39,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	store, repo, cleanup, err := loadStore(ctx, cfg, lg)
+	store, repo, cleanup, err := loadStore(ctx, cfg, startedAt, lg)
 	if err != nil {
 		lg.Error("failed to load transit data", "error", err)
 		os.Exit(1)
@@ -78,7 +80,8 @@ func main() {
 		lg.Info("WORKER_TOKEN not set; the routing worker endpoints will answer 503")
 	}
 
-	srv := server.New(cfg, store, deps, publisher, lg)
+	compiles := compile.NewRunner(deps, cfg.BoardingWait)
+	srv := server.New(cfg, store, deps, publisher, compiles, lg)
 
 	go func() {
 		lg.Info("listening", "addr", srv.Addr)
@@ -94,13 +97,22 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		lg.Error("graceful shutdown failed", "error", err)
+	// Handlers first, so no request can enqueue a compile after the drain has
+	// begun; then the compiles they enqueued, inside the same grace period.
+	shutdownErr := srv.Shutdown(shutdownCtx)
+	if shutdownErr != nil {
+		lg.Error("graceful shutdown failed", "error", shutdownErr)
+	}
+	if abandoned := compiles.Drain(shutdownCtx); len(abandoned) > 0 {
+		lg.Warn("abandoned in-flight compiles at shutdown; the next boot fails them",
+			"count", len(abandoned), "job_ids", abandoned)
+	}
+	if shutdownErr != nil {
 		os.Exit(1)
 	}
 }
 
-func loadStore(ctx context.Context, cfg config.Config, lg *slog.Logger) (*transit.Store, *postgres.Repo, func(), error) {
+func loadStore(ctx context.Context, cfg config.Config, startedAt time.Time, lg *slog.Logger) (*transit.Store, *postgres.Repo, func(), error) {
 	noop := func() {}
 
 	if cfg.DatabaseURL == "" {
@@ -116,6 +128,16 @@ func loadStore(ctx context.Context, cfg config.Config, lg *slog.Logger) (*transi
 	repo, err := postgres.Connect(ctx, cfg.DatabaseURL, cfg.DBMaxConns)
 	if err != nil {
 		return nil, nil, noop, err
+	}
+
+	// A deploy or crash mid-compile leaves its job queued or running with
+	// nothing left to finish it (SPA-431). Swept before the seeded compile
+	// below enqueues jobs of its own. Not fatal: the stuck rows only mislead
+	// whoever polls them.
+	if n, err := repo.FailInterruptedJobs(ctx, startedAt); err != nil {
+		lg.Error("could not fail interrupted compile jobs", "error", err)
+	} else if n > 0 {
+		lg.Warn("failed compile jobs interrupted by a restart", "count", n)
 	}
 
 	// YAML is the source of truth for seeded rows. SeedIfEmpty only fills an
