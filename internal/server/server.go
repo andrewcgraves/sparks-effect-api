@@ -10,6 +10,7 @@ import (
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
+	"github.com/andrewcgraves/sparks-effect-api/internal/compile"
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/metrics"
@@ -45,6 +46,7 @@ type AuthDeps interface {
 	handler.HandoverStore
 	handler.AccountTokenStore
 	handler.RetentionStore
+	handler.RoutingQueueStore
 	GetSessionUser(ctx context.Context, tokenHash string) (account.User, bool, error)
 }
 
@@ -57,7 +59,7 @@ var (
 	_ handler.Pinger = (*routing.AMQPPublisher)(nil)
 )
 
-func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routing.Publisher, lg *slog.Logger, m *metrics.Metrics) *http.Server {
+func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routing.Publisher, compiles *compile.Runner, lg *slog.Logger, m *metrics.Metrics) *http.Server {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", handler.Health)
@@ -65,6 +67,14 @@ func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routi
 	// (SPA-379). Both bare: a probe carries no identity and must not spend a
 	// rate-limit bucket.
 	mux.HandleFunc("GET /readyz", handler.Ready(pinger(deps), pinger(publisher), lg))
+
+	// Every enqueue below goes through the watch, so the routing status can
+	// tell a job the worker never answered (SPA-442). Wrapped only after
+	// readiness has taken the publisher's Pinger, which the wrapper hides.
+	watch := handler.NewWorkerWatch(time.Now)
+	if publisher != nil {
+		publisher = watch.Publisher(publisher)
+	}
 
 	// Public reads: the curated scenario data, unauthenticated by design.
 	//
@@ -99,8 +109,9 @@ func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routi
 	registerCompileRoutes(mux, deps, publisher, capBacklog, limitIso, lg)
 	registerPrerenderedRoutes(mux, deps)
 	registerPublishedServiceRoutes(mux, deps)
-	registerAuthRoutes(mux, cfg, deps, publisher, capBacklog, limitLogin, limitIso, limitCompile, lg, m)
-	registerWorkerRoutes(mux, cfg, deps)
+	registerAuthRoutes(mux, cfg, deps, publisher, compiles, capBacklog, limitLogin, limitIso, limitCompile, lg)
+	registerWorkerRoutes(mux, cfg, deps, watch)
+	registerRoutingStatusRoutes(mux, deps, watch)
 
 	h := cors(mux, cfg.AllowLocalhostCORS)
 
@@ -220,8 +231,8 @@ func requirePublisher(publisher routing.Publisher, h http.Handler) http.Handler 
 	return h
 }
 
-func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, publisher routing.Publisher,
-	capBacklog, limitLogin, limitIso, limitCompile func(http.Handler) http.Handler, lg *slog.Logger, m *metrics.Metrics) {
+func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, publisher routing.Publisher, compiles *compile.Runner,
+	capBacklog, limitLogin, limitIso, limitCompile func(http.Handler) http.Handler, lg *slog.Logger) {
 	if deps == nil {
 		for _, pattern := range []string{
 			"/api/auth/login", "/api/auth/logout", "/api/auth/me",
@@ -278,7 +289,7 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 	// Async compile jobs: any authenticated caller may trigger a compile or
 	// poll a job. JobStatus enforces ownership itself (see its doc comment),
 	// since "not found" there means something different from "not admin".
-	mux.Handle("POST /api/scenarios/{slug}/compile", authenticated(limitCompile(handler.CompileScenario(deps, cfg.BoardingWait, m))))
+	mux.Handle("POST /api/scenarios/{slug}/compile", authenticated(limitCompile(handler.CompileScenario(deps, compiles))))
 	mux.Handle("GET /api/jobs/{id}", authenticated(handler.JobStatus(deps)))
 
 	// Owner-scoped CRUD over the seeded route model. Distinct from the public
@@ -348,7 +359,7 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 	mux.Handle("DELETE /api/services/{slug}", authenticated(handler.DeleteService(deps)))
 	// Compiling a single service is the degenerate scenario compile; owner-scoped
 	// like the rest of the authored surface.
-	mux.Handle("POST /api/services/{slug}/compile", authenticated(limitCompile(handler.CompileUserService(deps, cfg.BoardingWait, m))))
+	mux.Handle("POST /api/services/{slug}/compile", authenticated(limitCompile(handler.CompileUserService(deps, compiles))))
 	// Read that compile back, and plot over it, without wrapping the service in
 	// a scenario first (SPA-140). Twins of the /api/user-scenarios pair below,
 	// owner-scoped identically. The database-less 503 list above needs no entry
@@ -400,7 +411,7 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 	mux.Handle("DELETE /api/user-scenarios/{slug}", authenticated(handler.DeleteUserScenario(deps)))
 	// Compile a user scenario's curated members into one graph, then read it back
 	// by slug. Both owner-scoped, unlike the public seeded /api/scenarios/{slug}/graph.
-	mux.Handle("POST /api/user-scenarios/{slug}/compile", authenticated(limitCompile(handler.CompileUserScenario(deps, cfg.BoardingWait, m))))
+	mux.Handle("POST /api/user-scenarios/{slug}/compile", authenticated(limitCompile(handler.CompileUserScenario(deps, compiles))))
 	mux.Handle("GET /api/user-scenarios/{slug}/graph", authenticated(handler.UserScenarioGraph(deps)))
 	// The user-authored counterpart to POST /api/isochrone (SPA-83): computes
 	// over the scenario's compiled graph rather than the seeded store, and
@@ -429,7 +440,17 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 		adminOnly(handler.CreatePrerenderedIsochrone(deps)))
 }
 
-func registerWorkerRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps) {
+// Bare, like /readyz: the website asks on behalf of every visitor, and the
+// answer carries no job, origin or owner, so there is nothing to scope.
+func registerRoutingStatusRoutes(mux *http.ServeMux, deps AuthDeps, watch *handler.WorkerWatch) {
+	if deps == nil {
+		mux.HandleFunc("GET /api/routing/status", noDatabase("routing status is unavailable"))
+		return
+	}
+	mux.HandleFunc("GET /api/routing/status", handler.RoutingStatus(deps, watch))
+}
+
+func registerWorkerRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, watch *handler.WorkerWatch) {
 	const unavailable = "worker API is unavailable"
 	if deps == nil {
 		mux.HandleFunc("/api/internal/", noDatabase(unavailable))
@@ -439,7 +460,10 @@ func registerWorkerRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps) 
 		mux.HandleFunc("/api/internal/", serviceUnavailable(unavailable+": no WORKER_TOKEN configured"))
 		return
 	}
-	gate := auth.RequireWorkerToken(cfg.WorkerToken)
+	// Contact is recorded inside the token check: a request anyone could send
+	// is no proof the worker is alive.
+	requireWorker := auth.RequireWorkerToken(cfg.WorkerToken)
+	gate := func(h http.Handler) http.Handler { return requireWorker(watch.RecordContact(h)) }
 	mux.Handle("GET /api/internal/worker", gate(handler.WorkerReady()))
 	mux.Handle("POST /api/internal/routing-jobs/{id}/running", gate(handler.WorkerMarkRunning(deps)))
 	mux.Handle("POST /api/internal/routing-jobs/{id}/succeeded", gate(handler.WorkerMarkSucceeded(deps)))

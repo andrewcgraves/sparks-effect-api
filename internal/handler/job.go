@@ -4,10 +4,10 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/compile"
-	"github.com/andrewcgraves/sparks-effect-api/internal/metrics"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
@@ -20,10 +20,11 @@ type CompileStore interface {
 	GetLatestSucceededJob(ctx context.Context, scenarioSlug, kind string) (transit.Job, bool, error)
 	GetLatestSucceededUserScenarioJob(ctx context.Context, userScenarioSlug string) (transit.Job, bool, error)
 	GetLatestSucceededUserServiceJob(ctx context.Context, userServiceSlug string) (transit.Job, bool, error)
+	FailInterruptedJob(ctx context.Context, id, errMsg string) (bool, error)
 	compile.Store
 }
 
-func CompileScenario(store CompileStore, boardingWait transit.BoardingWaitPolicy, m *metrics.Metrics) http.HandlerFunc {
+func CompileScenario(store CompileStore, compiles *compile.Runner) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := auth.UserFrom(r.Context())
 		if !ok {
@@ -53,17 +54,9 @@ func CompileScenario(store CompileStore, boardingWait transit.BoardingWaitPolicy
 		if !ok {
 			return
 		}
-		enqueueCompile(store, job, boardingWait, m)
+		compiles.Enqueue(job)
 		writeJSON(w, http.StatusAccepted, job)
 	}
-}
-
-func enqueueCompile(store CompileStore, job transit.Job, boardingWait transit.BoardingWaitPolicy, m *metrics.Metrics) {
-	go func() {
-		if err := compile.Compile(context.Background(), store, job, boardingWait, m); err != nil {
-			slog.Error("compile: job failed", "job_id", job.ID, "error", err)
-		}
-	}()
 }
 
 func JobStatus(store CompileStore) http.HandlerFunc {
@@ -85,8 +78,47 @@ func JobStatus(store CompileStore) http.HandlerFunc {
 			return
 		}
 
+		job = failIfCompileInterrupted(r.Context(), store, job)
+
 		writeJSON(w, http.StatusOK, job)
 	}
+}
+
+const CompileJobInterruptedAfter = 5 * time.Minute
+
+const interruptedCompileJobMessage = "the compile was interrupted before it finished; compile again to retry"
+
+func failIfCompileInterrupted(ctx context.Context, store CompileStore, job transit.Job) transit.Job {
+	if job.Status != transit.JobStatusQueued && job.Status != transit.JobStatusRunning {
+		return job
+	}
+	// A compile runs in-process and takes seconds, so one unfinished this long
+	// lost its goroutine to a process the boot sweep has not reached: another
+	// replica, or one that died with no restart (SPA-431).
+	if time.Since(job.CreatedAt) <= CompileJobInterruptedAfter {
+		return job
+	}
+
+	failed, err := store.FailInterruptedJob(ctx, job.ID, interruptedCompileJobMessage)
+	if err != nil {
+		slog.ErrorContext(ctx, "compile: could not mark interrupted compile job failed",
+			"job_id", job.ID, "error", err)
+		return job
+	}
+	if !failed {
+		// It finished between the read above and the write. Answer with what
+		// it finished as, not the unfinished row this request first saw.
+		if current, found, err := store.GetJobByID(ctx, job.ID); err == nil && found {
+			return current
+		}
+		return job
+	}
+
+	slog.WarnContext(ctx, "compile: job interrupted; marked failed",
+		"job_id", job.ID, "age", time.Since(job.CreatedAt))
+	job.Status = transit.JobStatusFailed
+	job.Error = interruptedCompileJobMessage
+	return job
 }
 
 func ScenarioGraph(store CompileStore) http.HandlerFunc {

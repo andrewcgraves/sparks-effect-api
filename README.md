@@ -206,7 +206,7 @@ The four policies, overridable by env, are disabled only by `PER_MIN=0`
 | Compile | All three compile POSTs (one shared limiter) | 10/min, burst 3 |
 
 Ordinary CRUD, routing-job polling, public scenario/graph reads, `/healthz`,
-`/readyz`, and `/api/internal/*` are not limited here.
+`/readyz`, `/api/routing/status`, and `/api/internal/*` are not limited here.
 
 ### Polling a routing job
 
@@ -216,6 +216,24 @@ publication's `POST /api/services/{slug}/publication/isochrone`, and is
 readable by anyone holding its id — a v4 UUID, unguessable. An **owned** job,
 from one of the authored isochrones, answers 404 to anyone but its owner or an
 admin, so a caller cannot probe which job ids exist.
+
+### Routing status
+
+`GET /api/routing/status` says whether live plotting is working, so the
+website can warn a visitor before they wait out the 120 s deadline (SPA-442).
+It is public and cached for ten seconds:
+
+```json
+{"status": "ok", "oldest_queued_secs": 0, "inflight": 0}
+```
+
+`inflight` and `oldest_queued_secs` count routing jobs younger than
+`handler.RoutingJobStaleAfter`, as the backlog cap does. `status` is one of the
+three [routing statuses](CONTEXT.md#routing-status). Worker contact is any
+authenticated `/api/internal/*` request, which the worker's 30 s heartbeat to
+`GET /api/internal/worker` guarantees while it is up. Contact is held in this
+process's memory, so a restart starts the clock again and a second replica
+would not see the first one's contact.
 
 ## Seed data
 

@@ -853,6 +853,39 @@ func (r *Repo) CompleteJob(ctx context.Context, id string, result transit.Transi
 	return nil
 }
 
+const interruptedByRestart = "interrupted by restart"
+
+func (r *Repo) FailInterruptedJobs(ctx context.Context) (int64, error) {
+	// Compiles run in-process, so a job still unfinished when a process boots
+	// has no goroutine left to finish it (SPA-431). There is deliberately no
+	// time cutoff: created_at is the database's clock and a boot time would be
+	// the API's, and skew between them misfiles rows. The caller sweeps before
+	// it enqueues anything instead.
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE jobs SET status = $1, error = $2, updated_at = now()
+		 WHERE status = ANY($3)`,
+		transit.JobStatusFailed, interruptedByRestart,
+		[]string{transit.JobStatusQueued, transit.JobStatusRunning})
+	if err != nil {
+		return 0, wrap("FailInterruptedJobs", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+func (r *Repo) FailInterruptedJob(ctx context.Context, id, errMsg string) (bool, error) {
+	// Guarded on the job still being unfinished, so a compile that completes
+	// between the caller's read and this write keeps its result.
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE jobs SET status = $2, error = $3, updated_at = now()
+		 WHERE id = $1 AND status = ANY($4)`,
+		id, transit.JobStatusFailed, errMsg,
+		[]string{transit.JobStatusQueued, transit.JobStatusRunning})
+	if err != nil {
+		return false, wrap("FailInterruptedJob", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
 func (r *Repo) ListJobs(ctx context.Context) ([]transit.Job, error) {
 	rows, err := r.pool.Query(ctx, `SELECT `+jobColumns+` FROM jobs ORDER BY created_at DESC`)
 	if err != nil {

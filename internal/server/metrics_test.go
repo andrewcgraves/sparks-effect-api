@@ -21,7 +21,7 @@ func TestRequestsAreCountedByRoutePattern(t *testing.T) {
 		t.Fatalf("NewStore: %v", err)
 	}
 	cfg := config.Config{Port: "8080", SessionTTL: time.Hour}
-	h := New(cfg, store, newStubDeps(), &routing.FakePublisher{}, logger.Discard(), m).Handler
+	h := New(cfg, store, newStubDeps(), &routing.FakePublisher{}, nil, logger.Discard(), m).Handler
 
 	request(t, h, http.MethodGet, "/api/scenarios/ca-hsr", "")
 	request(t, h, http.MethodGet, "/api/scenarios/no-such-scenario", "")
@@ -57,7 +57,7 @@ func TestRequestsAreCountedByRoutePattern(t *testing.T) {
 
 func TestUnknownMethodsShareOneLabel(t *testing.T) {
 	m, reader := metricstest.New(t)
-	h := New(config.Config{Port: "8080"}, nil, nil, nil, logger.Discard(), m).Handler
+	h := New(config.Config{Port: "8080"}, nil, nil, nil, nil, logger.Discard(), m).Handler
 
 	request(t, h, "BREW", "/no/such/path", "")
 
@@ -77,7 +77,7 @@ func TestRateLimitRefusalsAreCountedByLimiter(t *testing.T) {
 		t.Fatalf("NewStore: %v", err)
 	}
 	cfg := config.Config{Port: "8080", SessionTTL: time.Hour, RateLimitLogin: tinyPolicy()}
-	h := New(cfg, store, newStubDeps(), &routing.FakePublisher{}, logger.Discard(), m).Handler
+	h := New(cfg, store, newStubDeps(), &routing.FakePublisher{}, nil, logger.Discard(), m).Handler
 
 	for range 3 {
 		requestFrom(t, h, http.MethodPost, "/api/auth/login", "", "203.0.113.7:1234", "", loginBody)

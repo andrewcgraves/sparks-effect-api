@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/account"
+	"github.com/andrewcgraves/sparks-effect-api/internal/compile"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/routing"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
@@ -31,10 +32,10 @@ func TestCompileAuthoredTargetNonOwnerIsNotFound(t *testing.T) {
 		wantMsg string
 	}{
 		{"service", func(s handler.CompileStore) http.HandlerFunc {
-			return handler.CompileUserService(s, transit.DefaultBoardingWaitPolicy(), nil)
+			return handler.CompileUserService(s, compile.NewRunner(s, transit.DefaultBoardingWaitPolicy(), nil))
 		}, "/api/services/line-a/compile", "line-a", "service not found"},
 		{"scenario", func(s handler.CompileStore) http.HandlerFunc {
-			return handler.CompileUserScenario(s, transit.DefaultBoardingWaitPolicy(), nil)
+			return handler.CompileUserScenario(s, compile.NewRunner(s, transit.DefaultBoardingWaitPolicy(), nil))
 		}, "/api/user-scenarios/trip/compile", "trip", "scenario not found"},
 	}
 	for _, tt := range tests {
