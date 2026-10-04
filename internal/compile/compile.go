@@ -3,7 +3,9 @@ package compile
 import (
 	"context"
 	"fmt"
+	"time"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/metrics"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
@@ -18,23 +20,45 @@ type Store interface {
 	CompleteJob(ctx context.Context, id string, result transit.TransitGraph, compiledServiceIDs []string) error
 }
 
-func Compile(ctx context.Context, store Store, job transit.Job, boardingWait transit.BoardingWaitPolicy) error {
+// outcomeError is a job whose status could not be written, as distinct from
+// a compile that ran and failed: the job is left wherever it was.
+const outcomeError = "error"
+
+func Compile(ctx context.Context, store Store, job transit.Job, boardingWait transit.BoardingWaitPolicy, m *metrics.Metrics) error {
+	start := time.Now()
+	outcome, err := run(ctx, store, job, boardingWait)
+	m.Compile(ctx, kindLabel(job.Kind), outcome, time.Since(start))
+	return err
+}
+
+func run(ctx context.Context, store Store, job transit.Job, boardingWait transit.BoardingWaitPolicy) (outcome string, err error) {
 	if err := store.UpdateJobStatus(ctx, job.ID, transit.JobStatusRunning, ""); err != nil {
-		return fmt.Errorf("compile: marking job %s running: %w", job.ID, err)
+		return outcomeError, fmt.Errorf("compile: marking job %s running: %w", job.ID, err)
 	}
 
 	graph, err := compile(ctx, store, job, boardingWait)
 	if err != nil {
 		if failErr := store.UpdateJobStatus(ctx, job.ID, transit.JobStatusFailed, err.Error()); failErr != nil {
-			return fmt.Errorf("compile: recording failure for job %s: %w", job.ID, failErr)
+			return outcomeError, fmt.Errorf("compile: recording failure for job %s: %w", job.ID, failErr)
 		}
-		return nil
+		return transit.JobStatusFailed, nil
 	}
 
 	if err := store.CompleteJob(ctx, job.ID, graph, transit.CompiledServiceIDs(graph)); err != nil {
-		return fmt.Errorf("compile: completing job %s: %w", job.ID, err)
+		return outcomeError, fmt.Errorf("compile: completing job %s: %w", job.ID, err)
 	}
-	return nil
+	return transit.JobStatusSucceeded, nil
+}
+
+// Kind comes from a database row, so an unrecognised one is folded into
+// "other" rather than becoming a label value of its own.
+func kindLabel(kind string) string {
+	switch kind {
+	case transit.JobKindCompileScenario, transit.JobKindCompileUserScenario, transit.JobKindCompileUserService:
+		return kind
+	default:
+		return "other"
+	}
 }
 
 func compile(ctx context.Context, store Store, job transit.Job, boardingWait transit.BoardingWaitPolicy) (transit.TransitGraph, error) {

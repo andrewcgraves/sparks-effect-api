@@ -13,6 +13,7 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/compile"
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
+	"github.com/andrewcgraves/sparks-effect-api/internal/metrics"
 	"github.com/andrewcgraves/sparks-effect-api/internal/persistence/postgres"
 	"github.com/andrewcgraves/sparks-effect-api/internal/ratelimit"
 	"github.com/andrewcgraves/sparks-effect-api/internal/routing"
@@ -58,7 +59,7 @@ var (
 	_ handler.Pinger = (*routing.AMQPPublisher)(nil)
 )
 
-func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routing.Publisher, compiles *compile.Runner, lg *slog.Logger) *http.Server {
+func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routing.Publisher, compiles *compile.Runner, lg *slog.Logger, m *metrics.Metrics) *http.Server {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", handler.Health)
@@ -95,14 +96,14 @@ func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routi
 	// "disabled" warning is logged once (SPA-219).
 	capBacklog := passThrough
 	if deps != nil {
-		capBacklog = handler.CapIsochroneBacklog(deps, cfg.MaxInFlightIsochrones, lg)
+		capBacklog = handler.CapIsochroneBacklog(deps, cfg.MaxInFlightIsochrones, lg, m)
 	}
 
 	clientIP := ratelimit.ClientIP(cfg.TrustedProxyCount)
-	limitIso := ratelimit.Limit(ratelimit.New(cfg.RateLimitIsochrone.RatePerMinute, cfg.RateLimitIsochrone.Burst), clientIP)
-	limitSnap := ratelimit.Limit(ratelimit.New(cfg.RateLimitSnapStops.RatePerMinute, cfg.RateLimitSnapStops.Burst), clientIP)
-	limitLogin := ratelimit.Limit(ratelimit.New(cfg.RateLimitLogin.RatePerMinute, cfg.RateLimitLogin.Burst), clientIP)
-	limitCompile := ratelimit.Limit(ratelimit.New(cfg.RateLimitCompile.RatePerMinute, cfg.RateLimitCompile.Burst), clientIP)
+	limitIso := ratelimit.Limit(ratelimit.New(cfg.RateLimitIsochrone.RatePerMinute, cfg.RateLimitIsochrone.Burst), clientIP, m.RateLimited("isochrone"))
+	limitSnap := ratelimit.Limit(ratelimit.New(cfg.RateLimitSnapStops.RatePerMinute, cfg.RateLimitSnapStops.Burst), clientIP, m.RateLimited("snap_stops"))
+	limitLogin := ratelimit.Limit(ratelimit.New(cfg.RateLimitLogin.RatePerMinute, cfg.RateLimitLogin.Burst), clientIP, m.RateLimited("login"))
+	limitCompile := ratelimit.Limit(ratelimit.New(cfg.RateLimitCompile.RatePerMinute, cfg.RateLimitCompile.Burst), clientIP, m.RateLimited("compile"))
 
 	registerRouteRoutes(mux, deps, limitSnap)
 	registerCompileRoutes(mux, deps, publisher, capBacklog, limitIso, lg)
@@ -119,7 +120,7 @@ func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routi
 		// traceid.Middleware runs outermost: logRequests reads the trace id it
 		// attaches, and every handler downstream that enqueues routing work
 		// forwards the same id to the worker (see handler.enqueueIsochrone).
-		Handler:           traceid.Middleware(logRequests(lg, h)),
+		Handler:           traceid.Middleware(logRequests(lg, m, h)),
 		ReadHeaderTimeout: 5 * time.Second,
 		// Headers and body together. The largest body any route accepts is an
 		// 8 MiB route ingest, and the public ones are capped at 4 KiB, so 15 s
@@ -496,11 +497,17 @@ func (s *statusRecorder) WriteHeader(status int) {
 	s.ResponseWriter.WriteHeader(status)
 }
 
-func logRequests(lg *slog.Logger, next http.Handler) http.Handler {
+func logRequests(lg *slog.Logger, m *metrics.Metrics, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		start := time.Now()
 		next.ServeHTTP(rec, r)
+		elapsed := time.Since(start)
+
+		// The mux sets r.Pattern on this same request: cors passes it through
+		// unchanged, and nothing between here and the mux calls WithContext.
+		// An unmatched path leaves it empty.
+		m.Request(r.Context(), r.Pattern, r.Method, rec.status, elapsed)
 
 		// Probes are polled on a timer by the platform and uptime monitors;
 		// at info they would drown the requests worth reading.
@@ -513,7 +520,7 @@ func logRequests(lg *slog.Logger, next http.Handler) http.Handler {
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", rec.status,
-			"duration_ms", time.Since(start).Milliseconds(),
+			"duration_ms", elapsed.Milliseconds(),
 			"trace_id", trace,
 		)
 	})

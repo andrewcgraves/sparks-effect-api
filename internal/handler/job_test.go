@@ -398,7 +398,7 @@ func TestCompileScenarioReturnsQueuedJobAndCompilesAsync(t *testing.T) {
 	store := newFakeCompileStore()
 	store.compilableFixture()
 
-	rec := postAs(t, handler.CompileScenario(store, compile.NewRunner(store, transit.DefaultBoardingWaitPolicy())), "/api/scenarios/scenario-a/compile", "slug", "scenario-a",
+	rec := postAs(t, handler.CompileScenario(store, compile.NewRunner(store, transit.DefaultBoardingWaitPolicy(), nil)), "/api/scenarios/scenario-a/compile", "slug", "scenario-a",
 		account.User{ID: "user-1"})
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202; body %s", rec.Code, rec.Body.String())
@@ -435,7 +435,7 @@ func TestCompileScenarioFailsJobOnBadScenarioData(t *testing.T) {
 	store.compilableFixture()
 	store.services[0].VehicleTypeID = "no-such-vehicle-type"
 
-	rec := postAs(t, handler.CompileScenario(store, compile.NewRunner(store, transit.DefaultBoardingWaitPolicy())), "/api/scenarios/scenario-a/compile", "slug", "scenario-a",
+	rec := postAs(t, handler.CompileScenario(store, compile.NewRunner(store, transit.DefaultBoardingWaitPolicy(), nil)), "/api/scenarios/scenario-a/compile", "slug", "scenario-a",
 		account.User{ID: "user-1"})
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202; body %s", rec.Code, rec.Body.String())
@@ -455,7 +455,7 @@ func TestCompileScenarioRequiresAuth(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/scenarios/scenario-a/compile", nil)
 	req.SetPathValue("slug", "scenario-a")
 	rec := httptest.NewRecorder()
-	handler.CompileScenario(store, compile.NewRunner(store, transit.DefaultBoardingWaitPolicy())).ServeHTTP(rec, req)
+	handler.CompileScenario(store, compile.NewRunner(store, transit.DefaultBoardingWaitPolicy(), nil)).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", rec.Code)
@@ -464,7 +464,7 @@ func TestCompileScenarioRequiresAuth(t *testing.T) {
 
 func TestCompileScenarioUnknownSlugIsNotFound(t *testing.T) {
 	store := newFakeCompileStore()
-	rec := postAs(t, handler.CompileScenario(store, compile.NewRunner(store, transit.DefaultBoardingWaitPolicy())), "/api/scenarios/no-such-scenario/compile", "slug", "no-such-scenario",
+	rec := postAs(t, handler.CompileScenario(store, compile.NewRunner(store, transit.DefaultBoardingWaitPolicy(), nil)), "/api/scenarios/no-such-scenario/compile", "slug", "no-such-scenario",
 		account.User{ID: "user-1"})
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rec.Code)
@@ -475,7 +475,7 @@ func TestCompileScenarioReportsStorageFailure(t *testing.T) {
 	store := newFakeCompileStore()
 	store.createJobErr = errors.New("database is down")
 
-	rec := postAs(t, handler.CompileScenario(store, compile.NewRunner(store, transit.DefaultBoardingWaitPolicy())), "/api/scenarios/scenario-a/compile", "slug", "scenario-a",
+	rec := postAs(t, handler.CompileScenario(store, compile.NewRunner(store, transit.DefaultBoardingWaitPolicy(), nil)), "/api/scenarios/scenario-a/compile", "slug", "scenario-a",
 		account.User{ID: "user-1"})
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", rec.Code)

@@ -12,6 +12,7 @@ import (
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/logger"
+	"github.com/andrewcgraves/sparks-effect-api/internal/metrics/metricstest"
 )
 
 type fakeBacklogStore struct {
@@ -43,7 +44,7 @@ func capped(t *testing.T, store handler.RoutingBacklogStore, limit int) (http.Ha
 		reached = true
 		w.WriteHeader(http.StatusAccepted)
 	})
-	return handler.CapIsochroneBacklog(store, limit, logger.Discard())(next), &reached
+	return handler.CapIsochroneBacklog(store, limit, logger.Discard(), nil)(next), &reached
 }
 
 func postCapped(h http.Handler) *httptest.ResponseRecorder {
@@ -165,5 +166,30 @@ func TestCapIsochroneBacklogDisabled(t *testing.T) {
 			t.Errorf("limit %d: counted the backlog %d times with the cap disabled", limit, store.calls)
 		}
 		store.mu.Unlock()
+	}
+}
+
+func TestCapIsochroneBacklogReportsTheBacklog(t *testing.T) {
+	m, reader := metricstest.New(t)
+	store := &fakeBacklogStore{count: 2}
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusAccepted) })
+	h := handler.CapIsochroneBacklog(store, 3, logger.Discard(), m)(next)
+
+	postCapped(h)
+	if got, ok := reader.Gauge(t, "isochrone_backlog_inflight"); !ok || got != 2 {
+		t.Errorf("in-flight gauge = %d (set %v), want 2", got, ok)
+	}
+	if got := reader.Count(t, "backlog_full"); got != 0 {
+		t.Errorf("backlog_full after an admitted request = %d, want 0", got)
+	}
+
+	store.set(3)
+	postCapped(h)
+	postCapped(h)
+	if got, _ := reader.Gauge(t, "isochrone_backlog_inflight"); got != 3 {
+		t.Errorf("in-flight gauge = %d, want 3", got)
+	}
+	if got := reader.Count(t, "backlog_full"); got != 2 {
+		t.Errorf("backlog_full = %d, want 2", got)
 	}
 }

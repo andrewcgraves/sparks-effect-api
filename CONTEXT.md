@@ -336,6 +336,14 @@ its grace period. Boot fails every unfinished job before it enqueues any of its 
 message telling the author to compile again. Say *interrupted* about compile
 jobs, not *stale*: that word belongs to graphs.
 
+### Compile outcome
+
+The `outcome` label on the `compile_jobs_total` metric (SPA-433). It is the
+terminal job status the compile wrote, `succeeded` or `failed`, or `error`
+when no status could be written at all, for example when the database was
+unreachable. `error` is a metric value only and never a job status: that job
+is left wherever it was.
+
 ### Routing status
 
 The three values `GET /api/routing/status` answers in `status`
