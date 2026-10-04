@@ -22,6 +22,11 @@ type stubAuthDeps struct {
 	sessions  map[string]account.User
 	inFlight  int
 	published []transit.PublishedServiceSummary
+	queue     handler.RoutingQueue
+}
+
+func (s *stubAuthDeps) RoutingQueueSnapshot(context.Context, time.Duration) (handler.RoutingQueue, error) {
+	return s.queue, nil
 }
 
 func (s *stubAuthDeps) GetSessionUser(_ context.Context, tokenHash string) (account.User, bool, error) {

@@ -333,6 +333,24 @@ its grace period. Boot fails every unfinished job before it enqueues any of its 
 message telling the author to compile again. Say *interrupted* about compile
 jobs, not *stale*: that word belongs to graphs.
 
+### Routing status
+
+The three values `GET /api/routing/status` answers in `status`
+(`handler.RoutingStatus*`). *Contact* is the last authenticated
+`/api/internal/*` request from the worker. A job is *waiting* when it has been
+queued and in flight for over 60 s, or was published over 60 s ago with no
+contact since.
+
+| Status | Means |
+| --- | --- |
+| `offline` | A job is waiting and there has been no contact for 2 minutes. Live plotting is down |
+| `degraded` | A queued job is waiting but the worker is in contact. It is up and behind |
+| `ok` | Neither. A silent worker with nothing waiting is idle, not down |
+
+The publish half of *waiting* exists because a polled job is failed as stale at
+90 s, before two minutes of silence can pass. Without it, a visitor's job would
+leave the queue before the worker counted as gone.
+
 ## Where the rest of the vocabulary lives
 
 | Repository | Owns |

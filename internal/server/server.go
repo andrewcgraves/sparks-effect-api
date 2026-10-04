@@ -45,6 +45,7 @@ type AuthDeps interface {
 	handler.HandoverStore
 	handler.AccountTokenStore
 	handler.RetentionStore
+	handler.RoutingQueueStore
 	GetSessionUser(ctx context.Context, tokenHash string) (account.User, bool, error)
 }
 
@@ -65,6 +66,14 @@ func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routi
 	// (SPA-379). Both bare: a probe carries no identity and must not spend a
 	// rate-limit bucket.
 	mux.HandleFunc("GET /readyz", handler.Ready(pinger(deps), pinger(publisher), lg))
+
+	// Every publish below goes through the watch, so the routing status can
+	// tell a job the worker never answered (SPA-442). Wrapped only after
+	// readiness has taken the publisher's Pinger, which the wrapper hides.
+	watch := handler.NewWorkerWatch(time.Now)
+	if publisher != nil {
+		publisher = watch.Publisher(publisher)
+	}
 
 	// Public reads: the curated scenario data, unauthenticated by design.
 	//
@@ -100,7 +109,8 @@ func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routi
 	registerPrerenderedRoutes(mux, deps)
 	registerPublishedServiceRoutes(mux, deps)
 	registerAuthRoutes(mux, cfg, deps, publisher, compiles, capBacklog, limitLogin, limitIso, limitCompile, lg)
-	registerWorkerRoutes(mux, cfg, deps)
+	registerWorkerRoutes(mux, cfg, deps, watch)
+	registerRoutingStatusRoutes(mux, deps, watch)
 
 	h := cors(mux, cfg.AllowLocalhostCORS)
 
@@ -429,7 +439,17 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 		adminOnly(handler.CreatePrerenderedIsochrone(deps)))
 }
 
-func registerWorkerRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps) {
+// Bare, like /readyz: the website asks on behalf of every visitor, and the
+// answer carries no job, origin or owner, so there is nothing to scope.
+func registerRoutingStatusRoutes(mux *http.ServeMux, deps AuthDeps, watch *handler.WorkerWatch) {
+	if deps == nil {
+		mux.HandleFunc("GET /api/routing/status", noDatabase("routing status is unavailable"))
+		return
+	}
+	mux.HandleFunc("GET /api/routing/status", handler.RoutingStatus(deps, watch))
+}
+
+func registerWorkerRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, watch *handler.WorkerWatch) {
 	const unavailable = "worker API is unavailable"
 	if deps == nil {
 		mux.HandleFunc("/api/internal/", noDatabase(unavailable))
@@ -439,7 +459,10 @@ func registerWorkerRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps) 
 		mux.HandleFunc("/api/internal/", serviceUnavailable(unavailable+": no WORKER_TOKEN configured"))
 		return
 	}
-	gate := auth.RequireWorkerToken(cfg.WorkerToken)
+	// Contact is recorded inside the token check: a request anyone could send
+	// is no proof the worker is alive.
+	requireWorker := auth.RequireWorkerToken(cfg.WorkerToken)
+	gate := func(h http.Handler) http.Handler { return requireWorker(watch.RecordContact(h)) }
 	mux.Handle("GET /api/internal/worker", gate(handler.WorkerReady()))
 	mux.Handle("POST /api/internal/routing-jobs/{id}/running", gate(handler.WorkerMarkRunning(deps)))
 	mux.Handle("POST /api/internal/routing-jobs/{id}/succeeded", gate(handler.WorkerMarkSucceeded(deps)))
