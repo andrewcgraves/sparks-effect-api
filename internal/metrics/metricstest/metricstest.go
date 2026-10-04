@@ -72,7 +72,6 @@ func (r *Reader) Count(t *testing.T, name string, attrs ...attribute.KeyValue) i
 	return 0
 }
 
-// Gauge is a gauge's last value and whether it was ever set.
 func (r *Reader) Gauge(t *testing.T, name string) (int64, bool) {
 	t.Helper()
 	m, ok := r.find(t, name)

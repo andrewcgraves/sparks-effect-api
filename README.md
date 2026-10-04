@@ -408,8 +408,11 @@ the namespace and name, so the setting above makes it
 `job="staging/sparks-effect-api"`. The namespace is what keeps staging and
 production apart, both on dashboards and in the alert rules, which group by
 `job`. Use `service.namespace` rather than `deployment.environment`, because
-Grafana Cloud does not reliably put the latter on every series. With no endpoint set, nothing is exported and
-boot logs one `info` line saying so. That is the local default.
+Grafana Cloud does not reliably put the latter on every series.
+
+With no endpoint set, nothing is exported and boot logs one `info` line saying
+so. That is the local default. An allowed-origin CORS preflight is answered
+before the mux, so it counts under `route="unmatched"` alongside real 404s.
 
 ## Persistence
 

@@ -10,14 +10,9 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
-// Instrument names are written the way Grafana Cloud's OTLP ingest wants
-// them: no `_total` on counters and no unit on histograms, because the
-// Prometheus translation adds both. http_requests lands as
-// http_requests_total, http_request_duration (unit "s") as
-// http_request_duration_seconds — the names the alert rules query.
 const (
-	RouteUnmatched = "unmatched"
-	MethodOther    = "other"
+	routeUnmatched = "unmatched"
+	methodOther    = "other"
 )
 
 // Few buckets on purpose: every route that is ever hit costs one series per
@@ -49,6 +44,11 @@ type Metrics struct {
 
 func New(provider metric.MeterProvider) *Metrics {
 	meter := provider.Meter("github.com/andrewcgraves/sparks-effect-api")
+	// Instrument names are written the way Grafana Cloud's OTLP ingest wants
+	// them: no `_total` on counters and no unit on histograms, because the
+	// Prometheus translation adds both. http_requests lands as
+	// http_requests_total, http_request_duration (unit "s") as
+	// http_request_duration_seconds — the names the alert rules query.
 	// The API returns an error only for an invalid name or option, which is a
 	// programming error caught by the tests, and a usable no-op instrument
 	// alongside it, so the errors are deliberately dropped.
@@ -82,7 +82,7 @@ func (m *Metrics) Request(ctx context.Context, pattern, method string, status in
 	}
 	route := routeOf(pattern)
 	if !knownMethods[method] {
-		method = MethodOther
+		method = methodOther
 	}
 	m.requests.Add(ctx, 1, metric.WithAttributes(
 		attribute.String("route", route),
@@ -131,7 +131,7 @@ func (m *Metrics) RateLimited(limiter string) func(context.Context) {
 // method has a label of its own.
 func routeOf(pattern string) string {
 	if pattern == "" {
-		return RouteUnmatched
+		return routeUnmatched
 	}
 	if i := strings.IndexByte(pattern, ' '); i >= 0 {
 		pattern = strings.TrimLeft(pattern[i+1:], " ")

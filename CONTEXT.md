@@ -324,6 +324,14 @@ The four values of `transit.JobStatus*`, shared by compile jobs and routing jobs
 missing *or* already terminal — which is how a job the API gave up on and failed
 stops a late worker from reviving it.
 
+### Compile outcome
+
+The `outcome` label on the `compile_jobs_total` metric (SPA-433). It is the
+terminal job status the compile wrote, `succeeded` or `failed`, or `error`
+when no status could be written at all, for example when the database was
+unreachable. `error` is a metric value only and never a job status: that job
+is left wherever it was.
+
 ## Where the rest of the vocabulary lives
 
 | Repository | Owns |
