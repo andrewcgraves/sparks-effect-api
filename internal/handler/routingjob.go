@@ -30,6 +30,11 @@ type RoutingStore interface {
 	FindReusableRoutingJob(ctx context.Context, want transit.RoutingJob) (transit.RoutingJob, bool, error)
 }
 
+type RoutingJobPollStore interface {
+	RoutingStore
+	CountInFlightRoutingJobsBefore(ctx context.Context, createdAt time.Time, within time.Duration) (int, error)
+}
+
 func enqueueIsochrone(w http.ResponseWriter, r *http.Request, store RoutingStore,
 	publisher routing.Publisher, job transit.RoutingJob, graph *transit.TransitGraph) {
 	if !originInRange(w, job, graph) {
@@ -112,7 +117,7 @@ func failUnpublishedJob(store RoutingStore, id string, cause error) {
 
 const failJobTimeout = 5 * time.Second
 
-func RoutingJobStatus(store RoutingStore) http.HandlerFunc {
+func RoutingJobStatus(store RoutingJobPollStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		job, found, err := store.GetRoutingJobByID(r.Context(), r.PathValue("id"))
 		if err != nil {
@@ -126,8 +131,32 @@ func RoutingJobStatus(store RoutingStore) http.HandlerFunc {
 
 		job = failIfStale(r.Context(), store, job)
 
-		writeJSON(w, http.StatusOK, job)
+		writeJSON(w, http.StatusOK, routingJobPoll{
+			RoutingJob:    job,
+			QueuePosition: queuePosition(r.Context(), store, job),
+		})
 	}
+}
+
+type routingJobPoll struct {
+	transit.RoutingJob
+	QueuePosition *int `json:"queue_position,omitempty"`
+}
+
+// The worker takes one job at a time, oldest first, so a queued job waits
+// behind every in-flight job created before it (SPA-437). A failed count only
+// loses the courtesy, not the poll.
+func queuePosition(ctx context.Context, store RoutingJobPollStore, job transit.RoutingJob) *int {
+	if job.Status != transit.JobStatusQueued {
+		return nil
+	}
+	ahead, err := store.CountInFlightRoutingJobsBefore(ctx, job.CreatedAt, RoutingJobStaleAfter)
+	if err != nil {
+		slog.ErrorContext(ctx, "routing: could not count in-flight jobs before this one; omitting queue position",
+			"routing_job_id", job.ID, "error", err)
+		return nil
+	}
+	return &ahead
 }
 
 const RoutingJobStaleAfter = 90 * time.Second

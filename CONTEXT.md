@@ -216,6 +216,9 @@ through a node both of them touch.
   refused with 429 and `backlog_full`. The cap is per deployment, not per caller.
   Per-caller floods of the expensive POSTs are refused separately with 429 and
   `rate_limited`.
+- **Queue position** — for a `queued` routing job, the count of in-flight jobs
+  created before it: the jobs a FIFO worker taking one at a time will finish
+  first. `0` means next. Reported on the poll, never stored (SPA-437).
 - **Reuse** / **reused** — answering an isochrone request with an earlier
   succeeded routing job instead of minting one (SPA-331). Reused only when the
   graph, mode, budget, owner and origin (to five decimal places) agree, and the

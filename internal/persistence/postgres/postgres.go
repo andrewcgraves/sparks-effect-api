@@ -1004,15 +1004,27 @@ func (r *Repo) queryRoutingJob(ctx context.Context, op, sql string, args ...any)
 }
 
 func (r *Repo) CountInFlightRoutingJobs(ctx context.Context, within time.Duration) (int, error) {
+	return r.countInFlightRoutingJobs(ctx, "CountInFlightRoutingJobs", within, nil)
+}
+
+func (r *Repo) CountInFlightRoutingJobsBefore(ctx context.Context, createdAt time.Time, within time.Duration) (int, error) {
+	return r.countInFlightRoutingJobs(ctx, "CountInFlightRoutingJobsBefore", within, &createdAt)
+}
+
+// A nil before counts the whole backlog; otherwise only the jobs created
+// earlier, which is a queued job's queue position.
+func (r *Repo) countInFlightRoutingJobs(ctx context.Context, op string, within time.Duration, before *time.Time) (int, error) {
 	var n int
 	err := r.pool.QueryRow(ctx,
 		`SELECT count(*) FROM routing_jobs
-		 WHERE status = ANY($1) AND created_at > $2`,
+		 WHERE status = ANY($1) AND created_at > $2
+		   AND ($3::timestamptz IS NULL OR created_at < $3)`,
 		[]string{transit.JobStatusQueued, transit.JobStatusRunning},
 		time.Now().Add(-within),
+		before,
 	).Scan(&n)
 	if err != nil {
-		return 0, wrap("CountInFlightRoutingJobs", err)
+		return 0, wrap(op, err)
 	}
 	return n, nil
 }

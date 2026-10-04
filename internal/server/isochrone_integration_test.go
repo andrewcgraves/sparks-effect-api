@@ -197,3 +197,69 @@ func TestIntegration_IsochroneEnqueueCap(t *testing.T) {
 		t.Fatalf("after the backlog drained: status %d, want 202; body %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestIntegration_QueuedVisitorSeesTheirPlaceInTheQueue(t *testing.T) {
+	h, repo := integrationServer(t)
+	ctx := context.Background()
+
+	if _, err := transit.SeedIfEmpty(ctx, repo); err != nil {
+		t.Fatalf("SeedIfEmpty: %v", err)
+	}
+	if _, err := transit.CompileSeededIfNeeded(ctx, repo, transit.DefaultBoardingWaitPolicy()); err != nil {
+		t.Fatalf("CompileSeededIfNeeded: %v", err)
+	}
+
+	var ids []string
+	for i := 0; i < 3; i++ {
+		rec := request(t, h, http.MethodPost, "/api/isochrone", "", seededIsochroneBody)
+		if rec.Code != http.StatusAccepted {
+			t.Fatalf("enqueue %d: status %d, want 202; body %s", i, rec.Code, rec.Body.String())
+		}
+		var job transit.RoutingJob
+		if err := json.Unmarshal(rec.Body.Bytes(), &job); err != nil {
+			t.Fatalf("decode routing job: %v", err)
+		}
+		ids = append(ids, job.ID)
+	}
+
+	poll := func(id string) (status string, position *int) {
+		t.Helper()
+		rec := request(t, h, http.MethodGet, "/api/routing-jobs/"+id, "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("poll %s: status %d, want 200; body %s", id, rec.Code, rec.Body.String())
+		}
+		var body struct {
+			Status        string `json:"status"`
+			QueuePosition *int   `json:"queue_position"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode poll: %v", err)
+		}
+		return body.Status, body.QueuePosition
+	}
+	wantPosition := func(id string, want int) {
+		t.Helper()
+		if _, got := poll(id); got == nil || *got != want {
+			t.Errorf("queue_position = %v, want %d", got, want)
+		}
+	}
+
+	wantPosition(ids[2], 2)
+
+	// The worker picks up the first: it is no longer waiting, and it is still
+	// ahead of the third.
+	if err := repo.MarkRoutingJobRunning(ctx, ids[0]); err != nil {
+		t.Fatalf("MarkRoutingJobRunning: %v", err)
+	}
+	if status, got := poll(ids[0]); got != nil {
+		t.Errorf("a %s job carries queue_position %d, want none", status, *got)
+	}
+	wantPosition(ids[2], 2)
+
+	// It finishes, and the third counts down.
+	if err := repo.FailRoutingJob(ctx, ids[0], "finished for the test"); err != nil {
+		t.Fatalf("FailRoutingJob: %v", err)
+	}
+	wantPosition(ids[2], 1)
+	wantPosition(ids[1], 0)
+}

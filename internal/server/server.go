@@ -36,7 +36,7 @@ type AuthDeps interface {
 	handler.OwnedTravelTimesStore
 	handler.OwnedServiceStore
 	handler.OwnedRouteStore
-	handler.RoutingStore
+	handler.RoutingJobPollStore
 	handler.WorkerStore
 	handler.RoutingBacklogStore
 	handler.PrerenderedStore

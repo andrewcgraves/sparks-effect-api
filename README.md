@@ -217,6 +217,11 @@ readable by anyone holding its id — a v4 UUID, unguessable. An **owned** job,
 from one of the authored isochrones, answers 404 to anyone but its owner or an
 admin, so a caller cannot probe which job ids exist.
 
+While the job is `queued`, the response also carries `queue_position`: the
+number of in-flight jobs created before it, so `0` means it is next (SPA-437).
+It is absent once the job is `running` or finished, and absent if the count
+could not be read. It is counted on each poll, not stored.
+
 ### Routing status
 
 `GET /api/routing/status` says whether live plotting is working, so the
