@@ -405,7 +405,7 @@ func TestRoutingQueueSnapshot(t *testing.T) {
 	}
 }
 
-func TestCountRoutingJobsAhead(t *testing.T) {
+func TestCountInFlightRoutingJobsBefore(t *testing.T) {
 	ctx := context.Background()
 	repo, url := freshRepo(t)
 	seedCompileJob(t, repo, routingCompileJobID)
@@ -444,9 +444,9 @@ func TestCountRoutingJobsAhead(t *testing.T) {
 
 	ahead := func(id string) int {
 		t.Helper()
-		n, err := repo.CountRoutingJobsAhead(ctx, createdAt[id], 5*time.Minute)
+		n, err := repo.CountInFlightRoutingJobsBefore(ctx, createdAt[id], 5*time.Minute)
 		if err != nil {
-			t.Fatalf("CountRoutingJobsAhead: %v", err)
+			t.Fatalf("CountInFlightRoutingJobsBefore: %v", err)
 		}
 		return n
 	}

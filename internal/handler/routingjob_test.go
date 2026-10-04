@@ -22,7 +22,7 @@ var (
 	pollAdmin    = account.User{ID: "admin-1", Email: "admin@example.com", IsAdmin: true}
 )
 
-func pollAs(t *testing.T, store handler.RoutingStore, id string, user account.User) *httptest.ResponseRecorder {
+func pollAs(t *testing.T, store handler.RoutingJobPollStore, id string, user account.User) *httptest.ResponseRecorder {
 	t.Helper()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/routing-jobs/{id}", handler.RoutingJobStatus(store))

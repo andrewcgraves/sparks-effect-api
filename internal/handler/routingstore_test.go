@@ -21,7 +21,7 @@ type fakeRoutingStore struct {
 	reuseErr   error
 	reuseAsked []transit.RoutingJob
 
-	// What CountRoutingJobsAhead answers, and what it was last asked. The
+	// What CountInFlightRoutingJobsBefore answers, and what it was last asked. The
 	// counting rule is the postgres repo's and tested there.
 	ahead       int
 	aheadErr    error
@@ -29,7 +29,7 @@ type fakeRoutingStore struct {
 	aheadWithin time.Duration
 }
 
-func (f *fakeRoutingStore) CountRoutingJobsAhead(_ context.Context, createdAt time.Time, within time.Duration) (int, error) {
+func (f *fakeRoutingStore) CountInFlightRoutingJobsBefore(_ context.Context, createdAt time.Time, within time.Duration) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.aheadOf, f.aheadWithin = createdAt, within

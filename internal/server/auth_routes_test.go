@@ -250,7 +250,7 @@ func (s *stubAuthDeps) CountInFlightRoutingJobs(context.Context, time.Duration) 
 	return s.inFlight, nil
 }
 
-func (s *stubAuthDeps) CountRoutingJobsAhead(context.Context, time.Time, time.Duration) (int, error) {
+func (s *stubAuthDeps) CountInFlightRoutingJobsBefore(context.Context, time.Time, time.Duration) (int, error) {
 	return 0, nil
 }
 
