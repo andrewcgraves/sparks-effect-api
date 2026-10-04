@@ -14,6 +14,7 @@ type Runner struct {
 
 	wg       sync.WaitGroup
 	mu       sync.Mutex
+	draining bool
 	inFlight map[string]struct{}
 }
 
@@ -22,10 +23,18 @@ func NewRunner(store Store, boardingWait transit.BoardingWaitPolicy) *Runner {
 }
 
 func (r *Runner) Enqueue(job transit.Job) {
+	// Admission and wg.Add share Drain's lock, so no compile can join the
+	// WaitGroup once Drain is waiting on it. A refused job keeps its queued
+	// row, which the next boot's sweep fails.
 	r.mu.Lock()
+	if r.draining {
+		r.mu.Unlock()
+		slog.Warn("compile: refused while shutting down; the next boot fails it", "job_id", job.ID)
+		return
+	}
 	r.inFlight[job.ID] = struct{}{}
-	r.mu.Unlock()
 	r.wg.Add(1)
+	r.mu.Unlock()
 
 	// Detached from the request that enqueued it: the handler answers 202 at
 	// once, and the compile has to outlive that response. Shutdown reaches it
@@ -43,9 +52,11 @@ func (r *Runner) Enqueue(job transit.Job) {
 	}()
 }
 
-// Drain returns the ids of the compiles still running when ctx ends. Their
-// rows stay queued or running; the next boot's sweep fails them.
 func (r *Runner) Drain(ctx context.Context) []string {
+	r.mu.Lock()
+	r.draining = true
+	r.mu.Unlock()
+
 	done := make(chan struct{})
 	go func() {
 		r.wg.Wait()
@@ -58,6 +69,8 @@ func (r *Runner) Drain(ctx context.Context) []string {
 	case <-ctx.Done():
 	}
 
+	// What is still in flight at the deadline is abandoned: its row stays
+	// queued or running, and the next boot's sweep fails it.
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	abandoned := make([]string, 0, len(r.inFlight))

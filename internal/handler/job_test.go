@@ -34,6 +34,24 @@ type fakeCompileStore struct {
 	getJobErr      error
 	getGraphErr    error
 	completed      chan transit.Job
+	// Runs just before FailInterruptedJob writes, to land a finish in the
+	// window between JobStatus's read and its write.
+	beforeFail func()
+}
+
+func (f *fakeCompileStore) FailInterruptedJob(_ context.Context, id, errMsg string) (bool, error) {
+	if f.beforeFail != nil {
+		f.beforeFail()
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	j, ok := f.jobs[id]
+	if !ok || (j.Status != transit.JobStatusQueued && j.Status != transit.JobStatusRunning) {
+		return false, nil
+	}
+	j.Status, j.Error = transit.JobStatusFailed, errMsg
+	f.jobs[id] = j
+	return true, nil
 }
 
 func newFakeCompileStore() *fakeCompileStore {
@@ -509,6 +527,33 @@ func TestJobStatusFailsACompileJobLeftUnfinishedPastTheBound(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestJobStatusKeepsACompileThatFinishesBetweenItsReadAndItsWrite(t *testing.T) {
+	store := newFakeCompileStore()
+	owner := "user-1"
+	store.jobs["job-1"] = transit.Job{ID: "job-1", Kind: transit.JobKindCompileUserService, Status: transit.JobStatusRunning,
+		OwnerID: &owner, CreatedAt: time.Now().Add(-2 * handler.CompileJobInterruptedAfter)}
+	store.beforeFail = func() {
+		store.mu.Lock()
+		defer store.mu.Unlock()
+		j := store.jobs["job-1"]
+		j.Status = transit.JobStatusSucceeded
+		store.jobs["job-1"] = j
+	}
+
+	user := account.User{ID: owner}
+	rec := getWithPathValueAs(t, handler.JobStatus(store), "/api/jobs/job-1", "id", "job-1", &user)
+	var got transit.Job
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Status != transit.JobStatusSucceeded {
+		t.Errorf("response status = %q, want the succeeded the compile reached", got.Status)
+	}
+	if stored := store.jobs["job-1"]; stored.Status != transit.JobStatusSucceeded {
+		t.Errorf("stored status = %q, want succeeded left alone", stored.Status)
 	}
 }
 

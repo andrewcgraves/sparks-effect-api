@@ -88,6 +88,23 @@ func TestRunnerDrainReportsCompilesItAbandonsAtTheDeadline(t *testing.T) {
 	}
 }
 
+func TestRunnerRunsNothingEnqueuedOnceDrainHasBegun(t *testing.T) {
+	store := newGatedStore()
+	close(store.release)
+	runner := compile.NewRunner(store, transit.DefaultBoardingWaitPolicy())
+	runner.Drain(context.Background())
+
+	// A handler still running past a timed-out Shutdown can get here. Its row
+	// stays queued for the next boot's sweep rather than racing the drain.
+	runner.Enqueue(scenarioJob())
+
+	select {
+	case <-store.started:
+		t.Fatal("a compile enqueued after Drain began was run")
+	case <-time.After(20 * time.Millisecond):
+	}
+}
+
 func TestRunnerDrainWithNothingInFlightReturnsAtOnce(t *testing.T) {
 	runner := compile.NewRunner(fixtureStore(), transit.DefaultBoardingWaitPolicy())
 

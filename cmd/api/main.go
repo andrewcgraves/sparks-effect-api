@@ -25,7 +25,6 @@ import (
 )
 
 func main() {
-	startedAt := time.Now()
 	_ = godotenv.Load()
 	cfg := config.Load()
 
@@ -39,7 +38,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	store, repo, cleanup, err := loadStore(ctx, cfg, startedAt, lg)
+	store, repo, cleanup, err := loadStore(ctx, cfg, lg)
 	if err != nil {
 		lg.Error("failed to load transit data", "error", err)
 		os.Exit(1)
@@ -112,7 +111,7 @@ func main() {
 	}
 }
 
-func loadStore(ctx context.Context, cfg config.Config, startedAt time.Time, lg *slog.Logger) (*transit.Store, *postgres.Repo, func(), error) {
+func loadStore(ctx context.Context, cfg config.Config, lg *slog.Logger) (*transit.Store, *postgres.Repo, func(), error) {
 	noop := func() {}
 
 	if cfg.DatabaseURL == "" {
@@ -131,10 +130,11 @@ func loadStore(ctx context.Context, cfg config.Config, startedAt time.Time, lg *
 	}
 
 	// A deploy or crash mid-compile leaves its job queued or running with
-	// nothing left to finish it (SPA-431). Swept before the seeded compile
-	// below enqueues jobs of its own. Not fatal: the stuck rows only mislead
-	// whoever polls them.
-	if n, err := repo.FailInterruptedJobs(ctx, startedAt); err != nil {
+	// nothing left to finish it (SPA-431). Every unfinished row is the dead
+	// process's only because this runs before anything here enqueues a compile:
+	// keep it ahead of the seeded compile below and of the listener. Not fatal:
+	// the stuck rows only mislead whoever polls them.
+	if n, err := repo.FailInterruptedJobs(ctx); err != nil {
 		lg.Error("could not fail interrupted compile jobs", "error", err)
 	} else if n > 0 {
 		lg.Warn("failed compile jobs interrupted by a restart", "count", n)

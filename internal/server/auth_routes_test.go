@@ -165,6 +165,9 @@ func (s *stubAuthDeps) GetJobByID(context.Context, string) (transit.Job, bool, e
 	return transit.Job{}, false, nil
 }
 func (s *stubAuthDeps) UpdateJobStatus(context.Context, string, string, string) error { return nil }
+func (s *stubAuthDeps) FailInterruptedJob(context.Context, string, string) (bool, error) {
+	return false, nil
+}
 func (s *stubAuthDeps) CompleteJob(context.Context, string, transit.TransitGraph, []string) error {
 	return nil
 }

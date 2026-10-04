@@ -20,6 +20,7 @@ type CompileStore interface {
 	GetLatestSucceededJob(ctx context.Context, scenarioSlug, kind string) (transit.Job, bool, error)
 	GetLatestSucceededUserScenarioJob(ctx context.Context, userScenarioSlug string) (transit.Job, bool, error)
 	GetLatestSucceededUserServiceJob(ctx context.Context, userServiceSlug string) (transit.Job, bool, error)
+	FailInterruptedJob(ctx context.Context, id, errMsg string) (bool, error)
 	compile.Store
 }
 
@@ -83,9 +84,6 @@ func JobStatus(store CompileStore) http.HandlerFunc {
 	}
 }
 
-// A compile runs in-process and takes seconds, so one unfinished this long
-// after it was enqueued lost its goroutine to a process that died without the
-// boot sweep reaching it yet: another replica, or no restart at all (SPA-431).
 const CompileJobInterruptedAfter = 5 * time.Minute
 
 const interruptedCompileJobMessage = "the compile was interrupted before it finished; compile again to retry"
@@ -94,13 +92,25 @@ func failIfCompileInterrupted(ctx context.Context, store CompileStore, job trans
 	if job.Status != transit.JobStatusQueued && job.Status != transit.JobStatusRunning {
 		return job
 	}
+	// A compile runs in-process and takes seconds, so one unfinished this long
+	// lost its goroutine to a process the boot sweep has not reached: another
+	// replica, or one that died with no restart (SPA-431).
 	if time.Since(job.CreatedAt) <= CompileJobInterruptedAfter {
 		return job
 	}
 
-	if err := store.UpdateJobStatus(ctx, job.ID, transit.JobStatusFailed, interruptedCompileJobMessage); err != nil {
+	failed, err := store.FailInterruptedJob(ctx, job.ID, interruptedCompileJobMessage)
+	if err != nil {
 		slog.ErrorContext(ctx, "compile: could not mark interrupted compile job failed",
 			"job_id", job.ID, "error", err)
+		return job
+	}
+	if !failed {
+		// It finished between the read above and the write. Answer with what
+		// it finished as, not the unfinished row this request first saw.
+		if current, found, err := store.GetJobByID(ctx, job.ID); err == nil && found {
+			return current
+		}
 		return job
 	}
 

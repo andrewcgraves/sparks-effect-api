@@ -322,10 +322,11 @@ stops a late worker from reviving it.
 An **interrupted** compile job is one left `queued` or `running` with no
 goroutine left to finish it, because compiles run inside the API process and
 that process exited mid-compile. Shutdown waits for in-flight compiles up to
-its grace period. Boot fails any job created before the process started, with
+its grace period. Boot fails every unfinished job before it enqueues any of its own, with
 `error = "interrupted by restart"`. `GET /api/jobs/{id}` fails one older than
-`handler.CompileJobInterruptedAfter`. Say *interrupted* about compile jobs, not
-*stale*: that word belongs to graphs.
+`handler.CompileJobInterruptedAfter`, which a boot never reached, with a
+message telling the author to compile again. Say *interrupted* about compile
+jobs, not *stale*: that word belongs to graphs.
 
 ## Where the rest of the vocabulary lives
 
