@@ -520,15 +520,19 @@ under `/api/admin/`.
 ### The published index
 
 `GET /api/published-services` lists every published `UserService` as a card:
-`slug`, `name`, `subtext` and `description`, by first publication, newest
-first, with slug breaking a tie. Republishing keeps a service's place, so a
+`slug`, `name`, `subtext`, `description`, `author_name` and `published_at`,
+by first publication, newest first, with slug breaking a tie. `published_at`
+is the latest publish, the same time the publication itself shows, and
+`author_name` is the owner's current display name (see
+[Byline](CONTEXT.md#seeded--curated--authored--owned)). Republishing keeps a service's place, so a
 paged walk never skips one (migration 00033). It is unauthenticated, and the
 answer is the same for every caller, so an owner does not see their own
 unpublished drafts there either
 ([ADR-0005](docs/adr/0005-publishing-an-authored-service.md)). The prose is the
 publication's frozen copy, so a draft edit does not show until it is
 republished. `ListPublishedServiceSummaries` selects neither the stops or
-vehicle documents nor the publication's routes, and migration 00033 indexes
+vehicle documents nor the publication's routes, nor anything about the owner
+but their name, and migration 00033 indexes
 `first_published_at` for its sort.
 
 It pages with a keyset cursor (SPA-434). `?limit=` asks for up to that many
@@ -586,9 +590,10 @@ Five rules, all enforced server-side:
   `CanAccess`, because adding to a scenario is changing it.
 - **Publication** — the one public read of an authored service.
   `GET /api/services/{slug}/publication` has no auth middleware at all and
-  reads only the snapshot in `service_publications` — the draft row is joined
-  for its slug and nothing else — so it answers everyone alike, owner included,
-  and never carries the draft. An unpublished slug gets the same 404
+  reads the snapshot in `service_publications`, plus two things joined through
+  the draft row that no edit can change: its slug, and its owner's current
+  display name (`author_name`). So it answers everyone alike, owner included,
+  and never carries an unpublished edit, the owner's email or their id. An unpublished slug gets the same 404
   as an unknown one, both before the first publish and after an unpublish.
   `POST /api/services/{slug}/publication/isochrone` plots over it the same
   way: no auth middleware, the same 404, and only the pinned compile job's

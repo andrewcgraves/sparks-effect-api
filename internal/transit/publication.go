@@ -10,13 +10,16 @@ type ServicePublication struct {
 	Description   string    `json:"description,omitempty"`
 	Routes        []Route   `json:"routes"`
 	PublishedAt   time.Time `json:"published_at"`
+	AuthorName    string    `json:"author_name"`
 }
 
 type PublishedServiceSummary struct {
-	Slug        string `json:"slug"`
-	Name        string `json:"name"`
-	Subtext     string `json:"subtext,omitempty"`
-	Description string `json:"description,omitempty"`
+	Slug        string    `json:"slug"`
+	Name        string    `json:"name"`
+	Subtext     string    `json:"subtext,omitempty"`
+	Description string    `json:"description,omitempty"`
+	AuthorName  string    `json:"author_name"`
+	PublishedAt time.Time `json:"published_at"`
 }
 
 type PublishedIndexKey struct {

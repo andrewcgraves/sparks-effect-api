@@ -100,7 +100,14 @@ func TestIntegration_PublishedServicesIndexListsOnlyPublications(t *testing.T) {
 	want := map[string]any{
 		"slug": first.Slug, "name": "First Line",
 		"subtext": "Electrified · Express", "description": "Published first.",
+		// Provisioned without a display name. The byline has its own test.
+		"author_name": "",
 	}
+	// Its value is the byline test's concern; here it only has to be present.
+	if _, ok := items[0]["published_at"].(string); !ok {
+		t.Errorf("published_at = %v, want a time", items[0]["published_at"])
+	}
+	delete(items[0], "published_at")
 	if len(items[0]) != len(want) {
 		t.Fatalf("item = %+v, want exactly the keys of %+v", items[0], want)
 	}
