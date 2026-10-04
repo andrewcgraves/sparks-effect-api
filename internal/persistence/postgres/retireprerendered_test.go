@@ -3,6 +3,7 @@ package postgres_test
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"testing"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/persistence/postgres"
@@ -20,7 +21,7 @@ func insertCaHSRPrerendered(t *testing.T, repo *postgres.Repo, url string) {
 	t.Helper()
 	exec(t, url,
 		`INSERT INTO scenarios (id, slug, name) VALUES ('`+phase1ScenarioID+`', 'ca-hsr', 'CA HSR')`)
-	for _, id := range append(append([]string{}, retiredPrerenderedIDs...), keptPrerenderedID) {
+	for _, id := range slices.Concat(retiredPrerenderedIDs, []string{keptPrerenderedID}) {
 		entry := transit.PrerenderedIsochrone{
 			ID: id, ScenarioSlug: "ca-hsr", Label: id,
 			Lat: 37.3, Lng: -121.9, BudgetMins: 60, Mode: transit.TravelModeBike,

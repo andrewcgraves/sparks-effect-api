@@ -261,16 +261,22 @@ func TestSeedPrerenderedIsochrones_embeddedSeedDataIsValid(t *testing.T) {
 	}
 }
 
-// The home page leads with ca-hsr's prerendered splash zones so its hero and
+// The home page leads with ca-hsr's prerendered isochrones so its hero and
 // first clicks enqueue no routing job (SPA-439). Fewer than four leaves it
 // little to choose from.
-func TestSeedPrerenderedIsochrones_featuredScenarioShipsAtLeastFour(t *testing.T) {
+func TestSeedPrerenderedIsochrones_caHSRShipsAtLeastFour(t *testing.T) {
 	store := newFakePrerenderedSeedStore()
 	if err := transit.SeedPrerenderedIsochronesFromEmbedded(context.Background(), store); err != nil {
 		t.Fatalf("SeedPrerenderedIsochronesFromEmbedded: %v", err)
 	}
-	if len(store.entries) < 4 {
-		t.Errorf("ca-hsr ships %d prerendered isochrones, want at least 4", len(store.entries))
+	n := 0
+	for _, p := range store.entries {
+		if p.ScenarioSlug == "ca-hsr" {
+			n++
+		}
+	}
+	if n < 4 {
+		t.Errorf("ca-hsr ships %d prerendered isochrones, want at least 4", n)
 	}
 }
 

@@ -42,7 +42,7 @@ and mode. That is why the list endpoint never selects the column.
 
 ## What ships here
 
-These are the splash zones the home page leads with (SPA-439), so a visitor's
+These are the prerendered isochrones the home page leads with (SPA-439), so a visitor's
 first plots cost no routing job. Each was captured from a real succeeded
 routing job on staging, whose worker routes on production's tileset, against
 the `ca-hsr` graph with the HSR Express running (compile `a5080656`). The
