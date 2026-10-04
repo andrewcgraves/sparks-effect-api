@@ -20,6 +20,11 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # The golang build image's minor is the Go version, which moves together
+    # with go.mod and GO_VERSION in CI, not on its own in a grouped PR.
+    ignore:
+      - dependency-name: golang
+        update-types: [version-update:semver-minor, version-update:semver-major]
     groups:
       docker-minor-patch:
         update-types: [minor, patch]
