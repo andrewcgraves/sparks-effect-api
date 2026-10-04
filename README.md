@@ -120,8 +120,8 @@ A lookup or put also carries at most 1000 keys or entries, and more is a `400`
 naming the limit. The worker treats a refused lookup as a miss and a refused
 put as an unwritten row, so neither changes a job's outcome. A refused result
 does, which is why its cap is generous: the largest real chain
-(`internal/handler/testdata/cache-put-sj-240-bike.json` and its prerendered
-result) sits under a sixteenth of it. A put is all or nothing:
+(`internal/handler/testdata/cache-put-sj-240-bike.json` and its result,
+`chain-result-sj-240-bike.json`) sits under a sixteenth of it. A put is all or nothing:
 one rejected entry loses the whole batch, on purpose.
 
 Every isochrone request's `budget_mins` must be between 1 and 300. Above the

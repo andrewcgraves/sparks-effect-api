@@ -260,3 +260,34 @@ func TestSeedPrerenderedIsochrones_embeddedSeedDataIsValid(t *testing.T) {
 		t.Fatalf("the embedded prerendered seed data does not load: %v", err)
 	}
 }
+
+// The home page leads with ca-hsr's prerendered splash zones so its hero and
+// first clicks enqueue no routing job (SPA-439). Fewer than four leaves it
+// little to choose from.
+func TestSeedPrerenderedIsochrones_featuredScenarioShipsAtLeastFour(t *testing.T) {
+	store := newFakePrerenderedSeedStore()
+	if err := transit.SeedPrerenderedIsochronesFromEmbedded(context.Background(), store); err != nil {
+		t.Fatalf("SeedPrerenderedIsochronesFromEmbedded: %v", err)
+	}
+	if len(store.entries) < 4 {
+		t.Errorf("ca-hsr ships %d prerendered isochrones, want at least 4", len(store.entries))
+	}
+}
+
+// Both 240-minute entries were captured against a graph without the HSR
+// Express, so SPA-464 left them outdated. Migration 00035 deletes their rows;
+// shipping either file again would only re-seed a payload of that old graph.
+func TestSeedPrerenderedIsochrones_doesNotShipRetiredEntries(t *testing.T) {
+	store := newFakePrerenderedSeedStore()
+	if err := transit.SeedPrerenderedIsochronesFromEmbedded(context.Background(), store); err != nil {
+		t.Fatalf("SeedPrerenderedIsochronesFromEmbedded: %v", err)
+	}
+	for _, id := range []string{
+		"00000000-0000-4006-8001-000000000001",
+		"00000000-0000-4006-8001-000000000002",
+	} {
+		if _, ok := store.entries[id]; ok {
+			t.Errorf("retired prerendered isochrone %s is still embedded", id)
+		}
+	}
+}
