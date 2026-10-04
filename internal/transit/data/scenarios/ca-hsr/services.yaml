@@ -1,7 +1,7 @@
 # Services for the CA HSR scenario.
 #
-# HSR Express: key stops only (skips Madera and Kings/Tulare). Parked — see
-#   `active` on its entry below. It does not call at Merced.
+# HSR Express: key stops only (skips Madera and Kings/Tulare). It does not
+#   call at Merced.
 # HSR Local: Phase 1 stops SF–Anaheim. Merced is not a Phase 1 call.
 # Merced Shuttle: hourly Merced–Madera spur. The 2026 Business Plan describes
 #   this as an hourly shuttle with a timed connection at Madera.
@@ -23,14 +23,15 @@
   vehicle_type_id: "00000000-0000-4003-8001-000000000001"
   name: "HSR Express"
   direction: "both"
-  # Parked. Phase 1 is one corridor, and running two stopping patterns over it
-  # makes the network read as two lines everywhere it is presented — an
-  # isochrone reports the same station twice, once per pattern, and the rider
-  # has to work out that they are the same railway. Kept here rather than
-  # deleted: nothing about the pattern is wrong, it is the presentation that
-  # cannot yet carry it. Setting this back to true restores it to both the
-  # compiled graph and the scenario API.
-  active: false
+  # Un-parked in SPA-464. It was parked in SPA-223 on the belief that two
+  # stopping patterns over one corridor would report a station twice. They do
+  # not: the compiled graph has one node per station, and the routing worker's
+  # search keeps the fastest arrival at each, naming the winning service.
+  #
+  # A skipped stop saves only its dwell. run_seconds come from the all-stop
+  # matrix, so the braking and acceleration for Madera and Kings/Tulare are
+  # still in the hops the Express rides through.
+  active: true
   provenance: calibrated
   stops:
     - station_id: "00000000-0000-4005-8001-000000000001"

@@ -26,9 +26,10 @@ Compile() → TransitGraph, stored as a succeeded compile job
   • nodes (position + names) so the graph plots on its own
         │
         ▼
-POST /api/isochrone  →  202 + routing job
+POST /api/isochrone  →  202 + routing job (200 + an earlier one, on a repeat)
   • resolves auth, ownership, target slug, and the stale-graph check
-  • publishes { graph, lat, lng, budget_mins, mode } with publisher confirms
+  • answers a repeat with the earlier succeeded job, publishing nothing
+  • otherwise publishes { graph, lat, lng, budget_mins, mode } with publisher confirms
         │
         ▼
 routing worker (separate repo, inside the cluster)
@@ -112,6 +113,22 @@ cycle needs no purge: each stale row is recomputed once and replaced. The
 worker README records how it treats a NULL stamp. An older worker ignores the
 added field, so deploy this side first.
 
+The internal endpoints cap their bodies like every other handler (SPA-332),
+answering an oversized one `413` with `request body too large`: 8 MiB for a
+job's result and for a cache put, 1 MiB for a lookup, 64 KiB for a failure.
+A lookup or put also carries at most 1000 keys or entries, and more is a `400`
+naming the limit. The worker treats a refused lookup as a miss and a refused
+put as an unwritten row, so neither changes a job's outcome. A refused result
+does, which is why its cap is generous: the largest real chain
+(`internal/handler/testdata/cache-put-sj-240-bike.json` and its prerendered
+result) sits under a sixteenth of it. A put is all or nothing:
+one rejected entry loses the whole batch, on purpose.
+
+Every isochrone request's `budget_mins` must be between 1 and 300. Above the
+worker's 320-minute contour ceiling the chain clamps its contours, and 300
+keeps every request below it while leaving room above the site's largest
+preset, 240.
+
 Travel mode is stored in the domain's own vocabulary — `walk` / `bike` /
 `drive` / `transit` ([CONTEXT.md](CONTEXT.md#travel-mode-vs-costing)). "Costing"
 is Valhalla's word for the same concept and stays at the worker's client
@@ -144,6 +161,20 @@ isochrone as well as `POST /api/isochrone`, so an anonymous flood fills the
 same backlog an owner's draft isochrone waits on; the per-IP limit below is
 what keeps one caller from doing that alone.
 
+### Reusing a previous job
+
+Since SPA-331 an isochrone request that repeats one already answered is
+answered with that earlier routing job: `200` with the succeeded job, no new
+row, no queue message, nothing counted against the backlog. A repeat means the
+same compiled graph, mode, budget and owner, at an origin equal to five decimal
+places, and the earlier result still fresh: not past the service date the
+worker computed it for (`reusable_until`), and cut from the newest tileset any
+job has reported (`tileset_at`). The rules and their reasoning are in migration
+`00034`; the word is defined in [`CONTEXT.md`](CONTEXT.md).
+
+The backlog cap above still runs first, so at a full backlog a repeat is
+refused with `429` like any other request.
+
 ### Per-caller rate limits
 
 The expensive POST routes also carry an in-process token bucket (SPA-220),
@@ -171,7 +202,7 @@ The four policies, overridable by env, are disabled only by `PER_MIN=0`
 | --- | --- | --- |
 | Isochrone | All `POST .../isochrone` (one shared limiter) | 10/min, burst 5 |
 | Snap-stops | `POST /api/routes/{slug}/snap-stops` | 30/min, burst 10 |
-| Login | `POST /api/auth/login`, `GET`/`POST /api/auth/tokens/{token}` (one shared limiter) | 5/min, burst 5 |
+| Login | `POST /api/auth/login`, `GET`/`POST /api/auth/tokens/{token}` and `POST /api/auth/password` (one shared limiter) | 5/min, burst 5 |
 | Compile | All three compile POSTs (one shared limiter) | 10/min, burst 3 |
 
 Ordinary CRUD, routing-job polling, public scenario/graph reads, `/healthz`,
@@ -326,7 +357,8 @@ message for any isochrone the request enqueues, so one request's logs can be
 followed across both services in Grafana.
 
 Sample request for San Jose downtown, walk 90 min, ca-hsr scenario. It answers
-202 with a routing job; poll that job for the result.
+202 with a routing job; poll that job for the result. Sent again, it answers 200
+with the same, already succeeded, job.
 
 ```sh
 JOB=$(curl -s -X POST http://localhost:8080/api/isochrone \
@@ -431,6 +463,9 @@ scenario/route reads or `/api/internal/*`.
 | `POST /api/auth/tokens/{token}` | public | Set the password from a link and sign in |
 | `POST /api/auth/logout` | authenticated | Revoke the presented token |
 | `GET /api/auth/me` | authenticated | The caller's identity and admin flag |
+| `PATCH /api/auth/me` | authenticated | Set the caller's display name (`{name}`, 1–80 characters after trimming); nothing else on the account changes |
+| `POST /api/auth/password` | authenticated | Change the caller's password (`{current_password, new_password}`): `401` on a wrong current password, `422` `validation` on a weak new one, `409` if a concurrent change or revocation got there first. Revokes every other session; the presenting one keeps working |
+| `POST /api/auth/sessions/revoke-all` | authenticated | Revoke every session the caller has, the presenting one included. `204` |
 | `GET /api/me/scenarios` | authenticated | Seeded Scenarios the caller owns |
 | `GET /api/me/services` | authenticated | Seeded Services the caller owns, not UserServices |
 | `POST /api/me/routes` | authenticated | Author an alignment of your own |
@@ -443,12 +478,17 @@ scenario/route reads or `/api/internal/*`.
 | `GET`/`PUT /api/me/scenarios/{slug}/travel-times` | authenticated | Its segment run times, read and replaced whole |
 | `POST /api/me/services` | authenticated | Author a seeded service inside a scenario you own |
 | `GET`/`PUT`/`DELETE /api/me/services/{id}` | authenticated | Read, edit, or remove one |
+| `POST /api/services/{slug}/handovers` | authenticated | Offer your service to another account by `to_email`. 202 with the same body whether or not the address is an active account, and nothing recorded when it is not; 422 to the owner, 409 while one is pending |
+| `GET /api/me/handovers` | authenticated | Your pending handovers, `{incoming, outgoing}`, with the service and the other party's display name |
+| `POST /api/handovers/{id}/cancel` | authenticated | Withdraw a pending offer you sent |
+| `POST /api/handovers/{id}/decline` | authenticated | Refuse a pending offer sent to you |
 | `POST /api/admin/users` | admin | Provision an account with a password (for scripts) |
 | `POST /api/admin/invites` | admin | Create an account and return its one-time invite link |
 | `POST /api/admin/users/{id}/reset-link` | admin | Return a one-time password-reset link |
 | `GET /api/admin/users` | admin | Every account, oldest first, with `disabled_at` and how many UserServices it authored (`service_count`) and has published (`published_count`) |
 | `PATCH /api/admin/users/{id}` | admin | Set `is_admin` and/or `disabled`; disabling revokes the account's sessions. An admin demoting or disabling themselves gets 409 |
 | `POST /api/admin/routes` | admin | Ingest a curated alignment |
+| `POST /api/admin/retention` | admin | Dry-run (empty body or `{"apply":false}`) or apply (`{"apply":true}`) isochrone-cache and routing-job-result retention. See [`docs/retention.md`](docs/retention.md) |
 | `POST /api/scenarios/{slug}/prerendered-isochrones` | admin | Curate a ready-to-display isochrone for a scenario |
 
 ### Owning the seeded models
@@ -496,18 +536,39 @@ under `/api/admin/`.
 ### The published index
 
 `GET /api/published-services` lists every published `UserService` as a card:
-`slug`, `name`, `subtext` and `description`, most recently published first,
-with slug breaking a tie. It is unauthenticated, and the answer is the same for
-every caller, so an owner does not see their own unpublished drafts there either
+`slug`, `name`, `subtext`, `description`, `author_name` and `published_at`,
+by first publication, newest first, with slug breaking a tie. `published_at`
+is the latest publish, the same time the publication itself shows, and
+`author_name` is the owner's current display name (see
+[Byline](CONTEXT.md#seeded--curated--authored--owned)). Republishing keeps a service's place, so a
+paged walk never skips one (migration 00033). It is unauthenticated, and the
+answer is the same for every caller, so an owner does not see their own
+unpublished drafts there either
 ([ADR-0005](docs/adr/0005-publishing-an-authored-service.md)). The prose is the
 publication's frozen copy, so a draft edit does not show until it is
 republished. `ListPublishedServiceSummaries` selects neither the stops or
-vehicle documents nor the publication's routes, and migration 00027 indexes
-`published_at` for its sort.
+vehicle documents nor the publication's routes, nor anything about the owner
+but their name, and migration 00033 indexes
+`first_published_at` for its sort.
+
+It pages with a keyset cursor (SPA-434). `?limit=` asks for up to that many
+cards (default 50, capped at 100; anything that is not a positive integer is a
+`400`), and `?cursor=` continues after the page whose `next_cursor` it is; an
+empty cursor is the first page. Either parameter switches the response to
+`{"items": [...], "next_cursor": "..." | null}`, and `next_cursor` is `null` on
+the last page. The cursor is opaque URL-safe base64 of the last card's
+first-publish time and slug, so it depends on nothing about the caller and the
+pages stay cacheable; a malformed one is a `400`. A service published after a
+walk starts lands on page one, ahead of the cursor, and that walk does not see
+it.
+
+With neither parameter the endpoint still answers the bare array of every card,
+for websites built before SPA-434. It goes once the website's production tag
+reads pages.
 
 It is not `GET /api/services`, which stays the caller's own drafts. Curated
 scenarios stay at `GET /api/scenarios`: the two models differ, so a page that
-lists both calls both and merges them. There is no pagination yet.
+lists both calls both and merges them.
 
 ### Bootstrapping the first admin
 
@@ -529,7 +590,7 @@ password through `POST /api/admin/users`.
 
 ### Authorization
 
-Four rules, all enforced server-side:
+Five rules, all enforced server-side:
 
 - **Admin gating** — `RequireAdmin` protects account provisioning and management and is the
   gate route-write endpoints register behind.
@@ -545,9 +606,10 @@ Four rules, all enforced server-side:
   `CanAccess`, because adding to a scenario is changing it.
 - **Publication** — the one public read of an authored service.
   `GET /api/services/{slug}/publication` has no auth middleware at all and
-  reads only the snapshot in `service_publications` — the draft row is joined
-  for its slug and nothing else — so it answers everyone alike, owner included,
-  and never carries the draft. An unpublished slug gets the same 404
+  reads the snapshot in `service_publications`, plus two things joined through
+  the draft row that no edit can change: its slug, and its owner's current
+  display name (`author_name`). So it answers everyone alike, owner included,
+  and never carries an unpublished edit, the owner's email or their id. An unpublished slug gets the same 404
   as an unknown one, both before the first publish and after an unpublish.
   `POST /api/services/{slug}/publication/isochrone` plots over it the same
   way: no auth middleware, the same 404, and only the pinned compile job's
@@ -560,6 +622,14 @@ Four rules, all enforced server-side:
   still gets 404 there and an anonymous caller 401. The draft isochrone keeps
   plotting the owner's live graph and answering 409 `stale_graph`. See
   [ADR-0005](docs/adr/0005-publishing-an-authored-service.md).
+- **Handover** — offering a service goes through `CanAccess` like any other
+  write, so an admin may offer one on the owner's behalf (the owner stays the
+  sender). Deciding does not: only the sender may cancel and only the
+  recipient may decline, and everyone else, an admin included, gets 404. The
+  offer answers 202 with one body whether or not `to_email` belongs to an
+  active account, so it cannot be used to discover who has one. A pending
+  offer past `expires_at` (14 days) reads as expired and can no longer be
+  cancelled or declined. Accepting is not built yet (SPA-389).
 
 ### Database integration tests
 

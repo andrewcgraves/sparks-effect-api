@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -69,6 +68,13 @@ func (s *stubAuthDeps) UserServiceIDsOwnedBy(context.Context, string, []string) 
 	return nil, nil
 }
 
+func (s *stubAuthDeps) UpdateUserName(context.Context, string, string) (account.User, bool, error) {
+	return account.User{}, false, nil
+}
+func (s *stubAuthDeps) ChangePassword(context.Context, account.PasswordChange) (bool, error) {
+	return false, nil
+}
+func (s *stubAuthDeps) DeleteUserSessions(context.Context, string) error       { return nil }
 func (s *stubAuthDeps) CreateSession(context.Context, account.Session) error   { return nil }
 func (s *stubAuthDeps) DeleteSession(context.Context, string) error            { return nil }
 func (s *stubAuthDeps) CreateUser(context.Context, account.User, string) error { return nil }
@@ -180,8 +186,23 @@ func (s *stubAuthDeps) GetServicePublicationBySlug(context.Context, string) (tra
 func (s *stubAuthDeps) GetSucceededCompileJob(context.Context, string) (transit.Job, bool, error) {
 	return transit.Job{}, false, nil
 }
-func (s *stubAuthDeps) ListPublishedServiceSummaries(context.Context) ([]transit.PublishedServiceSummary, error) {
-	return s.published, nil
+func (s *stubAuthDeps) HasPendingServiceHandover(context.Context, string) (bool, error) {
+	return false, nil
+}
+func (s *stubAuthDeps) OfferServiceHandover(context.Context, transit.ServiceHandover, time.Duration) (transit.ServiceHandover, error) {
+	return transit.ServiceHandover{}, nil
+}
+func (s *stubAuthDeps) ListPendingServiceHandovers(context.Context, string) ([]transit.ServiceHandover, error) {
+	return nil, nil
+}
+func (s *stubAuthDeps) CancelServiceHandover(context.Context, string, string) (transit.ServiceHandover, error) {
+	return transit.ServiceHandover{}, handler.ErrHandoverNotFound
+}
+func (s *stubAuthDeps) DeclineServiceHandover(context.Context, string, string) (transit.ServiceHandover, error) {
+	return transit.ServiceHandover{}, handler.ErrHandoverNotFound
+}
+func (s *stubAuthDeps) ListPublishedServiceSummaries(context.Context, *transit.PublishedIndexKey, int) (transit.PublishedIndexPage, error) {
+	return transit.PublishedIndexPage{Items: s.published}, nil
 }
 func (s *stubAuthDeps) ListUserServicesByIDs(context.Context, []string) ([]transit.UserService, error) {
 	return nil, nil
@@ -201,9 +222,12 @@ func (s *stubAuthDeps) FailRoutingJob(context.Context, string, string) error    
 func (s *stubAuthDeps) GetRoutingJobByID(context.Context, string) (transit.RoutingJob, bool, error) {
 	return transit.RoutingJob{}, false, nil
 }
+func (s *stubAuthDeps) FindReusableRoutingJob(context.Context, transit.RoutingJob) (transit.RoutingJob, bool, error) {
+	return transit.RoutingJob{}, false, nil
+}
 
 func (s *stubAuthDeps) MarkRoutingJobRunning(context.Context, string) error { return nil }
-func (s *stubAuthDeps) SucceedRoutingJob(context.Context, string, json.RawMessage) error {
+func (s *stubAuthDeps) SucceedRoutingJob(context.Context, string, handler.JobSucceededBody) error {
 	return nil
 }
 func (s *stubAuthDeps) GetIsochroneCache(context.Context, []handler.IsochroneKey) (map[handler.IsochroneKey]handler.CachedIsochrone, error) {
@@ -231,6 +255,10 @@ func (s *stubAuthDeps) GetPrerenderedIsochrone(context.Context, string) (transit
 
 func (s *stubAuthDeps) CreatePrerenderedIsochrone(context.Context, *transit.PrerenderedIsochrone) error {
 	return nil
+}
+
+func (s *stubAuthDeps) ApplyRetention(context.Context, bool) (handler.RetentionReport, error) {
+	return handler.RetentionReport{}, nil
 }
 
 const (
@@ -279,6 +307,9 @@ func TestProtectedRoutesRejectAnonymousCallers(t *testing.T) {
 	protected := []struct{ method, path string }{
 		{http.MethodGet, "/api/auth/me"},
 		{http.MethodPost, "/api/auth/logout"},
+		{http.MethodPatch, "/api/auth/me"},
+		{http.MethodPost, "/api/auth/password"},
+		{http.MethodPost, "/api/auth/sessions/revoke-all"},
 		{http.MethodGet, "/api/me/scenarios"},
 		{http.MethodGet, "/api/me/services"},
 		{http.MethodPost, "/api/admin/users"},
@@ -287,6 +318,7 @@ func TestProtectedRoutesRejectAnonymousCallers(t *testing.T) {
 		{http.MethodPost, "/api/admin/invites"},
 		{http.MethodPost, "/api/admin/users/some-id/reset-link"},
 		{http.MethodPost, "/api/admin/routes"},
+		{http.MethodPost, "/api/admin/retention"},
 		{http.MethodPost, "/api/scenarios/ca-hsr/compile"},
 		{http.MethodGet, "/api/jobs/some-id"},
 		// The authored draft surface. GET .../publication and POST
@@ -302,6 +334,10 @@ func TestProtectedRoutesRejectAnonymousCallers(t *testing.T) {
 		{http.MethodPost, "/api/services/some-slug/isochrone"},
 		{http.MethodPut, "/api/services/some-slug/publication"},
 		{http.MethodDelete, "/api/services/some-slug/publication"},
+		{http.MethodPost, "/api/services/some-slug/handovers"},
+		{http.MethodGet, "/api/me/handovers"},
+		{http.MethodPost, "/api/handovers/some-id/cancel"},
+		{http.MethodPost, "/api/handovers/some-id/decline"},
 		{http.MethodPost, "/api/user-scenarios"},
 		{http.MethodGet, "/api/user-scenarios"},
 		{http.MethodGet, "/api/user-scenarios/some-slug"},
@@ -335,6 +371,7 @@ func TestAdminRoutesRejectNonAdmins(t *testing.T) {
 		{http.MethodPost, "/api/admin/invites"},
 		{http.MethodPost, "/api/admin/users/some-id/reset-link"},
 		{http.MethodPost, "/api/admin/routes"},
+		{http.MethodPost, "/api/admin/retention"},
 		// Not under /api/admin/, so nothing about its path says it is gated —
 		// which is exactly why it is asserted here.
 		{http.MethodPost, "/api/scenarios/ca-hsr/prerendered-isochrones"},
@@ -519,6 +556,9 @@ func TestAuthRoutesReportUnavailableWithoutADatabase(t *testing.T) {
 		{http.MethodGet, "/api/auth/tokens/some-token"},
 		{http.MethodPost, "/api/auth/tokens/some-token"},
 		{http.MethodGet, "/api/auth/me"},
+		{http.MethodPatch, "/api/auth/me"},
+		{http.MethodPost, "/api/auth/password"},
+		{http.MethodPost, "/api/auth/sessions/revoke-all"},
 		{http.MethodPost, "/api/admin/users"},
 		{http.MethodGet, "/api/me/scenarios"},
 		{http.MethodPost, "/api/scenarios/ca-hsr/compile"},
@@ -535,6 +575,10 @@ func TestAuthRoutesReportUnavailableWithoutADatabase(t *testing.T) {
 		{http.MethodDelete, "/api/services/some-slug/publication"},
 		{http.MethodGet, "/api/services/some-slug/publication"},
 		{http.MethodPost, "/api/services/some-slug/publication/isochrone"},
+		{http.MethodPost, "/api/services/some-slug/handovers"},
+		{http.MethodGet, "/api/me/handovers"},
+		{http.MethodPost, "/api/handovers/some-id/cancel"},
+		{http.MethodPost, "/api/handovers/some-id/decline"},
 		{http.MethodGet, "/api/internal/worker"},
 	} {
 		t.Run(p.method+" "+p.path, func(t *testing.T) {

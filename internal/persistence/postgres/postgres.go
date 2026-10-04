@@ -735,6 +735,44 @@ func (r *Repo) PatchUser(ctx context.Context, id string, patch account.UserPatch
 	return u, true, nil
 }
 
+func (r *Repo) UpdateUserName(ctx context.Context, id, name string) (account.User, bool, error) {
+	return scanUser(r.pool.QueryRow(ctx,
+		`UPDATE users SET name = $2, updated_at = now() WHERE id = $1 AND disabled_at IS NULL RETURNING `+userColumns, id, name))
+}
+
+// ChangePassword answers false, changing nothing, when the user is missing or
+// disabled, the stored hash is no longer c.CurrentHash, or the presenting
+// session is gone. The hash update and the revocation of every other session
+// share one transaction, so a stolen session cannot outlive the password
+// change that was meant to end it.
+func (r *Repo) ChangePassword(ctx context.Context, c account.PasswordChange) (bool, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return false, wrap("ChangePassword begin", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // rollback after commit is a no-op
+
+	tag, err := tx.Exec(ctx,
+		`UPDATE users SET password_hash = $2, updated_at = now()
+		 WHERE id = $1 AND password_hash = $3 AND disabled_at IS NULL
+		   AND EXISTS (SELECT 1 FROM sessions WHERE token_hash = $4 AND user_id = $1 AND expires_at > now())`,
+		c.UserID, c.NewHash, c.CurrentHash, c.KeepTokenHash)
+	if err != nil {
+		return false, wrap("ChangePassword", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return false, nil
+	}
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM sessions WHERE user_id = $1 AND token_hash <> $2`, c.UserID, c.KeepTokenHash); err != nil {
+		return false, wrap("ChangePassword sessions", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, wrap("ChangePassword commit", err)
+	}
+	return true, nil
+}
+
 // --- Sessions ---
 
 func (r *Repo) CreateSession(ctx context.Context, s account.Session) error {
@@ -754,6 +792,11 @@ func (r *Repo) GetSessionUser(ctx context.Context, tokenHash string) (account.Us
 func (r *Repo) DeleteSession(ctx context.Context, tokenHash string) error {
 	_, err := r.pool.Exec(ctx, `DELETE FROM sessions WHERE token_hash = $1`, tokenHash)
 	return wrap("DeleteSession", err)
+}
+
+func (r *Repo) DeleteUserSessions(ctx context.Context, userID string) error {
+	_, err := r.pool.Exec(ctx, `DELETE FROM sessions WHERE user_id = $1`, userID)
+	return wrap("DeleteUserSessions", err)
 }
 
 func (r *Repo) DeleteExpiredSessions(ctx context.Context) (int64, error) {
@@ -845,7 +888,7 @@ func (r *Repo) latestSucceededJobBySlug(ctx context.Context, targetTable, fkColu
 		`SELECT `+jobColumnsQualified+`
 		 FROM jobs j JOIN `+targetTable+` t ON t.id = j.`+fkColumn+`
 		 WHERE t.slug = $1 AND j.kind = $2 AND j.status = $3
-		 ORDER BY j.created_at DESC LIMIT 1`,
+		 ORDER BY j.created_at DESC, j.id DESC LIMIT 1`,
 		slug, kind, transit.JobStatusSucceeded)
 	return scanJob(row)
 }
@@ -887,15 +930,42 @@ func (r *Repo) CreateRoutingJob(ctx context.Context, j *transit.RoutingJob) erro
 }
 
 func (r *Repo) GetRoutingJobByID(ctx context.Context, id string) (transit.RoutingJob, bool, error) {
+	return r.queryRoutingJob(ctx, "GetRoutingJobByID",
+		`SELECT `+routingJobColumns+` FROM routing_jobs WHERE id = $1`, id)
+}
+
+// The key, quantisation and freshness rules are migration 00034's. The
+// round(..., 5) expressions and the status literal must match
+// routing_jobs_reuse_idx for the index to serve this.
+func (r *Repo) FindReusableRoutingJob(ctx context.Context, want transit.RoutingJob) (transit.RoutingJob, bool, error) {
+	return r.queryRoutingJob(ctx, "FindReusableRoutingJob", findReusableRoutingJobSQL,
+		want.CompileJobID, string(want.Mode), want.BudgetMins, want.Lat, want.Lng, want.OwnerID)
+}
+
+const findReusableRoutingJobSQL = `SELECT ` + routingJobColumns + `
+		   FROM routing_jobs
+		  WHERE status = 'succeeded'
+		    AND compile_job_id = $1
+		    AND mode = $2
+		    AND budget_mins = $3
+		    AND round(lat::numeric, 5) = round($4::float8::numeric, 5)
+		    AND round(lng::numeric, 5) = round($5::float8::numeric, 5)
+		    AND owner_id IS NOT DISTINCT FROM $6::uuid
+		    AND (reusable_until IS NULL OR reusable_until > now())
+		    AND tileset_at = (SELECT max(tileset_at) FROM routing_jobs WHERE status = 'succeeded')
+		  ORDER BY updated_at DESC
+		  LIMIT 1`
+
+func (r *Repo) queryRoutingJob(ctx context.Context, op, sql string, args ...any) (transit.RoutingJob, bool, error) {
 	var j transit.RoutingJob
-	err := r.pool.QueryRow(ctx, `SELECT `+routingJobColumns+` FROM routing_jobs WHERE id = $1`, id).
+	err := r.pool.QueryRow(ctx, sql, args...).
 		Scan(&j.ID, &j.Status, &j.CompileJobID, &j.OwnerID, &j.Lat, &j.Lng,
 			&j.BudgetMins, &j.Mode, &j.Result, &j.Error, &j.CreatedAt, &j.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return transit.RoutingJob{}, false, nil
 	}
 	if err != nil {
-		return transit.RoutingJob{}, false, wrap("GetRoutingJobByID", err)
+		return transit.RoutingJob{}, false, wrap(op, err)
 	}
 	return j, true, nil
 }

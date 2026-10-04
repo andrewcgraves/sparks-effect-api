@@ -39,7 +39,9 @@ type CachePutRequest struct {
 }
 
 type JobSucceededBody struct {
-	Result json.RawMessage `json:"result"`
+	Result        json.RawMessage `json:"result"`
+	TilesetAt     time.Time       `json:"tileset_at,omitzero"`
+	ReusableUntil time.Time       `json:"reusable_until,omitzero"`
 }
 
 type JobFailedBody struct {

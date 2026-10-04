@@ -125,12 +125,13 @@ func TestGraphDijkstra_palmdaleInterchangeNoTransferWaitUnderOverrides(t *testin
 
 	services := store.GetServicesByScenario(sc.ID)
 	const (
-		localID      = "00000000-0000-4004-8001-000000000002"
+		expressID    = caHSRExpressID
+		localID      = caHSRLocalID
 		brightlineID = "00000000-0000-4004-8001-000000000003"
 	)
 	for i := range services {
 		switch services[i].ID {
-		case localID:
+		case expressID, localID:
 			services[i].BoardingWait = &BoardingWaitOverride{Policy: BoardingWaitHalfHeadway}
 		case brightlineID:
 			services[i].BoardingWait = &BoardingWaitOverride{Policy: BoardingWaitFixed, Secs: intPtr(60)}
@@ -154,11 +155,13 @@ func TestGraphDijkstra_palmdaleInterchangeNoTransferWaitUnderOverrides(t *testin
 	if !ok {
 		t.Fatal("sf→palmdale unreachable")
 	}
-	if originSvc != localID {
-		t.Fatalf("sf→palmdale boarded %s, want HSR Local", originSvc)
+	// Both Phase 1 patterns wait half their headway; the Express runs every
+	// 30 min at peak to the Local's 60, so it is boarded at SF.
+	if originSvc != expressID {
+		t.Fatalf("sf→palmdale boarded %s, want HSR Express", originSvc)
 	}
-	if originWait != 1800 {
-		t.Fatalf("sf→palmdale wait: want Local half_headway 1800, got %d", originWait)
+	if originWait != 900 {
+		t.Fatalf("sf→palmdale wait: want Express half_headway 900, got %d", originWait)
 	}
 
 	_, wait, _, ok := graphDijkstra(g, "sf", "las-vegas")

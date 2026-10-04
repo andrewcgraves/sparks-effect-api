@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/persistence/postgres"
+	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
 const hsrExpressID = "00000000-0000-4004-8001-000000000001"
@@ -75,5 +76,29 @@ func TestHSRExpressParkedMigrationIsSafeToReRun(t *testing.T) {
 	if got := scalarCount(t, url,
 		`SELECT count(*) FROM services WHERE id = '`+hsrExpressID+`' AND active = false`); got != 1 {
 		t.Error("HSR Express after a re-run: want parked (active = false)")
+	}
+}
+
+// 00017 parked the Express on deployed databases. SPA-464 un-parks it in the
+// YAML alone, so the boot-time ReconcileSeed is what has to flip that row back.
+func TestReconcileSeedUnparksHSRExpressOnADeployedDatabase(t *testing.T) {
+	ctx := context.Background()
+	repo, url := freshRepo(t)
+
+	if _, err := transit.SeedIfEmpty(ctx, repo); err != nil {
+		t.Fatalf("SeedIfEmpty: %v", err)
+	}
+	exec(t, url, `UPDATE services SET active = false WHERE id = '`+hsrExpressID+`'`)
+
+	reconciled, err := transit.ReconcileSeed(ctx, repo)
+	if err != nil {
+		t.Fatalf("ReconcileSeed: %v", err)
+	}
+	if reconciled != 1 {
+		t.Errorf("ReconcileSeed wrote %d rows, want 1 (the Express)", reconciled)
+	}
+	if got := scalarCount(t, url,
+		`SELECT count(*) FROM services WHERE id = '`+hsrExpressID+`' AND active = true`); got != 1 {
+		t.Error("HSR Express still parked after ReconcileSeed")
 	}
 }

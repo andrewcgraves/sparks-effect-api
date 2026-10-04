@@ -13,6 +13,25 @@ type fakeRoutingStore struct {
 	createErr   error
 	failErr     error
 	lookupErr   error
+
+	// What FindReusableRoutingJob answers. The rules that decide it are the
+	// postgres repo's and tested there; this only records what it was asked.
+	reusable   *transit.RoutingJob
+	reuseErr   error
+	reuseAsked []transit.RoutingJob
+}
+
+func (f *fakeRoutingStore) FindReusableRoutingJob(_ context.Context, want transit.RoutingJob) (transit.RoutingJob, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reuseAsked = append(f.reuseAsked, want)
+	if f.reuseErr != nil {
+		return transit.RoutingJob{}, false, f.reuseErr
+	}
+	if f.reusable == nil {
+		return transit.RoutingJob{}, false, nil
+	}
+	return *f.reusable, true, nil
 }
 
 func (f *fakeRoutingStore) CreateRoutingJob(_ context.Context, j *transit.RoutingJob) error {

@@ -56,11 +56,20 @@ One more overload, on the same models. Every seeded-model row (`scenarios`,
   `subtext`, description and route geometry, taken when the owner published it.
   Public reads of it, and the isochrones anyone may plot over it, use the
   publication and never the **draft** — the live, editable row the owner keeps
-  working on — so an edit stays invisible until it is republished. **Unpublishing** deletes the publication. Only a `UserService`
+  working on — so an edit stays invisible until it is republished. The one
+  live part is the **byline**'s author name. **Unpublishing** deletes the publication. Only a `UserService`
   can be published today; a curated row is public without being published. Not to be confused
   with the routing worker's *publication* of a queue message — the same idea one
   level down, and in this repository spelled *enqueue*. See
   [ADR-0005](docs/adr/0005-publishing-an-authored-service.md).
+- **First published** — when a service's current publication began:
+  `first_published_at`, set on publishing and kept by every republish until the
+  service is unpublished. The published index orders by it, newest first, so a
+  republish keeps a service's place. *Published at* is the last publish.
+- **Byline** — who made a publication and when: `author_name`, the owner's
+  current display name (`users.name`, read live through `owner_id`, so a rename
+  or a transfer changes it without a republish), and `published_at`. Both public
+  reads carry it; neither carries the owner's email or id.
 
 **Public** is the adjective for what anyone may read: curated rows, and
 publications.
@@ -91,9 +100,10 @@ type. `User` and `Session` live in `internal/account`.
 | **Compile job** | A row in `jobs`. Kinds: `compile_scenario`, `compile_user_scenario`, `compile_user_service`. Its `result` is a `TransitGraph`. Compilation runs **in-process in this API**, in `internal/compile`. That package is not the routing worker — the routing worker is a separate repository |
 | **Routing job** | A row in `routing_jobs`. Its `result` is the worker's isochrone GeoJSON. Created by the isochrone endpoints, executed **in the routing worker**, written back over `/api/internal/...`. Different table, different owning process — a "job" with no qualifier is ambiguous, so always say which |
 | **Prerendered isochrone** | An admin-curated, ready-to-display isochrone stored against a scenario, so a public page can show a result without enqueueing one. Also called a *curated* isochrone |
-| **User** | `account.User` — an authenticated person. Authored rows point at them through `owner_id`. `is_admin` is the only privilege bit: it gates curated writes and `/api/admin/users`. `disabled_at` (nullable timestamptz) removes sign-in without deleting the person or their authored rows; NULL means the account can sign in. Publications stay published; attribution still shows the display name |
+| **User** | `account.User` — an authenticated person. Authored rows point at them through `owner_id`. `name` is the display name attribution shows; the user sets it through `PATCH /api/auth/me`, trimmed and bounded at 1–80 characters (`required` / `max_length` faults). `is_admin` is the only privilege bit: it gates curated writes and `/api/admin/users`. `disabled_at` (nullable timestamptz) removes sign-in without deleting the person or their authored rows; NULL means the account can sign in. Publications stay published; attribution still shows the display name |
 | **Session** | `account.Session` — a hashed bearer token bound to a User, with an expiry. The raw token is returned once at login and never stored |
 | **Account token** | `account.Token` — a one-time link that lets whoever holds it set a User's password. Purpose `invite` (made with the account, lasts 7 days) or `reset` (issued by an admin, lasts 1 hour, revokes the account's earlier unused reset). Stored only as a hash in `account_tokens`, like a Session. Redeeming one sets the password, marks it used, signs out every Session and starts a new one. A used, expired or disabled-account token answers exactly as an unknown one does |
+| **Handover** | `transit.ServiceHandover` — moving a `UserService`, with its publication and compile history, from one owner to another. **Offered** by the owner (or an admin, on the owner's behalf) to another account by email, then **accepted** or **declined** by the recipient, or **cancelled** by the owner while it is **pending**. A pending offer past `expires_at` (14 days) reads as **expired**, though nothing rewrites the row: expiry is lazy. A service has at most one pending handover, and its slug and public URL survive one. Table `service_handovers`, routes under `/api/.../handovers`. Not a *transfer*: see [interchange](#interchange) |
 
 ## Terms of art
 
@@ -145,6 +155,10 @@ everyday one.
 
 ### Interchange
 
+**Transfer** is reserved for this sense, a rider changing service (SPA-225,
+SPA-347), and is otherwise not a domain word here. Moving a service between
+owners is a [handover](#core-nouns).
+
 **There is no transfer edge.** The whole of interchange is *two services
 emitting an edge under one node key*. Nothing in the graph represents changing
 trains; a path that arrives on one service and leaves on another simply passes
@@ -175,6 +189,26 @@ through a node both of them touch.
   different word. An outdated entry is still served; `outdated` is a boolean on
   the read, not a refusal. Say *stale* about graphs and *outdated* about
   prerendered isochrones, and neither about the other.
+- **Cache generation rotated** — the log line `CompileSeededIfNeeded` writes
+  when a seeded scenario already had a succeeded compile and a new one is
+  stored. The previous job is the superseded compile. The new compile job id
+  does not exist until that compile is recorded, and a first compile has no
+  previous generation, so it does not log the line. A newer running or failed
+  compile does not supersede.
+- **Retention** — housekeeping an admin runs by hand with
+  `POST /api/admin/retention`. Nothing runs at boot, and a deploy deletes
+  nothing: the call dry-runs unless the body is `{"apply":true}`. It deletes
+  isochrone cache rows whose compile job is a superseded compile (not the
+  latest succeeded compile for that scenario, user scenario, or user service,
+  and not a publication's pinned compile, which stays live for this rule; a
+  target set NULL is not live) and transit rows outside the service-date
+  window of 7 calendar days, including rows on a live compile and on a pin.
+  Walk, bike and drive store a NULL service date and are not swept by that
+  window. It NULLs a routing job result older than 30 days and keeps the row.
+  SPA-331's reuse window is still open; 30 days sits well outside a
+  service-date reuse clock of a few days, and a NULL result must be treated
+  as a miss by that lookup.
+  Prerendered isochrones are never swept.
 - **Backlog** / **in-flight** — in-flight routing jobs are those `queued` or
   `running` and younger than `handler.RoutingJobStaleAfter`; the age bound is
   what stops a dead worker's abandoned rows wedging the cap shut forever. The
@@ -182,10 +216,18 @@ through a node both of them touch.
   refused with 429 and `backlog_full`. The cap is per deployment, not per caller.
   Per-caller floods of the expensive POSTs are refused separately with 429 and
   `rate_limited`.
+- **Reuse** / **reused** — answering an isochrone request with an earlier
+  succeeded routing job instead of minting one (SPA-331). Reused only when the
+  graph, mode, budget, owner and origin (to five decimal places) agree, and the
+  result is still fresh by the worker's own clocks: not past its
+  `reusable_until` service-date rollover, and stamped with the newest tileset
+  any job has reported. A reused job is answered 200, not 202, and costs no
+  backlog slot. Migration `00034` holds the reasoning.
 - **Park** / **parked** — `Service.Active = false`. A parked service stays in the
   seed and in the database, documented, but is skipped by the compiler. It is how
-  a stopping pattern is retired without deleting it. (CA HSR's HSR Express is the
-  standing example.)
+  a stopping pattern is retired without deleting it. Un-parking reaches a
+  deployed database through `ReconcileSeed`, since `active` is seed content.
+  (CA HSR's HSR Express was parked from SPA-223 until SPA-464.)
 - **Provenance tier** — how a service's timings were arrived at, and therefore
   which editor levers are honest: `computed` (physics-compiled, all levers),
   `calibrated` (imported timetable run times; dwell, frequency and stops

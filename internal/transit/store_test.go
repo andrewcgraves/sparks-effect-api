@@ -29,6 +29,112 @@ func TestNewStore(t *testing.T) {
 	}
 }
 
+func TestNewStore_repeatedCallsDoNotShareSeedGeometry(t *testing.T) {
+	a := mustNewStore(t)
+	b := mustNewStore(t)
+	scenarios := a.GetScenarios()
+	if len(scenarios) == 0 {
+		t.Fatal("NewStore returned no scenarios")
+	}
+	slug := scenarios[0].Slug
+
+	routes := a.GetRoutesByScenario(scenarios[0].ID)
+	if len(routes) == 0 || len(routes[0].Geometry.Coordinates) == 0 || len(routes[0].Geometry.Coordinates[0]) == 0 {
+		t.Fatal("seeded alignment has no coordinates")
+	}
+	before := routes[0].Geometry.Coordinates[0][0]
+	routes[0].Geometry.Coordinates[0][0] = before + 1
+
+	otherRoutes := b.GetRoutesByScenario(b.GetScenarios()[0].ID)
+	var other float64
+	found := false
+	for _, r := range otherRoutes {
+		if r.ID == routes[0].ID {
+			other = r.Geometry.Coordinates[0][0]
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("second store is missing route %s", routes[0].ID)
+	}
+	if other != before {
+		t.Fatalf("second store coordinate = %v, want %v: NewStore calls share alignment geometry", other, before)
+	}
+
+	tt, ok := a.GetTravelTimes(slug)
+	if !ok || len(tt.Segments) == 0 {
+		t.Fatal("seeded scenario has no segment run times")
+	}
+	var seg int
+	for i := range tt.Segments {
+		if tt.Segments[i].ReverseRunSeconds != nil {
+			seg = i
+			break
+		}
+	}
+	if tt.Segments[seg].ReverseRunSeconds == nil {
+		t.Fatal("seeded segment run times have no reverse_run_seconds")
+	}
+	orig := *tt.Segments[seg].ReverseRunSeconds
+	*tt.Segments[seg].ReverseRunSeconds = orig + 1
+	otherTT, ok := b.GetTravelTimes(slug)
+	if !ok {
+		t.Fatal("second store is missing travel times")
+	}
+	if got := *otherTT.Segments[seg].ReverseRunSeconds; got != orig {
+		t.Fatalf("second store reverse_run_seconds = %d, want %d: NewStore calls share segment pointers", got, orig)
+	}
+
+	var anchor *Station
+	for i := range a.stations {
+		if a.stations[i].RoutingLocation != nil && len(a.stations[i].RoutingLocation.Coordinates) > 0 {
+			anchor = &a.stations[i]
+			break
+		}
+	}
+	if anchor == nil {
+		t.Fatal("seeded stations have no routing anchor")
+	}
+	anchorBefore := anchor.RoutingLocation.Coordinates[0]
+	anchor.RoutingLocation.Coordinates[0] = anchorBefore + 1
+	for _, st := range b.stations {
+		if st.ID != anchor.ID || st.RoutingLocation == nil {
+			continue
+		}
+		if st.RoutingLocation.Coordinates[0] != anchorBefore {
+			t.Fatalf("second store routing anchor = %v, want %v: NewStore calls share the anchor",
+				st.RoutingLocation.Coordinates[0], anchorBefore)
+		}
+		return
+	}
+	t.Fatalf("second store is missing station %s", anchor.ID)
+}
+
+func TestCloneEmbeddedScenario_copiesBoardingWaitAndDwell(t *testing.T) {
+	secs := 120
+	dwell := 30
+	owner := "owner"
+	in := embeddedScenario{
+		services: []Service{{
+			ID:      "svc",
+			OwnerID: &owner,
+			Stops:   []ServiceStop{{StationID: "st", Sequence: 1, DwellS: &dwell}},
+			BoardingWait: &BoardingWaitOverride{
+				Policy: BoardingWaitFixed,
+				Secs:   &secs,
+			},
+		}},
+	}
+	out := cloneEmbeddedScenario(in)
+	*out.services[0].BoardingWait.Secs = 1
+	*out.services[0].Stops[0].DwellS = 1
+	*out.services[0].OwnerID = "other"
+	if *in.services[0].BoardingWait.Secs != 120 || *in.services[0].Stops[0].DwellS != 30 || *in.services[0].OwnerID != "owner" {
+		t.Fatalf("clone shares boarding wait, dwell, or owner with the cached scenario: %+v", in.services[0])
+	}
+}
+
 type errStoreSource struct{ err error }
 
 func (f errStoreSource) ListVehicleTypes(context.Context) ([]VehicleType, error) {
@@ -211,19 +317,15 @@ func TestGetServicesByScenario(t *testing.T) {
 	services := store.GetServicesByScenario(sc.ID)
 
 	// Named rather than counted, so this says which services the store is meant
-	// to hand out — and, in the case of the parked express pattern, which it is
-	// meant to withhold.
+	// to hand out.
 	served := make(map[string]bool, len(services))
 	for _, svc := range services {
 		served[svc.Name] = true
 	}
-	for _, want := range []string{"HSR Local", "Merced Shuttle", "Brightline West"} {
+	for _, want := range []string{"HSR Express", "HSR Local", "Merced Shuttle", "Brightline West"} {
 		if !served[want] {
 			t.Errorf("expected active service %q", want)
 		}
-	}
-	if served["HSR Express"] {
-		t.Error("HSR Express is seeded active: false and must not be served")
 	}
 
 	for _, svc := range services {
@@ -419,21 +521,25 @@ func sumStopToStop(t *testing.T, adj map[string]int, name string, stops []string
 
 func TestTravelTimeBetween_caHSRCorridorDirectionsDiffer(t *testing.T) {
 	store := mustNewStore(t)
+	allStop := compileCAHSR(t, store, withoutExpress)
 
-	got, _, _, ok := store.TravelTimeBetween("ca-hsr", "sf", "anaheim")
-	if !ok {
-		t.Fatal("TravelTimeBetween: sf→anaheim not found")
-	}
-	if got != 18300 {
-		t.Errorf("sf→anaheim: want 18300 (run sum 17310 + 11×dwell 90), got %d", got)
-	}
-
-	got, _, _, ok = store.TravelTimeBetween("ca-hsr", "anaheim", "sf")
-	if !ok {
-		t.Fatal("TravelTimeBetween: anaheim→sf not found")
-	}
-	if got != 18180 {
-		t.Errorf("anaheim→sf: want 18180 (run sum 17190 + 11×dwell 90), got %d", got)
+	// The Local calls at 11 stations after its origin; the Express at 9.
+	for _, tc := range []struct {
+		from, to string
+		local    int
+		fastest  int
+	}{
+		{"sf", "anaheim", 17310 + 11*90, 17310 + 9*90},
+		{"anaheim", "sf", 17190 + 11*90, 17190 + 9*90},
+	} {
+		got, _, _, ok := graphDijkstra(allStop, tc.from, tc.to)
+		if !ok || got != tc.local {
+			t.Errorf("%s→%s all-stop: want %d, got %d (found %v)", tc.from, tc.to, tc.local, got, ok)
+		}
+		got, _, _, ok = store.TravelTimeBetween("ca-hsr", tc.from, tc.to)
+		if !ok || got != tc.fastest {
+			t.Errorf("%s→%s via HSR Express: want %d, got %d (found %v)", tc.from, tc.to, tc.fastest, got, ok)
+		}
 	}
 }
 

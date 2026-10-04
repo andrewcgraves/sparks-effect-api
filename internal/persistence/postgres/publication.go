@@ -5,13 +5,23 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 	"github.com/jackc/pgx/v5"
 )
 
-const publicationColumns = `user_service_id, compile_job_id, name, subtext, description, routes, published_at`
+// The author is the one thing a publication reads through its draft besides
+// the slug: user_services.owner_id, joined on to users.name. It is live, not
+// part of the snapshot, so a rename or a transfer changes the byline without a
+// republish (ADR-0005). The owner's email and id are never selected.
+const (
+	publicationColumns = `p.user_service_id, p.compile_job_id, p.name, p.subtext, p.description, p.routes, p.published_at, u.name`
+	publicationJoins   = `
+		   JOIN user_services s ON s.id = p.user_service_id
+		   JOIN users u ON u.id = s.owner_id`
+)
 
 // publishAfterDecide is a test seam. When non-nil, PublishUserService calls it
 // after decide returns a publication and before the snapshot upsert.
@@ -86,7 +96,8 @@ func (r *Repo) UnpublishUserService(ctx context.Context, serviceID string) error
 
 func (r *Repo) GetServicePublication(ctx context.Context, serviceID string) (transit.ServicePublication, bool, error) {
 	pub, err := scanPublication(r.pool.QueryRow(ctx,
-		`SELECT `+publicationColumns+` FROM service_publications WHERE user_service_id = $1`, serviceID))
+		`SELECT `+publicationColumns+` FROM service_publications p`+publicationJoins+`
+		  WHERE p.user_service_id = $1`, serviceID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return transit.ServicePublication{}, false, nil
 	}
@@ -97,14 +108,13 @@ func (r *Repo) GetServicePublication(ctx context.Context, serviceID string) (tra
 }
 
 // GetServicePublicationBySlug is the public read. It joins user_services only
-// to turn the slug into an id and selects nothing from the draft row, so what
-// it returns cannot carry an unpublished edit (ADR-0005). An unpublished slug
-// and an unknown one both come back as not found.
+// to turn the slug into an id and to reach the owner's name, and selects none
+// of the draft's prose or geometry, so what it returns cannot carry an
+// unpublished edit (ADR-0005). An unpublished slug and an unknown one both
+// come back as not found.
 func (r *Repo) GetServicePublicationBySlug(ctx context.Context, slug string) (transit.ServicePublication, bool, error) {
 	pub, err := scanPublication(r.pool.QueryRow(ctx,
-		`SELECT p.user_service_id, p.compile_job_id, p.name, p.subtext, p.description, p.routes, p.published_at
-		   FROM service_publications p
-		   JOIN user_services s ON s.id = p.user_service_id
+		`SELECT `+publicationColumns+` FROM service_publications p`+publicationJoins+`
 		  WHERE s.slug = $1`, slug))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return transit.ServicePublication{}, false, nil
@@ -115,38 +125,68 @@ func (r *Repo) GetServicePublicationBySlug(ctx context.Context, slug string) (tr
 	return pub, true, nil
 }
 
-func (r *Repo) ListPublishedServiceSummaries(ctx context.Context) ([]transit.PublishedServiceSummary, error) {
+func (r *Repo) ListPublishedServiceSummaries(ctx context.Context, after *transit.PublishedIndexKey, limit int) (transit.PublishedIndexPage, error) {
 	// Every service_publications row is a published service, so there is no
 	// filter to write: an unpublished service has no row to find.
 	//
 	// The prose comes from the publication, never the draft. The join reaches
-	// user_services for the slug alone, which the publication does not copy
-	// because it cannot change: a slug is never re-minted, so reading it off
-	// the draft cannot leak an edit. Neither the draft's stops or vehicle
+	// user_services for the slug, which the publication does not copy because
+	// it cannot change: a slug is never re-minted, so reading it off the draft
+	// cannot leak an edit. It also reaches the owner, for the byline's live
+	// author name (see publicationColumns). Neither the draft's stops or vehicle
 	// documents nor the publication's routes payload are selected — this is a
 	// list of cards, and those columns are what make a row heavy.
 	//
-	// Most recently published first, since republishing moves published_at.
-	// Slug breaks a tie, so the order is total and a snapshot of it is stable.
+	// By first publication, newest first. Slug breaks a tie, so the order is
+	// total, and neither key changes while a service stays published, so a
+	// keyset cursor over it never skips or repeats a row (00033).
+	//
+	// A limit of zero or less reads everything. Otherwise one row more than
+	// the limit is read: it is the evidence that a next page exists, so the
+	// last page carries no next key and nobody fetches an empty one.
+	var afterAt *time.Time
+	var afterSlug string
+	if after != nil {
+		afterAt, afterSlug = &after.FirstPublishedAt, after.Slug
+	}
+	var fetch *int
+	if limit > 0 {
+		n := limit + 1
+		fetch = &n
+	}
 	rows, err := r.pool.Query(ctx,
-		`SELECT us.slug, p.name, p.subtext, p.description
-		   FROM service_publications p
-		   JOIN user_services us ON us.id = p.user_service_id
-		  ORDER BY p.published_at DESC, us.slug`)
+		`SELECT s.slug, p.name, p.subtext, p.description, u.name, p.published_at, p.first_published_at
+		   FROM service_publications p`+publicationJoins+`
+		  WHERE $1::timestamptz IS NULL
+		     OR p.first_published_at < $1
+		     OR (p.first_published_at = $1 AND s.slug > $2)
+		  ORDER BY p.first_published_at DESC, s.slug
+		  LIMIT $3`, afterAt, afterSlug, fetch)
 	if err != nil {
-		return nil, wrap("ListPublishedServiceSummaries", err)
+		return transit.PublishedIndexPage{}, wrap("ListPublishedServiceSummaries", err)
 	}
 	defer rows.Close()
 
-	out := []transit.PublishedServiceSummary{}
+	page := transit.PublishedIndexPage{Items: []transit.PublishedServiceSummary{}}
+	var last transit.PublishedIndexKey
 	for rows.Next() {
 		var s transit.PublishedServiceSummary
-		if err := rows.Scan(&s.Slug, &s.Name, &s.Subtext, &s.Description); err != nil {
-			return nil, wrap("ListPublishedServiceSummaries scan", err)
+		var at time.Time
+		if err := rows.Scan(&s.Slug, &s.Name, &s.Subtext, &s.Description, &s.AuthorName, &s.PublishedAt, &at); err != nil {
+			return transit.PublishedIndexPage{}, wrap("ListPublishedServiceSummaries scan", err)
 		}
-		out = append(out, s)
+		if limit > 0 && len(page.Items) == limit {
+			// The extra row: only its existence matters.
+			page.Next = &last
+			continue
+		}
+		page.Items = append(page.Items, s)
+		last = transit.PublishedIndexKey{FirstPublishedAt: at, Slug: s.Slug}
 	}
-	return out, wrap("ListPublishedServiceSummaries rows", rows.Err())
+	if err := rows.Err(); err != nil {
+		return transit.PublishedIndexPage{}, wrap("ListPublishedServiceSummaries rows", err)
+	}
+	return page, nil
 }
 
 func (r *Repo) GetSucceededCompileJob(ctx context.Context, id string) (transit.Job, bool, error) {
@@ -163,7 +203,7 @@ func (q txPublicationRead) LatestSucceededCompileJob(ctx context.Context, servic
 	row := q.tx.QueryRow(ctx,
 		`SELECT `+jobColumns+` FROM jobs
 		  WHERE user_service_id = $1 AND kind = $2 AND status = $3
-		  ORDER BY created_at DESC
+		  ORDER BY created_at DESC, id DESC
 		  LIMIT 1`,
 		serviceID, transit.JobKindCompileUserService, transit.JobStatusSucceeded)
 	return scanJob(row)
@@ -202,7 +242,8 @@ func upsertPublication(ctx context.Context, tx pgx.Tx, pub transit.ServicePublic
 	}
 
 	stored, err := scanPublication(tx.QueryRow(ctx,
-		`INSERT INTO service_publications
+		`WITH p AS (
+		 INSERT INTO service_publications
 		    (user_service_id, compile_job_id, name, subtext, description, routes)
 		 VALUES ($1, $2, $3, $4, $5, $6)
 		 ON CONFLICT (user_service_id) DO UPDATE SET
@@ -212,7 +253,8 @@ func upsertPublication(ctx context.Context, tx pgx.Tx, pub transit.ServicePublic
 		    description = EXCLUDED.description,
 		    routes = EXCLUDED.routes,
 		    published_at = now()
-		 RETURNING `+publicationColumns,
+		 RETURNING *)
+		 SELECT `+publicationColumns+` FROM p`+publicationJoins,
 		pub.UserServiceID, pub.CompileJobID, pub.Name, pub.Subtext, pub.Description, payload))
 	if err != nil {
 		return transit.ServicePublication{}, wrap("upsert publication", err)
@@ -226,7 +268,7 @@ func scanPublication(row pgx.Row) (transit.ServicePublication, error) {
 		routes []byte
 	)
 	if err := row.Scan(&pub.UserServiceID, &pub.CompileJobID, &pub.Name, &pub.Subtext,
-		&pub.Description, &routes, &pub.PublishedAt); err != nil {
+		&pub.Description, &routes, &pub.PublishedAt, &pub.AuthorName); err != nil {
 		return transit.ServicePublication{}, err
 	}
 	if err := json.Unmarshal(routes, &pub.Routes); err != nil {

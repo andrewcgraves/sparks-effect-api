@@ -108,19 +108,16 @@ func TestSeedAndCompiledReadPathAcrossRestart(t *testing.T) {
 		t.Errorf("stations: want 15 (12 Phase 1 + Merced + Brightline West spur), got %d", got)
 	}
 	// Named rather than counted: what has to survive the restart is that the
-	// active services came back and the parked one stayed parked, which a
-	// number cannot say and has to be corrected every time the seed changes.
+	// active services came back, which a number cannot say and has to be
+	// corrected every time the seed changes.
 	restored := make(map[string]bool)
 	for _, svc := range store.GetServicesByScenario(sc.ID) {
 		restored[svc.Name] = true
 	}
-	for _, want := range []string{"HSR Local", "Merced Shuttle", "Brightline West"} {
+	for _, want := range []string{"HSR Express", "HSR Local", "Merced Shuttle", "Brightline West"} {
 		if !restored[want] {
 			t.Errorf("active service %q missing after restart", want)
 		}
-	}
-	if restored["HSR Express"] {
-		t.Error("HSR Express is seeded active: false and must not come back after restart")
 	}
 
 	// Segment route ids survive the write/read round trip, so a restarted

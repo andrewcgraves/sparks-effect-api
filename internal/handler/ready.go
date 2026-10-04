@@ -12,7 +12,9 @@ type Pinger interface {
 	Ping(ctx context.Context) error
 }
 
-const readyTimeout = time.Second
+// A hung database or broker must not pin /readyz. A second is long enough
+// for a local ping and short enough that a stuck check fails the probe.
+var readyTimeout = time.Second
 
 const (
 	componentOK          = "ok"

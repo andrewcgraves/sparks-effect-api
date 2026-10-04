@@ -145,7 +145,9 @@ So a publication freezes, at publish time and in the same transaction:
 
 **A public read never reads the draft row.** That is the property the design is
 built around: the public half of any handler can then not leak an unpublished
-edit, however it is written.
+edit, however it is written. (It joins through the draft for two things that
+are not edits: the slug, and since SPA-426 the owner, for the byline's live
+author name. See Consequences.)
 
 Where it is stored is SPA-355's call, with one recommendation: a
 `service_publications` table keyed on the service id, one row per published
@@ -256,6 +258,14 @@ on `transit.Scenario` and the seed YAML, and the `status` key on
   curated alignment does not reach existing publications until their owners
   republish. That is the same trade the pinned graph already makes, and the two
   must not disagree.
+- **The author is live, not frozen** (SPA-426). The byline's `author_name` is
+  the owner's current `users.name`, joined through `user_services.owner_id` on
+  every public read, not a column copied at publish. A rename (SPA-385) or a
+  transfer (SPA-389) then changes the byline without a republish, which is what
+  attribution should do: the snapshot freezes what the *author* chose to show,
+  and who the author is was never one of those choices. It is the one thing a
+  public read takes through the draft row besides the slug, and like the slug
+  it carries no unpublished edit. The owner's email and id are never selected.
 
 ## Considered and rejected
 

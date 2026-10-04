@@ -25,3 +25,20 @@ func TestNewUUIDShapeAndUniqueness(t *testing.T) {
 		seen[id] = true
 	}
 }
+
+func TestIsUUID(t *testing.T) {
+	for s, want := range map[string]bool{
+		"00000000-0000-4000-8000-0000000000aa": true,
+		"ABCDEF01-2345-6789-abcd-ef0123456789": true,
+		"":                                     false,
+		"not-a-uuid":                           false,
+		"00000000-0000-4000-8000-0000000000a":  false,
+		"00000000-0000-4000-8000-0000000000ag": false,
+		"00000000+0000-4000-8000-0000000000aa": false,
+		"000000000000-4000-8000-0000000000aa0": false,
+	} {
+		if got := ids.IsUUID(s); got != want {
+			t.Errorf("IsUUID(%q) = %v, want %v", s, got, want)
+		}
+	}
+}
