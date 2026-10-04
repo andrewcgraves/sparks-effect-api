@@ -315,9 +315,12 @@ honour `If-None-Match` with `304`:
 | `GET /api/prerendered-isochrones/{id}` | the row's `updated_at` moves, or it becomes outdated |
 | `GET /api/scenarios/{slug}/prerendered-isochrones`, `GET /api/published-services` | the body does (the tag is a hash of it) |
 
+A gzipped body carries its tag with `-gzip` inside the quotes, since a strong
+tag names exact bytes. Either copy revalidates with its own tag.
+
 Every tag also folds in the commit the image was built from (CI passes it as the
-`BUILD_SHA` build argument), so a deploy that changes a response's shape cannot
-be answered with a stale `304`. A binary built without it, such as `make run`,
+`BUILD_SHA` build argument), so after a deploy that changes a response's shape,
+no client is told by a `304` to keep the old body. A binary built without it, such as `make run`,
 uses a per-process value, so its tags last only until it restarts. The OptionalAuth
 reads (`GET /api/routes/{slug}`, `GET /api/scenarios/{slug}/graph`,
 `GET /api/routing-jobs/{id}`) answer per caller, so they stay private.

@@ -68,10 +68,49 @@ func TestJSONIsGzippedForClientsThatAcceptIt(t *testing.T) {
 	if zipped.Body.Len()*3 > plain.Body.Len() {
 		t.Errorf("gzip body %d bytes against %d plain: under 3x smaller", zipped.Body.Len(), plain.Body.Len())
 	}
-	// One representation's tag stands for both encodings: a cache keyed by
-	// Vary stores them apart, and the client revalidating either sends it.
-	if zipped.Header().Get("ETag") != plain.Header().Get("ETag") {
-		t.Errorf("ETag differs by encoding: %q vs %q", zipped.Header().Get("ETag"), plain.Header().Get("ETag"))
+	// A strong tag names exact bytes, so the gzipped body needs its own
+	// (RFC 9110 §8.8.3).
+	plainTag := plain.Header().Get("ETag")
+	zippedTag := zipped.Header().Get("ETag")
+	if want := strings.TrimSuffix(plainTag, `"`) + `-gzip"`; zippedTag != want {
+		t.Fatalf("gzipped ETag = %q, want %q", zippedTag, want)
+	}
+
+	// Each copy revalidates with its own tag, and the 304 names the copy the
+	// client holds, so a cache can freshen it.
+	for _, tc := range []struct {
+		name, accept, tag string
+	}{
+		{"gzipped copy", "gzip", zippedTag},
+		{"plain copy", "", plainTag},
+		{"plain copy, client now accepts gzip", "gzip", plainTag},
+	} {
+		rec := getWith(t, h, path, map[string]string{"Accept-Encoding": tc.accept, "If-None-Match": tc.tag})
+		if rec.Code != http.StatusNotModified {
+			t.Errorf("%s: status = %d, want 304", tc.name, rec.Code)
+			continue
+		}
+		if got := rec.Header().Get("ETag"); got != tc.tag {
+			t.Errorf("%s: 304 ETag = %q, want %q", tc.name, got, tc.tag)
+		}
+	}
+
+	// Without gzip on offer, the gzipped copy's tag names nothing served.
+	if rec := getWith(t, h, path, map[string]string{"If-None-Match": zippedTag}); rec.Code != http.StatusOK {
+		t.Errorf("gzip tag from a client that no longer accepts gzip: status = %d, want 200", rec.Code)
+	}
+}
+
+func TestCuratedTagsDifferByPath(t *testing.T) {
+	h := newTestServer(t, newStubDeps())
+	a := getWith(t, h, "/api/scenarios", nil).Header().Get("ETag")
+	b := getWith(t, h, "/api/scenarios/ca-hsr", nil).Header().Get("ETag")
+	if a == b {
+		t.Fatalf("two curated URLs share the tag %q", a)
+	}
+	// So a tag held for one URL cannot turn another's 404 into a 304.
+	if rec := getWith(t, h, "/api/scenarios/no-such-scenario", map[string]string{"If-None-Match": a}); rec.Code != http.StatusNotFound {
+		t.Errorf("unknown slug with another URL's tag: status = %d, want 404", rec.Code)
 	}
 }
 

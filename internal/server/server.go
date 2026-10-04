@@ -112,12 +112,13 @@ func routes(cfg config.Config, store *transit.Store, deps AuthDeps, publisher ro
 	// answer today. Rather than repurpose /api/scenarios/{slug} for both, the
 	// new resource lives at a path of its own — see registerAuthRoutes.
 	//
-	// The store is built once at boot from the seed, so everything these
-	// answer is fixed for the process: one tag, from the build and the one
-	// setting that shapes their bodies, names all of it.
+	// The store is built once at boot from the seed, so what each of these
+	// answers is fixed for the process: its tag needs only the build, the
+	// path, and the one setting that shapes the bodies.
 	tags := httpcache.NewTagger(cfg.BuildSHA)
+	curatedVersion := fmt.Sprintf("curated %+v", cfg.BoardingWait)
 	curated := func(h http.Handler) http.Handler {
-		return httpcache.Fixed(tags.ETag("curated", fmt.Sprintf("%+v", cfg.BoardingWait)), h)
+		return httpcache.PathTagged(tags, curatedVersion, h)
 	}
 	mux.Handle("GET /api/scenarios", curated(handler.Scenarios(store)))
 	mux.Handle("GET /api/scenarios/{slug}", curated(handler.ScenarioBySlug(store)))

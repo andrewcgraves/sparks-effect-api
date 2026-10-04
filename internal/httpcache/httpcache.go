@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	// A minute fresh, then ten more served stale while one request
+	// A minute fresh, then ten more served past max-age while one request
 	// revalidates: a republish reaches readers within a minute, and a burst of
 	// readers after that costs one 304 rather than one full body each.
 	Public = "public, max-age=60, stale-while-revalidate=600"
@@ -66,7 +66,7 @@ func MarkPublic(w http.ResponseWriter, etag string) {
 }
 
 // If-None-Match compares weakly (RFC 9110 §13.1.2), so a W/ a cache added in
-// transit still matches. "*" is not honoured: Fixed checks before its handler
+// transit still matches. "*" is not honoured: PathTagged checks before its handler
 // has decided whether the resource exists, and no browser sends it on a GET.
 func matches(header, etag string) bool {
 	for tag := range strings.SplitSeq(header, ",") {
@@ -86,13 +86,15 @@ func DefaultPrivate(next http.Handler) http.Handler {
 	})
 }
 
-// For a handler whose every 200 is named by one tag fixed for the process's
-// lifetime: the curated scenario reads, which move only on a deploy. A match is
-// answered before the handler runs. That is sound only because a client holds
-// the tag for a URL just when that URL answered 200 under this build, and
-// under the same build it still does.
-func Fixed(etag string, next http.Handler) http.Handler {
+// For a handler whose answer at each path is fixed for the process's lifetime:
+// the curated scenario reads, which move only on a deploy. version names
+// whatever besides the build shapes those answers. A match is answered before
+// the handler runs, which is sound because the tag is the path's own: a client
+// holds it just when that path answered 200 under this build, and under the
+// same build it still does.
+func PathTagged(tags Tagger, version string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		etag := tags.ETag(version, r.URL.Path)
 		if NotModified(w, r, etag) {
 			return
 		}

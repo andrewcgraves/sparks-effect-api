@@ -16,13 +16,15 @@ const gzipMinBytes = 1024
 
 var gzipWriters = sync.Pool{New: func() any { return gzip.NewWriter(io.Discard) }}
 
-// GeoJSON and compiled graphs shrink roughly tenfold, and a publication or
-// prerendered isochrone runs to hundreds of kilobytes, so this is most of what
-// a reader downloads.
+// A publication or prerendered isochrone runs to hundreds of kilobytes, most
+// of it full-precision coordinates that gzip takes down about 3.7x. The rest of
+// the JSON, which repeats more, shrinks 5–8x.
 //
-// The ETag is left as the handler set it rather than suffixed per encoding.
-// Vary keeps a cache from serving one encoding for the other, and a single tag
-// means a revalidation matches whichever encoding the client holds.
+// A strong ETag names exact bytes (RFC 9110 §8.8.3), so a gzipped body gets
+// the handler's tag with gzipTagSuffix inside the quotes. The suffix is taken
+// off an incoming If-None-Match before the handler compares it, and put back
+// on the 304, so the handlers mint and compare one tag per representation and
+// never learn about encodings.
 func compressJSON(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// The worker API is its own contract with one client (SPA-332), and
@@ -36,10 +38,30 @@ func compressJSON(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		gw := &gzipResponseWriter{ResponseWriter: w}
+		gw := &gzipResponseWriter{ResponseWriter: w, revalidatingGzip: stripGzipTags(r)}
 		defer gw.finish()
 		next.ServeHTTP(gw, r)
 	})
+}
+
+const gzipTagSuffix = "-gzip"
+
+func stripGzipTags(r *http.Request) bool {
+	inm := r.Header.Get("If-None-Match")
+	if !strings.Contains(inm, gzipTagSuffix+`"`) {
+		return false
+	}
+	r.Header.Set("If-None-Match", strings.ReplaceAll(inm, gzipTagSuffix+`"`, `"`))
+	return true
+}
+
+// A weak tag already promises only equivalent content, not equal bytes, so
+// it is left alone.
+func gzipTag(etag string) string {
+	if etag == "" || strings.HasPrefix(etag, "W/") {
+		return etag
+	}
+	return strings.TrimSuffix(etag, `"`) + gzipTagSuffix + `"`
 }
 
 func acceptsGzip(header string) bool {
@@ -70,13 +92,19 @@ func isJSON(contentType string) bool {
 // other for the rest of it.
 type gzipResponseWriter struct {
 	http.ResponseWriter
-	status  int
-	buf     []byte
-	decided bool
-	zw      *gzip.Writer
+	revalidatingGzip bool
+	status           int
+	buf              []byte
+	decided          bool
+	zw               *gzip.Writer
 }
 
 func (g *gzipResponseWriter) WriteHeader(status int) {
+	// An informational status precedes the real one rather than being it.
+	if status < http.StatusOK {
+		g.ResponseWriter.WriteHeader(status)
+		return
+	}
 	if g.status == 0 {
 		g.status = status
 	}
@@ -108,8 +136,13 @@ func (g *gzipResponseWriter) commit() error {
 	if len(g.buf) >= gzipMinBytes && isJSON(h.Get("Content-Type")) && h.Get("Content-Encoding") == "" {
 		h.Del("Content-Length")
 		h.Set("Content-Encoding", "gzip")
+		h.Set("ETag", gzipTag(h.Get("ETag")))
 		g.zw = gzipWriters.Get().(*gzip.Writer)
 		g.zw.Reset(g.ResponseWriter)
+	} else if g.status == http.StatusNotModified && g.revalidatingGzip {
+		// The client matched on its gzipped copy's tag; the 304 must name
+		// that copy for a cache to freshen it.
+		h.Set("ETag", gzipTag(h.Get("ETag")))
 	}
 	g.ResponseWriter.WriteHeader(g.status)
 	buf := g.buf
