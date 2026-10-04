@@ -1,6 +1,8 @@
 package handler_test
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -108,6 +110,165 @@ func TestCreatePrerenderedIsochrone_413(t *testing.T) {
 	assertTooLarge(t, createPrerendered(t, store, preAdminTok, big))
 	if len(store.entries) != 0 {
 		t.Error("an oversized payload was stored")
+	}
+}
+
+func TestWorkerCachePut_413_writesNothing(t *testing.T) {
+	store := &fakeWorkerStore{}
+	big := `{"entries":[{"key":{"compile_job_id":"c1","station_slug":"north","mode":"walk","contour_mins":30},` +
+		`"geometry":{"pad":"` + strings.Repeat("x", 9<<20) + `"}}]}`
+
+	assertTooLarge(t, postJSON(t, handler.WorkerCachePut(store), "/api/internal/isochrone-cache", big))
+	if store.putEntries != nil {
+		t.Error("an oversized put reached the store")
+	}
+}
+
+// Tiny and numerous: the byte cap admits it, and only the count can refuse it
+// before it becomes that many statements in one batch.
+func manyCacheKeys(n int) []string {
+	keys := make([]string, n)
+	for i := range keys {
+		keys[i] = fmt.Sprintf(`{"compile_job_id":"c1","station_slug":"s%d","mode":"walk","contour_mins":30}`, i)
+	}
+	return keys
+}
+
+func manyCacheEntries(n int) string {
+	entries := manyCacheKeys(n)
+	for i, k := range entries {
+		entries[i] = `{"key":` + k + `,"geometry":{}}`
+	}
+	return `{"entries":[` + strings.Join(entries, ",") + `]}`
+}
+
+func manyCacheLookupKeys(n int) string {
+	return `{"keys":[` + strings.Join(manyCacheKeys(n), ",") + `]}`
+}
+
+func TestWorkerCachePut_400_tooManyEntries(t *testing.T) {
+	store := &fakeWorkerStore{}
+
+	rec := postJSON(t, handler.WorkerCachePut(store), "/api/internal/isochrone-cache", manyCacheEntries(1001))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body %s", rec.Code, rec.Body.String())
+	}
+	if got := errorField(t, rec); got != "entries: at most 1000 per put" {
+		t.Errorf("error = %q, want the limit named", got)
+	}
+	if store.putEntries != nil {
+		t.Error("an over-count put reached the store")
+	}
+}
+
+func TestWorkerCachePut_204_atTheEntryCap(t *testing.T) {
+	store := &fakeWorkerStore{}
+
+	rec := postJSON(t, handler.WorkerCachePut(store), "/api/internal/isochrone-cache", manyCacheEntries(1000))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body %s", rec.Code, rec.Body.String())
+	}
+	if len(store.putEntries) != 1000 {
+		t.Errorf("put %d entries, want 1000", len(store.putEntries))
+	}
+}
+
+func TestWorkerCacheLookup_413(t *testing.T) {
+	store := &fakeWorkerStore{}
+	big := `{"keys":[{"compile_job_id":"c1","station_slug":"` + strings.Repeat("x", 2<<20) + `","mode":"walk","contour_mins":30}]}`
+
+	assertTooLarge(t, postJSON(t, handler.WorkerCacheLookup(store), "/api/internal/isochrone-cache/lookup", big))
+	if store.gotKeys != nil {
+		t.Error("an oversized lookup reached the store")
+	}
+}
+
+func TestWorkerCacheLookup_400_tooManyKeys(t *testing.T) {
+	store := &fakeWorkerStore{}
+
+	rec := postJSON(t, handler.WorkerCacheLookup(store), "/api/internal/isochrone-cache/lookup", manyCacheLookupKeys(1001))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body %s", rec.Code, rec.Body.String())
+	}
+	if got := errorField(t, rec); got != "keys: at most 1000 per lookup" {
+		t.Errorf("error = %q, want the limit named", got)
+	}
+	if store.gotKeys != nil {
+		t.Error("an over-count lookup reached the store")
+	}
+}
+
+func TestWorkerCacheLookup_200_atTheKeyCap(t *testing.T) {
+	store := &fakeWorkerStore{}
+
+	rec := postJSON(t, handler.WorkerCacheLookup(store), "/api/internal/isochrone-cache/lookup", manyCacheLookupKeys(1000))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body.String())
+	}
+	if len(store.gotKeys) != 1000 {
+		t.Errorf("looked up %d keys, want 1000", len(store.gotKeys))
+	}
+}
+
+func TestWorkerMarkSucceeded_413_recordsNothing(t *testing.T) {
+	store := &fakeWorkerStore{}
+	big := `{"result":{"pad":"` + strings.Repeat("x", 9<<20) + `"}}`
+
+	assertTooLarge(t, postJSON(t, handler.WorkerMarkSucceeded(store), "/api/internal/routing-jobs/j/succeeded", big))
+	if store.succeededID != "" {
+		t.Error("an oversized result reached the store")
+	}
+}
+
+// The largest real chain result must keep fitting: refusing it fails the job.
+func TestWorkerMarkSucceeded_204_largestCommittedChainResult(t *testing.T) {
+	raw, err := os.ReadFile("../transit/data/scenarios/ca-hsr/prerendered/isochrone-sj-240-bike.json")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	var env struct {
+		Result json.RawMessage `json:"result"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		t.Fatalf("decode fixture: %v", err)
+	}
+
+	store := &fakeWorkerStore{}
+	rec := postJSON(t, handler.WorkerMarkSucceeded(store), "/api/internal/routing-jobs/j/succeeded",
+		`{"result":`+string(env.Result)+`}`)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestWorkerMarkFailed_413_recordsNothing(t *testing.T) {
+	store := &fakeWorkerStore{}
+
+	assertTooLarge(t, postJSON(t, handler.WorkerMarkFailed(store), "/api/internal/routing-jobs/j/failed", oversizedBody("error")))
+	if store.errMsg != "" {
+		t.Error("an oversized failure reached the store")
+	}
+}
+
+// The fixture is the put the San Jose 240-minute bike chain made: its twelve
+// egress polygons, taken from that job's result (the committed prerendered
+// isochrone-sj-240-bike.json) with the three properties the chain adds to each
+// one stripped, which is the shape the worker caches. The result carries no
+// tileset stamp, so the fixture's tileset_at is supplied. The limits are sized
+// from it, so it must keep fitting under them.
+func TestWorkerCachePut_204_realChainFixture(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("testdata", "cache-put-sj-240-bike.json"))
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+
+	store := &fakeWorkerStore{}
+	rec := postJSON(t, handler.WorkerCachePut(store), "/api/internal/isochrone-cache", string(body))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204 for a %d-byte put; body %s", rec.Code, len(body), rec.Body.String())
+	}
+	if len(store.putEntries) != 12 {
+		t.Errorf("put %d entries, want the chain's 12", len(store.putEntries))
 	}
 }
 

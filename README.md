@@ -113,6 +113,22 @@ cycle needs no purge: each stale row is recomputed once and replaced. The
 worker README records how it treats a NULL stamp. An older worker ignores the
 added field, so deploy this side first.
 
+The internal endpoints cap their bodies like every other handler (SPA-332),
+answering an oversized one `413` with `request body too large`: 8 MiB for a
+job's result and for a cache put, 1 MiB for a lookup, 64 KiB for a failure.
+A lookup or put also carries at most 1000 keys or entries, and more is a `400`
+naming the limit. The worker treats a refused lookup as a miss and a refused
+put as an unwritten row, so neither changes a job's outcome. A refused result
+does, which is why its cap is generous: the largest real chain
+(`internal/handler/testdata/cache-put-sj-240-bike.json` and its prerendered
+result) sits under a sixteenth of it. A put is all or nothing:
+one rejected entry loses the whole batch, on purpose.
+
+Every isochrone request's `budget_mins` must be between 1 and 300. Above the
+worker's 320-minute contour ceiling the chain clamps its contours, and 300
+keeps every request below it while leaving room above the site's largest
+preset, 240.
+
 Travel mode is stored in the domain's own vocabulary — `walk` / `bike` /
 `drive` / `transit` ([CONTEXT.md](CONTEXT.md#travel-mode-vs-costing)). "Costing"
 is Valhalla's word for the same concept and stays at the worker's client

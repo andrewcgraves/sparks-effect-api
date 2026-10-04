@@ -127,6 +127,15 @@ func (r *Repo) PutIsochroneCache(ctx context.Context, entries []handler.CachedIs
 	// DO UPDATE can deadlock two concurrent batches touching the same keys in
 	// different orders, which DO NOTHING could not. One worker replica at
 	// prefetch 1 means there is only ever one writer.
+	//
+	// The batch runs as one implicit transaction, so one rejected entry loses
+	// every polygon in the put, and that is kept on purpose (SPA-332). Since a
+	// guarded conflict is a no-op, only an entry the schema refuses can be
+	// rejected: a bad uuid or date, an unknown mode, or a compile job that no
+	// longer exists. Every entry in a put shares one compile job and mode, so
+	// such an entry makes the put suspect as a whole. A partial
+	// write would leave a job's egress half cached for reasons nothing reports,
+	// while losing the put costs one recompute on the next request.
 	batch := &pgx.Batch{}
 	for _, e := range entries {
 		batch.Queue(putIsochroneCacheSQL,

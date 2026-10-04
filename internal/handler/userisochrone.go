@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -16,6 +17,14 @@ const StaleGraphErrorCode = "stale_graph"
 // Every isochrone request, seeded, authored or published, is a point, a budget
 // and a mode: a few hundred bytes. Shared so the three stay one limit.
 const maxIsochroneBodyBytes = 4 << 10
+
+// Above the worker's Valhalla contour ceiling (VALHALLA_MAX_ISO_CONTOUR_MINS,
+// 320) the chain clamps its contours, and a clamped egress contour no longer
+// says which budget it was cut for, which is the case SPA-326's cache key
+// cannot fully separate. The largest preset the site offers is 240. 300 keeps
+// every budget below the ceiling, so nothing is ever clamped, and leaves room
+// for a five-hour preset. Raise the ceiling before raising this.
+const maxIsochroneBudgetMins = 300
 
 type userIsochroneRequest struct {
 	Lat        float64 `json:"lat"`
@@ -43,6 +52,10 @@ func validateIsochroneRequest(w http.ResponseWriter, r *http.Request) (userIsoch
 func validateIsochroneParams(w http.ResponseWriter, budgetMins int, mode string) bool {
 	if budgetMins <= 0 {
 		writeError(w, http.StatusBadRequest, "budget_mins must be greater than 0")
+		return false
+	}
+	if budgetMins > maxIsochroneBudgetMins {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("budget_mins must be at most %d", maxIsochroneBudgetMins))
 		return false
 	}
 	if !transit.TravelMode(mode).Valid() {
