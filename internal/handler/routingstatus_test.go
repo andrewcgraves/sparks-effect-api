@@ -143,7 +143,7 @@ func TestRoutingStatusIsOKWhenTheWorkerIsSilentButNothingWaits(t *testing.T) {
 // A browser polling its job has it marked failed at RoutingJobStaleAfter, so
 // the queue alone stops showing the wait long before two minutes of silence.
 // What the API published and the worker never answered still does.
-func TestRoutingStatusIsOfflineWhenAPublishedJobWasNeverAnswered(t *testing.T) {
+func TestRoutingStatusIsOfflineWhenAnEnqueuedJobWasNeverAnswered(t *testing.T) {
 	clock := &fakeClock{t: time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)}
 	watch := handler.NewWorkerWatch(clock.now)
 	pub := watch.Publisher(&routing.FakePublisher{})
@@ -166,11 +166,11 @@ func TestRoutingStatusIsOfflineWhenAPublishedJobWasNeverAnswered(t *testing.T) {
 	contactFromWorker(t, watch)
 	clock.advance(time.Hour)
 	if _, body := getRoutingStatus(t, empty, watch); body.Status != "ok" {
-		t.Errorf("status = %q, want ok: contact after the publish answers it", body.Status)
+		t.Errorf("status = %q, want ok: contact after the enqueue answers it", body.Status)
 	}
 }
 
-func TestRoutingStatusIgnoresAPublishThatFailed(t *testing.T) {
+func TestRoutingStatusIgnoresAFailedEnqueue(t *testing.T) {
 	clock := &fakeClock{t: time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)}
 	watch := handler.NewWorkerWatch(clock.now)
 	pub := watch.Publisher(&routing.FakePublisher{Err: errors.New("broker down")})
@@ -210,5 +210,31 @@ func TestRoutingStatusAnswersNothingButTheThreeFields(t *testing.T) {
 		if raw[k] != v {
 			t.Errorf("%s = %v, want %v", k, raw[k], v)
 		}
+	}
+}
+
+type publisherFunc func(context.Context, routing.Message) error
+
+func (f publisherFunc) Publish(ctx context.Context, msg routing.Message) error { return f(ctx, msg) }
+
+// A fast worker can mark the job running before Publish has returned. That
+// contact answers the job, so it must not be left counted as waiting.
+func TestRoutingStatusCountsAnEnqueueTheWorkerAnsweredMidPublishAsAnswered(t *testing.T) {
+	clock := &fakeClock{t: time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)}
+	watch := handler.NewWorkerWatch(clock.now)
+	pub := watch.Publisher(publisherFunc(func(context.Context, routing.Message) error {
+		clock.advance(time.Second)
+		contactFromWorker(t, watch)
+		return nil
+	}))
+
+	clock.advance(30 * time.Second)
+	if err := pub.Publish(context.Background(), routing.Message{}); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	clock.advance(time.Hour)
+
+	if _, body := getRoutingStatus(t, &fakeQueueStore{}, watch); body.Status != "ok" {
+		t.Errorf("status = %q, want ok: the worker answered the job while it was being published", body.Status)
 	}
 }

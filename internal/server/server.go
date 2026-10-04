@@ -67,7 +67,7 @@ func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routi
 	// rate-limit bucket.
 	mux.HandleFunc("GET /readyz", handler.Ready(pinger(deps), pinger(publisher), lg))
 
-	// Every publish below goes through the watch, so the routing status can
+	// Every enqueue below goes through the watch, so the routing status can
 	// tell a job the worker never answered (SPA-442). Wrapped only after
 	// readiness has taken the publisher's Pinger, which the wrapper hides.
 	watch := handler.NewWorkerWatch(time.Now)
