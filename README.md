@@ -369,6 +369,48 @@ JOB=$(curl -s -X POST http://localhost:8080/api/isochrone \
 curl -s "http://localhost:8080/api/routing-jobs/$JOB" | jq '{status, error}'
 ```
 
+## Metrics
+
+The API pushes OpenTelemetry metrics over OTLP/HTTP to the same Grafana Cloud
+stack as the cluster (SPA-433). It is pushed rather than scraped because the
+API runs on Railway, outside the cluster Alloy scrapes. Every 60 s, and once
+more on shutdown.
+
+| Series in Grafana | Labels | Recorded |
+|---|---|---|
+| `http_requests_total` | `route`, `method`, `status_class` | every request |
+| `http_request_duration_seconds` (histogram) | `route` | every request |
+| `compile_jobs_total` | `kind`, `outcome` (`succeeded`, `failed`, `error`) | each compile job |
+| `compile_duration_seconds` (histogram) | `kind` | each compile job |
+| `isochrone_backlog_inflight` (gauge) | — | each isochrone enqueue the backlog cap counts |
+| `backlog_full_total` | — | each `backlog_full` 429 |
+| `rate_limited_total` | `limiter` (`isochrone`, `snap_stops`, `login`, `compile`) | each `rate_limited` 429 |
+
+Labels are kept bounded because the free-tier active-series budget is tight
+(SPA-296). `route` is the mux pattern a request matched (`/api/scenarios/{slug}`),
+never the path it asked for, and `unmatched` when it matched none. `method` is
+one of the standard methods or `other`. `kind` is a known compile job kind or
+`other`. The instruments are named without `_total` or a unit suffix, because
+Grafana Cloud's OTLP ingest adds both.
+
+Export is configured entirely by the standard OpenTelemetry variables, which the
+exporter reads itself:
+
+```sh
+OTEL_EXPORTER_OTLP_ENDPOINT=https://otlp-gateway-prod-us-west-0.grafana.net/otlp
+OTEL_EXPORTER_OTLP_HEADERS="Authorization=Basic <base64 of instance-id:token>"
+OTEL_RESOURCE_ATTRIBUTES=service.namespace=staging
+```
+
+Grafana Cloud's OpenTelemetry card (stack → Configure) produces the first two.
+The service name defaults to `sparks-effect-api`, and Grafana derives `job` from
+the namespace and name, so the setting above makes it
+`job="staging/sparks-effect-api"`. The namespace is what keeps staging and
+production apart, both on dashboards and in the alert rules, which group by
+`job`. Use `service.namespace` rather than `deployment.environment`, because
+Grafana Cloud does not reliably put the latter on every series. With no endpoint set, nothing is exported and
+boot logs one `info` line saying so. That is the local default.
+
 ## Persistence
 
 Domain data (scenarios, routes, stations, vehicle types, services, jobs, users)

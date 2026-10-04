@@ -31,10 +31,10 @@ func TestCompileAuthoredTargetNonOwnerIsNotFound(t *testing.T) {
 		wantMsg string
 	}{
 		{"service", func(s handler.CompileStore) http.HandlerFunc {
-			return handler.CompileUserService(s, transit.DefaultBoardingWaitPolicy())
+			return handler.CompileUserService(s, transit.DefaultBoardingWaitPolicy(), nil)
 		}, "/api/services/line-a/compile", "line-a", "service not found"},
 		{"scenario", func(s handler.CompileStore) http.HandlerFunc {
-			return handler.CompileUserScenario(s, transit.DefaultBoardingWaitPolicy())
+			return handler.CompileUserScenario(s, transit.DefaultBoardingWaitPolicy(), nil)
 		}, "/api/user-scenarios/trip/compile", "trip", "scenario not found"},
 	}
 	for _, tt := range tests {

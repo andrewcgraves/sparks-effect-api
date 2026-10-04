@@ -274,7 +274,7 @@ func newTestServer(t *testing.T, deps AuthDeps) http.Handler {
 		t.Fatalf("NewStore: %v", err)
 	}
 	cfg := config.Config{Port: "8080", SessionTTL: time.Hour, WorkerToken: workerToken}
-	return New(cfg, store, deps, &routing.FakePublisher{}, logger.Discard()).Handler
+	return New(cfg, store, deps, &routing.FakePublisher{}, logger.Discard(), nil).Handler
 }
 
 func newStubDeps() *stubAuthDeps {
@@ -684,7 +684,7 @@ func TestWorkerRoutesUnavailableWithoutATokenConfigured(t *testing.T) {
 		t.Fatalf("NewStore: %v", err)
 	}
 	cfg := config.Config{Port: "8080", SessionTTL: time.Hour} // no WorkerToken
-	h := New(cfg, store, newStubDeps(), &routing.FakePublisher{}, logger.Discard()).Handler
+	h := New(cfg, store, newStubDeps(), &routing.FakePublisher{}, logger.Discard(), nil).Handler
 
 	rec := request(t, h, http.MethodGet, "/api/internal/worker", workerToken)
 	if rec.Code != http.StatusServiceUnavailable {

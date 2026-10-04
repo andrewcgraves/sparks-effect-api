@@ -16,6 +16,7 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
 	"github.com/andrewcgraves/sparks-effect-api/internal/ids"
 	internlog "github.com/andrewcgraves/sparks-effect-api/internal/logger"
+	"github.com/andrewcgraves/sparks-effect-api/internal/metrics"
 	"github.com/andrewcgraves/sparks-effect-api/internal/persistence/postgres"
 	"github.com/andrewcgraves/sparks-effect-api/internal/routing"
 	"github.com/andrewcgraves/sparks-effect-api/internal/server"
@@ -36,6 +37,12 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	m, shutdownMetrics, err := metrics.Setup(ctx, cfg.ExportMetrics, lg)
+	if err != nil {
+		lg.Error("failed to set up metrics export", "error", err)
+		os.Exit(1)
+	}
 
 	store, repo, cleanup, err := loadStore(ctx, cfg, lg)
 	if err != nil {
@@ -78,7 +85,7 @@ func main() {
 		lg.Info("WORKER_TOKEN not set; the routing worker endpoints will answer 503")
 	}
 
-	srv := server.New(cfg, store, deps, publisher, lg)
+	srv := server.New(cfg, store, deps, publisher, lg, m)
 
 	go func() {
 		lg.Info("listening", "addr", srv.Addr)
@@ -97,6 +104,11 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		lg.Error("graceful shutdown failed", "error", err)
 		os.Exit(1)
+	}
+	// After the server, so the last requests it answered are in the final
+	// push rather than lost with the process.
+	if err := shutdownMetrics(shutdownCtx); err != nil {
+		lg.Error("could not flush metrics", "error", err)
 	}
 }
 

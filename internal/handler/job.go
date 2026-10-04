@@ -7,6 +7,7 @@ import (
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/compile"
+	"github.com/andrewcgraves/sparks-effect-api/internal/metrics"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
@@ -22,7 +23,7 @@ type CompileStore interface {
 	compile.Store
 }
 
-func CompileScenario(store CompileStore, boardingWait transit.BoardingWaitPolicy) http.HandlerFunc {
+func CompileScenario(store CompileStore, boardingWait transit.BoardingWaitPolicy, m *metrics.Metrics) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := auth.UserFrom(r.Context())
 		if !ok {
@@ -52,14 +53,14 @@ func CompileScenario(store CompileStore, boardingWait transit.BoardingWaitPolicy
 		if !ok {
 			return
 		}
-		enqueueCompile(store, job, boardingWait)
+		enqueueCompile(store, job, boardingWait, m)
 		writeJSON(w, http.StatusAccepted, job)
 	}
 }
 
-func enqueueCompile(store CompileStore, job transit.Job, boardingWait transit.BoardingWaitPolicy) {
+func enqueueCompile(store CompileStore, job transit.Job, boardingWait transit.BoardingWaitPolicy, m *metrics.Metrics) {
 	go func() {
-		if err := compile.Compile(context.Background(), store, job, boardingWait); err != nil {
+		if err := compile.Compile(context.Background(), store, job, boardingWait, m); err != nil {
 			slog.Error("compile: job failed", "job_id", job.ID, "error", err)
 		}
 	}()

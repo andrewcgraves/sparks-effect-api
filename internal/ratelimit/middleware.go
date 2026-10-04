@@ -1,6 +1,7 @@
 package ratelimit
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"math"
@@ -15,7 +16,9 @@ const ErrorCode = "rate_limited"
 
 const rateLimitedMessage = "Too many requests. Please try again shortly."
 
-func Limit(n *Limiter, clientIP func(*http.Request) string) func(http.Handler) http.Handler {
+// refused, when not nil, is told of each 429 so the caller can count them
+// without this package knowing how.
+func Limit(n *Limiter, clientIP func(*http.Request) string, refused func(context.Context)) func(http.Handler) http.Handler {
 	if n == nil {
 		return func(next http.Handler) http.Handler { return next }
 	}
@@ -40,6 +43,9 @@ func Limit(n *Limiter, clientIP func(*http.Request) string) func(http.Handler) h
 				keys = append([]string{"user:" + user.ID}, keys...)
 			}
 			if retryAfter, ok := n.AllowAll(keys...); !ok {
+				if refused != nil {
+					refused(r.Context())
+				}
 				writeRateLimited(w, retryAfter)
 				return
 			}

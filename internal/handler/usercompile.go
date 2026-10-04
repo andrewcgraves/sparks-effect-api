@@ -6,22 +6,23 @@ import (
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/ids"
+	"github.com/andrewcgraves/sparks-effect-api/internal/metrics"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
-func CompileUserService(store CompileStore, boardingWait transit.BoardingWaitPolicy) http.HandlerFunc {
+func CompileUserService(store CompileStore, boardingWait transit.BoardingWaitPolicy, m *metrics.Metrics) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		compileAuthoredTarget(w, r, store, serviceTarget{store}, boardingWait)
+		compileAuthoredTarget(w, r, store, serviceTarget{store}, boardingWait, m)
 	}
 }
 
-func CompileUserScenario(store CompileStore, boardingWait transit.BoardingWaitPolicy) http.HandlerFunc {
+func CompileUserScenario(store CompileStore, boardingWait transit.BoardingWaitPolicy, m *metrics.Metrics) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		compileAuthoredTarget(w, r, store, scenarioTarget{store}, boardingWait)
+		compileAuthoredTarget(w, r, store, scenarioTarget{store}, boardingWait, m)
 	}
 }
 
-func compileAuthoredTarget(w http.ResponseWriter, r *http.Request, store CompileStore, target authoredTarget, boardingWait transit.BoardingWaitPolicy) {
+func compileAuthoredTarget(w http.ResponseWriter, r *http.Request, store CompileStore, target authoredTarget, boardingWait transit.BoardingWaitPolicy, m *metrics.Metrics) {
 	user, ok := auth.UserFrom(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "authentication required")
@@ -37,7 +38,7 @@ func compileAuthoredTarget(w http.ResponseWriter, r *http.Request, store Compile
 	if !ok {
 		return
 	}
-	enqueueCompile(store, job, boardingWait)
+	enqueueCompile(store, job, boardingWait, m)
 	writeJSON(w, http.StatusAccepted, job)
 }
 

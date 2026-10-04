@@ -53,7 +53,7 @@ func integrationServerCapped(t *testing.T, maxInFlight int) (http.Handler, *post
 		MaxInFlightIsochrones: maxInFlight,
 		PasswordHashCost:      testHasher.Cost(),
 	}
-	return New(cfg, store, repo, &routing.FakePublisher{}, logger.Discard()).Handler, repo
+	return New(cfg, store, repo, &routing.FakePublisher{}, logger.Discard(), nil).Handler, repo
 }
 
 func provisionAdmin(t *testing.T, repo *postgres.Repo, email, password string) string {
