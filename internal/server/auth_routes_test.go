@@ -10,6 +10,7 @@ import (
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
+	"github.com/andrewcgraves/sparks-effect-api/internal/compile"
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/logger"
@@ -164,6 +165,9 @@ func (s *stubAuthDeps) GetJobByID(context.Context, string) (transit.Job, bool, e
 	return transit.Job{}, false, nil
 }
 func (s *stubAuthDeps) UpdateJobStatus(context.Context, string, string, string) error { return nil }
+func (s *stubAuthDeps) FailInterruptedJob(context.Context, string, string) (bool, error) {
+	return false, nil
+}
 func (s *stubAuthDeps) CompleteJob(context.Context, string, transit.TransitGraph, []string) error {
 	return nil
 }
@@ -274,7 +278,7 @@ func newTestServer(t *testing.T, deps AuthDeps) http.Handler {
 		t.Fatalf("NewStore: %v", err)
 	}
 	cfg := config.Config{Port: "8080", SessionTTL: time.Hour, WorkerToken: workerToken}
-	return New(cfg, store, deps, &routing.FakePublisher{}, logger.Discard()).Handler
+	return New(cfg, store, deps, &routing.FakePublisher{}, compile.NewRunner(deps, cfg.BoardingWait), logger.Discard()).Handler
 }
 
 func newStubDeps() *stubAuthDeps {
@@ -684,7 +688,7 @@ func TestWorkerRoutesUnavailableWithoutATokenConfigured(t *testing.T) {
 		t.Fatalf("NewStore: %v", err)
 	}
 	cfg := config.Config{Port: "8080", SessionTTL: time.Hour} // no WorkerToken
-	h := New(cfg, store, newStubDeps(), &routing.FakePublisher{}, logger.Discard()).Handler
+	h := New(cfg, store, newStubDeps(), &routing.FakePublisher{}, compile.NewRunner(nil, cfg.BoardingWait), logger.Discard()).Handler
 
 	rec := request(t, h, http.MethodGet, "/api/internal/worker", workerToken)
 	if rec.Code != http.StatusServiceUnavailable {

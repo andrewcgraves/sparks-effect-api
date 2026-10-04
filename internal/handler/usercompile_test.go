@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/account"
+	"github.com/andrewcgraves/sparks-effect-api/internal/compile"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
@@ -14,7 +15,7 @@ func TestCompileUserServiceReturnsQueuedJobAndCompilesAsync(t *testing.T) {
 	store := newFakeCompileStore()
 	svcID, _ := store.compilableUserFixture("user-1")
 
-	rec := postAs(t, handler.CompileUserService(store, transit.DefaultBoardingWaitPolicy()), "/api/services/line-a/compile", "slug", "line-a",
+	rec := postAs(t, handler.CompileUserService(store, compile.NewRunner(store, transit.DefaultBoardingWaitPolicy())), "/api/services/line-a/compile", "slug", "line-a",
 		account.User{ID: "user-1"})
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202; body %s", rec.Code, rec.Body.String())
@@ -50,7 +51,7 @@ func TestCompileUserServiceRejectsNonOwner(t *testing.T) {
 	store := newFakeCompileStore()
 	store.compilableUserFixture("owner")
 
-	rec := postAs(t, handler.CompileUserService(store, transit.DefaultBoardingWaitPolicy()), "/api/services/line-a/compile", "slug", "line-a",
+	rec := postAs(t, handler.CompileUserService(store, compile.NewRunner(store, transit.DefaultBoardingWaitPolicy())), "/api/services/line-a/compile", "slug", "line-a",
 		account.User{ID: "someone-else"})
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404 for a non-owner", rec.Code)
@@ -59,7 +60,7 @@ func TestCompileUserServiceRejectsNonOwner(t *testing.T) {
 
 func TestCompileUserServiceUnknownSlugIsNotFound(t *testing.T) {
 	store := newFakeCompileStore()
-	rec := postAs(t, handler.CompileUserService(store, transit.DefaultBoardingWaitPolicy()), "/api/services/nope/compile", "slug", "nope",
+	rec := postAs(t, handler.CompileUserService(store, compile.NewRunner(store, transit.DefaultBoardingWaitPolicy())), "/api/services/nope/compile", "slug", "nope",
 		account.User{ID: "user-1"})
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rec.Code)
@@ -71,7 +72,7 @@ func TestCompileUserServiceRequiresAuth(t *testing.T) {
 	store.compilableUserFixture("user-1")
 	// No user in context — the method the request carries is irrelevant here, the
 	// handler is invoked directly and rejects on the missing identity first.
-	rec := getWithPathValueAs(t, handler.CompileUserService(store, transit.DefaultBoardingWaitPolicy()), "/api/services/line-a/compile", "slug", "line-a", nil)
+	rec := getWithPathValueAs(t, handler.CompileUserService(store, compile.NewRunner(store, transit.DefaultBoardingWaitPolicy())), "/api/services/line-a/compile", "slug", "line-a", nil)
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", rec.Code)
 	}
@@ -81,7 +82,7 @@ func TestCompileUserScenarioReturnsQueuedJobAndCompilesAsync(t *testing.T) {
 	store := newFakeCompileStore()
 	svcID, scenarioID := store.compilableUserFixture("user-1")
 
-	rec := postAs(t, handler.CompileUserScenario(store, transit.DefaultBoardingWaitPolicy()), "/api/user-scenarios/trip/compile", "slug", "trip",
+	rec := postAs(t, handler.CompileUserScenario(store, compile.NewRunner(store, transit.DefaultBoardingWaitPolicy())), "/api/user-scenarios/trip/compile", "slug", "trip",
 		account.User{ID: "user-1"})
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202; body %s", rec.Code, rec.Body.String())
@@ -111,7 +112,7 @@ func TestCompileUserScenarioRejectsNonOwner(t *testing.T) {
 	store := newFakeCompileStore()
 	store.compilableUserFixture("owner")
 
-	rec := postAs(t, handler.CompileUserScenario(store, transit.DefaultBoardingWaitPolicy()), "/api/user-scenarios/trip/compile", "slug", "trip",
+	rec := postAs(t, handler.CompileUserScenario(store, compile.NewRunner(store, transit.DefaultBoardingWaitPolicy())), "/api/user-scenarios/trip/compile", "slug", "trip",
 		account.User{ID: "someone-else"})
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404 for a non-owner", rec.Code)

@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/compile"
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
 	"github.com/andrewcgraves/sparks-effect-api/internal/ids"
 	"github.com/andrewcgraves/sparks-effect-api/internal/logger"
@@ -32,7 +33,7 @@ func readyzServer(t *testing.T, deps AuthDeps, publisher routing.Publisher) http
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	return New(config.Config{Port: "8080"}, store, deps, publisher, logger.Discard()).Handler
+	return New(config.Config{Port: "8080"}, store, deps, publisher, compile.NewRunner(deps, transit.DefaultBoardingWaitPolicy()), logger.Discard()).Handler
 }
 
 func getReadyz(t *testing.T, h http.Handler) (int, map[string]string) {
