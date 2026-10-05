@@ -465,6 +465,9 @@ of them.
   YAML correction reaches a deployed database without a migration. A boot that
   finds a graph already matching its source rows leaves it alone, so restarting
   is not a recompile.
+- **Backups:** Railway volume backups of the `Postgres` service, and how to
+  restore one, are in [`docs/backups.md`](docs/backups.md), along with the
+  restore drill's results.
 
 ## Authentication
 
