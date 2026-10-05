@@ -23,6 +23,11 @@ depends on the URL space you are in. This is the single most confusing thing in
 the codebase and it is not going to be renamed — so know which one you are
 holding.
 
+Visitors see neither word: the website's copy says *line* for a service,
+*network* for a scenario and *route* for an alignment, recorded in its
+[product vocabulary](https://github.com/andrewcgraves/sparks-effect-website/blob/trunk/CONTEXT.md#product-vocabulary).
+That is deliberate, so do not "correct" the copy back to the words here.
+
 | Term | Model | Lives at | Is |
 | --- | --- | --- | --- |
 | **Scenario** | `transit.Scenario` | `/api/scenarios` (public), `/api/me/scenarios` (owner-scoped) | The seeded world model: metadata plus routes, stations, services and segment times hanging off it |
@@ -368,7 +373,7 @@ worker counted as gone.
 | Repository | Owns |
 | --- | --- |
 | [`sparks-effect-routing-worker`](https://github.com/andrewcgraves/sparks-effect-routing-worker/blob/main/CONTEXT.md) | Chain vocabulary: chaining, access and egress legs, starter station and starter walk, reached vs reachable, journey, leg, publication (of a queue message — a service's publication is defined here), the departure clock |
-| [`sparks-effect-website`](https://github.com/andrewcgraves/sparks-effect-website/blob/trunk/CONTEXT.md) | The time-remaining graph: view, lane, through, fork |
+| [`sparks-effect-website`](https://github.com/andrewcgraves/sparks-effect-website/blob/trunk/CONTEXT.md) | Product vocabulary (line, network, route, splash zone); the time-remaining graph: view, lane, through, fork |
 | [`kustomize-config`](https://github.com/andrewcgraves/kustomize-config/blob/main/CONTEXT.md) | Deployment vocabulary: overlay, pin, generation, cycling the map, tileset |
 
 Decisions — as opposed to definitions — belong in ADRs, not here. A term
