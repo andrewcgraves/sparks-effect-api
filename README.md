@@ -774,6 +774,7 @@ CI environments match. Use `make db-up DOCKER=podman` to use podman.
 | `make run`              | Build and run the API locally                        |
 | `make lint`             | Run `golangci-lint`                                  |
 | `make vet`              | Run `go vet`                                         |
+| `make vulncheck`        | Run `govulncheck` over both modules (needs network)  |
 | `make check-contract`   | Diff the golden fixtures against the worker           |
 | `make dev-workflow`     | Run test, vet, lint, and build — full verification   |
 | `make tidy`             | Sync `go.mod`/`go.sum` with imports                  |

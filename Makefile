@@ -8,6 +8,8 @@ GOLANGCI_LINT_VERSION := v2.12.2
 # a path the target never uses.
 GOBIN = $(shell go env GOPATH)/bin
 GOLANGCI_LINT = $(GOBIN)/golangci-lint
+GOVULNCHECK_VERSION := v1.8.0
+GOVULNCHECK = $(GOBIN)/govulncheck
 
 # --- Throwaway Postgres for integration tests (single source of truth) ---
 # These same values drive `make db-up` locally AND the CI job, so the local and
@@ -31,7 +33,7 @@ TEST_MQ_PORT     := 5672
 TEST_AMQP_URL    := amqp://guest:guest@localhost:$(TEST_MQ_PORT)/
 
 .PHONY: all deps build run test test-race test-integration itest \
-	db-up db-wait db-down mq-up mq-wait mq-down vet lint tidy clean \
+	db-up db-wait db-down mq-up mq-wait mq-down vet lint vulncheck tidy clean \
 	dev-workflow check-contract
 
 all: build
@@ -197,6 +199,21 @@ lint: $(GOLANGCI_LINT)
 
 $(GOLANGCI_LINT):
 	GOBIN=$(GOBIN) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+
+# vulncheck fails on a known vulnerability that this code actually calls, in
+# either module. Not part of `dev-workflow`: it needs the network
+# (vuln.go.dev). CI runs it in the check job.
+#
+# Standard-library findings are reported against the `go` on PATH, not the
+# version in go.mod, so a local run on an older toolchain can fail where CI,
+# on the latest patch of GO_VERSION, passes. GOTOOLCHAIN=go<patch> make
+# vulncheck reproduces CI's answer.
+vulncheck: $(GOVULNCHECK)
+	$(GOVULNCHECK) ./...
+	cd contract && $(GOVULNCHECK) ./...
+
+$(GOVULNCHECK):
+	GOBIN=$(GOBIN) go install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
 
 tidy:
 	go mod tidy
