@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/httpcache"
 	"github.com/andrewcgraves/sparks-effect-api/internal/ids"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
@@ -58,7 +60,7 @@ type prerenderedCreateRequest struct {
 	Result     json.RawMessage `json:"result"`
 }
 
-func PrerenderedIsochrones(store PrerenderedStore) http.HandlerFunc {
+func PrerenderedIsochrones(store PrerenderedStore, tags httpcache.Tagger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sc, ok := lookupScenario(w, r, store, r.PathValue("slug"))
 		if !ok {
@@ -80,11 +82,11 @@ func PrerenderedIsochrones(store PrerenderedStore) http.HandlerFunc {
 		for _, p := range entries {
 			out = append(out, prerenderedMeta(p, transit.PrerenderedOutdated(p, members)))
 		}
-		writeJSON(w, http.StatusOK, out)
+		writePublicJSON(w, r, tags, out)
 	}
 }
 
-func PrerenderedIsochrone(store PrerenderedStore) http.HandlerFunc {
+func PrerenderedIsochrone(store PrerenderedStore, tags httpcache.Tagger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		p, found, err := store.GetPrerenderedIsochrone(r.Context(), r.PathValue("id"))
 		if err != nil {
@@ -108,8 +110,17 @@ func PrerenderedIsochrone(store PrerenderedStore) http.HandlerFunc {
 			return
 		}
 
-		out := prerenderedMeta(p, transit.PrerenderedOutdated(p, members))
+		outdated := transit.PrerenderedOutdated(p, members)
+		// The row is rewritten only with its updated_at, and the one part of
+		// the answer computed rather than stored is outdated, which moves with
+		// the scenario's membership and not with the row.
+		etag := tags.ETag(p.ID, p.UpdatedAt.UTC().Format(time.RFC3339Nano), strconv.FormatBool(outdated))
+		if httpcache.NotModified(w, r, etag) {
+			return
+		}
+		out := prerenderedMeta(p, outdated)
 		out.Result = p.Result
+		httpcache.MarkPublic(w, etag)
 		writeJSON(w, http.StatusOK, out)
 	}
 }

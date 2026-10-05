@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/fault"
+	"github.com/andrewcgraves/sparks-effect-api/internal/httpcache"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
@@ -14,6 +15,31 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(v); err != nil {
+		slog.Error("handler: failed to write response", "error", err)
+	}
+}
+
+// For a public read with no cheaper key than its own bytes: the published
+// index, which moves on anyone's publish, unpublish or rename, and the
+// prerendered list, whose outdated flags move with the scenario. Both are
+// small, so encoding before deciding on a 304 costs little.
+func writePublicJSON(w http.ResponseWriter, r *http.Request, tags httpcache.Tagger, v any) {
+	body, err := json.Marshal(v)
+	if err != nil {
+		writeInternalError(r.Context(), w, "encoding response", err)
+		return
+	}
+	// The newline json.Encoder would have written, so the body is byte for
+	// byte what writeJSON sends.
+	body = append(body, '\n')
+	etag := tags.ETag(string(body))
+	if httpcache.NotModified(w, r, etag) {
+		return
+	}
+	httpcache.MarkPublic(w, etag)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if _, err := w.Write(body); err != nil {
 		slog.Error("handler: failed to write response", "error", err)
 	}
 }

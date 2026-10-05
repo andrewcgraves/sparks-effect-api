@@ -148,8 +148,8 @@ func prerenderedMux(store handler.PrerenderedStore) *http.ServeMux {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/scenarios/{slug}/prerendered-isochrones", handler.PrerenderedIsochrones(store))
-	mux.HandleFunc("GET /api/prerendered-isochrones/{id}", handler.PrerenderedIsochrone(store))
+	mux.HandleFunc("GET /api/scenarios/{slug}/prerendered-isochrones", handler.PrerenderedIsochrones(store, testTags))
+	mux.HandleFunc("GET /api/prerendered-isochrones/{id}", handler.PrerenderedIsochrone(store, testTags))
 	mux.Handle("POST /api/scenarios/{slug}/prerendered-isochrones",
 		auth.RequireAdmin(lookup)(handler.CreatePrerenderedIsochrone(store)))
 	return mux
