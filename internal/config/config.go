@@ -39,6 +39,8 @@ type Config struct {
 	// The exporter reads the rest of OTEL_EXPORTER_OTLP_* itself; this only
 	// decides whether there is anywhere to push to (SPA-433).
 	ExportMetrics bool
+	// The same, for internal errors sent as OTLP logs (SPA-380).
+	ReportErrors bool
 }
 
 const defaultSessionTTL = 24 * time.Hour
@@ -99,6 +101,8 @@ func Load() Config {
 		WebsiteURL:             getEnv("WEBSITE_URL", defaultWebsiteURL),
 		ExportMetrics: os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "" ||
 			os.Getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT") != "",
+		ReportErrors: os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "" ||
+			os.Getenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT") != "",
 	}
 }
 

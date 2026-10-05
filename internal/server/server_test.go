@@ -17,7 +17,7 @@ func TestNew_healthz(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	srv := New(config.Config{Port: "8080"}, store, nil, &routing.FakePublisher{}, nil, logger.Discard(), nil)
+	srv := New(config.Config{Port: "8080"}, store, nil, &routing.FakePublisher{}, nil, logger.Discard(), nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rec := httptest.NewRecorder()
@@ -34,7 +34,7 @@ func TestNew_readyzWithNeitherBackingService(t *testing.T) {
 		t.Fatalf("NewStore: %v", err)
 	}
 	// What cmd/api builds with neither DATABASE_URL nor AMQP_URL set.
-	srv := New(config.Config{Port: "8080"}, store, nil, nil, nil, logger.Discard(), nil)
+	srv := New(config.Config{Port: "8080"}, store, nil, nil, nil, logger.Discard(), nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	rec := httptest.NewRecorder()
@@ -54,7 +54,7 @@ func TestCORS_flagOn_localhostOrigin_GET(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: true}, store, nil, &routing.FakePublisher{}, nil, logger.Discard(), nil)
+	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: true}, store, nil, &routing.FakePublisher{}, nil, logger.Discard(), nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	req.Header.Set("Origin", "http://localhost:5173")
@@ -72,7 +72,7 @@ func TestCORS_flagOn_localhostOrigin_OPTIONS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: true}, store, nil, &routing.FakePublisher{}, nil, logger.Discard(), nil)
+	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: true}, store, nil, &routing.FakePublisher{}, nil, logger.Discard(), nil, nil)
 
 	req := httptest.NewRequest(http.MethodOptions, "/healthz", nil)
 	req.Header.Set("Origin", "http://127.0.0.1:4173")
@@ -94,7 +94,7 @@ func TestCORS_flagOn_nonLocalhostOrigin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: true}, store, nil, &routing.FakePublisher{}, nil, logger.Discard(), nil)
+	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: true}, store, nil, &routing.FakePublisher{}, nil, logger.Discard(), nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	req.Header.Set("Origin", "https://example.com")
@@ -112,7 +112,7 @@ func TestCORS_productionOrigin_allowedRegardlessOfFlag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: false}, store, nil, &routing.FakePublisher{}, nil, logger.Discard(), nil)
+	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: false}, store, nil, &routing.FakePublisher{}, nil, logger.Discard(), nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	req.Header.Set("Origin", "https://sparks-effect-website.vercel.app")
@@ -130,7 +130,7 @@ func TestCORS_previewOrigin_allowedRegardlessOfFlag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: false}, store, nil, &routing.FakePublisher{}, nil, logger.Discard(), nil)
+	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: false}, store, nil, &routing.FakePublisher{}, nil, logger.Discard(), nil, nil)
 
 	const origin = "https://sparks-effect-website-git-claude-2643c5-andrewcgraves-projects.vercel.app"
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
@@ -149,7 +149,7 @@ func TestCORS_previewOrigin_OPTIONS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: false}, store, nil, &routing.FakePublisher{}, nil, logger.Discard(), nil)
+	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: false}, store, nil, &routing.FakePublisher{}, nil, logger.Discard(), nil, nil)
 
 	const origin = "https://sparks-effect-website-7geea1s8q-andrewcgraves-projects.vercel.app"
 	req := httptest.NewRequest(http.MethodOptions, "/healthz", nil)
@@ -172,7 +172,7 @@ func TestCORS_unrelatedVercelOrigin_rejected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: false}, store, nil, &routing.FakePublisher{}, nil, logger.Discard(), nil)
+	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: false}, store, nil, &routing.FakePublisher{}, nil, logger.Discard(), nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	req.Header.Set("Origin", "https://some-other-app.vercel.app")
@@ -190,7 +190,7 @@ func TestCORS_allowsXTraceIdHeader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: true}, store, nil, &routing.FakePublisher{}, nil, logger.Discard(), nil)
+	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: true}, store, nil, &routing.FakePublisher{}, nil, logger.Discard(), nil, nil)
 
 	req := httptest.NewRequest(http.MethodOptions, "/healthz", nil)
 	req.Header.Set("Origin", "http://localhost:5173")
@@ -210,7 +210,7 @@ func TestCORS_exposesRetryAfter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: true}, store, nil, &routing.FakePublisher{}, nil, logger.Discard(), nil)
+	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: true}, store, nil, &routing.FakePublisher{}, nil, logger.Discard(), nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	req.Header.Set("Origin", "http://localhost:5173")
@@ -228,7 +228,7 @@ func TestCORS_flagOff_localhostOrigin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: false}, store, nil, &routing.FakePublisher{}, nil, logger.Discard(), nil)
+	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: false}, store, nil, &routing.FakePublisher{}, nil, logger.Discard(), nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	req.Header.Set("Origin", "http://localhost:5173")
@@ -250,7 +250,7 @@ func TestCORS_sparksEffectOrigin_allowedRegardlessOfFlag(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewStore: %v", err)
 		}
-		srv := New(config.Config{Port: "8080", AllowLocalhostCORS: false}, store, nil, &routing.FakePublisher{}, nil, logger.Discard(), nil)
+		srv := New(config.Config{Port: "8080", AllowLocalhostCORS: false}, store, nil, &routing.FakePublisher{}, nil, logger.Discard(), nil, nil)
 
 		req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 		req.Header.Set("Origin", origin)
@@ -268,7 +268,7 @@ func TestCORS_sparksEffectOrigin_OPTIONS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: false}, store, nil, &routing.FakePublisher{}, nil, logger.Discard(), nil)
+	srv := New(config.Config{Port: "8080", AllowLocalhostCORS: false}, store, nil, &routing.FakePublisher{}, nil, logger.Discard(), nil, nil)
 
 	const origin = "https://dev.sparks-effect.app"
 	req := httptest.NewRequest(http.MethodOptions, "/api/isochrone", nil)

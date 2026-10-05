@@ -23,7 +23,7 @@ func newCappedServer(t *testing.T, deps AuthDeps, limit int) http.Handler {
 		t.Fatalf("NewStore: %v", err)
 	}
 	cfg := config.Config{Port: "8080", SessionTTL: time.Hour, MaxInFlightIsochrones: limit}
-	return New(cfg, store, deps, &routing.FakePublisher{}, compile.NewRunner(deps, cfg.BoardingWait, nil), logger.Discard(), nil).Handler
+	return New(cfg, store, deps, &routing.FakePublisher{}, compile.NewRunner(deps, cfg.BoardingWait, nil), logger.Discard(), nil, nil).Handler
 }
 
 var isochroneRoutes = []struct{ path, token string }{

@@ -12,6 +12,7 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/compile"
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
+	"github.com/andrewcgraves/sparks-effect-api/internal/errorreport"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/metrics"
 	"github.com/andrewcgraves/sparks-effect-api/internal/persistence/postgres"
@@ -59,7 +60,7 @@ var (
 	_ handler.Pinger = (*routing.AMQPPublisher)(nil)
 )
 
-func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routing.Publisher, compiles *compile.Runner, lg *slog.Logger, m *metrics.Metrics) *http.Server {
+func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routing.Publisher, compiles *compile.Runner, lg *slog.Logger, m *metrics.Metrics, rep *errorreport.Reporter) *http.Server {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", handler.Health)
@@ -120,7 +121,10 @@ func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routi
 		// traceid.Middleware runs outermost: logRequests reads the trace id it
 		// attaches, and every handler downstream that enqueues routing work
 		// forwards the same id to the worker (see handler.enqueueIsochrone).
-		Handler:           traceid.Middleware(logRequests(lg, m, h)),
+		// The reporter swaps the request's context, so it goes outside
+		// logRequests, which reads r.Pattern back off the request it passed
+		// on; Recover goes inside it, so a panic's 500 is logged and counted.
+		Handler:           traceid.Middleware(rep.Middleware(logRequests(lg, m, errorreport.Recover(h)))),
 		ReadHeaderTimeout: 5 * time.Second,
 		// Headers and body together. The largest body any route accepts is an
 		// 8 MiB route ingest, and the public ones are capped at 4 KiB, so 15 s

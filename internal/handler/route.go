@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"log/slog"
 	"net/http"
 	"strings"
 
@@ -44,8 +43,7 @@ func CreateRoute(store RouteStore) http.HandlerFunc {
 		// routes.slug is still the authority under a concurrent create; this
 		// only spares the common case an opaque database error.
 		if _, exists, err := store.GetRouteBySlug(r.Context(), slug); err != nil {
-			slog.ErrorContext(r.Context(), "handler: checking existing route failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
+			writeInternalError(r.Context(), w, "checking existing route", err)
 			return
 		} else if exists {
 			writeError(w, http.StatusConflict, "a route with slug "+slug+" already exists")
@@ -67,8 +65,7 @@ func CreateRoute(store RouteStore) http.HandlerFunc {
 
 		id, err := ids.NewUUID()
 		if err != nil {
-			slog.ErrorContext(r.Context(), "handler: generating route id failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
+			writeInternalError(r.Context(), w, "generating route id", err)
 			return
 		}
 
@@ -78,8 +75,7 @@ func CreateRoute(store RouteStore) http.HandlerFunc {
 		// public picker, which is the opposite of why they are ingested.
 		rt := buildRouteFromIngest(in, id, slug, scenarioID, nil)
 		if err := store.CreateRoute(r.Context(), rt); err != nil {
-			slog.ErrorContext(r.Context(), "handler: creating route failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
+			writeInternalError(r.Context(), w, "creating route", err)
 			return
 		}
 
@@ -92,8 +88,7 @@ func RouteBySlug(store RouteStore) http.HandlerFunc {
 		slug := r.PathValue("slug")
 		rt, ok, err := store.GetRouteBySlug(r.Context(), slug)
 		if err != nil {
-			slog.ErrorContext(r.Context(), "handler: looking up route failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
+			writeInternalError(r.Context(), w, "looking up route", err)
 			return
 		}
 		if !ok || !mayReadRoute(r.Context(), rt) {
@@ -116,8 +111,7 @@ func Routes(store RouteStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		routes, err := store.ListCuratedRouteSummaries(r.Context())
 		if err != nil {
-			slog.ErrorContext(r.Context(), "handler: listing routes failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
+			writeInternalError(r.Context(), w, "listing routes", err)
 			return
 		}
 		if routes == nil {
@@ -133,8 +127,7 @@ func resolveCuratedScenarioOrFail(w http.ResponseWriter, r *http.Request, store 
 	}
 	sc, found, err := store.GetScenarioBySlug(r.Context(), slug)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "handler: looking up scenario failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal error")
+		writeInternalError(r.Context(), w, "looking up scenario", err)
 		return nil, false
 	}
 	if !found || sc.OwnerID != nil {

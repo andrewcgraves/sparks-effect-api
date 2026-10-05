@@ -130,6 +130,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            RELEASE=${{ github.sha }}
 
   # Staging is whatever `main` last published. Linear's staging pipeline is a
   # separate stream from production because the two environments can (and do)

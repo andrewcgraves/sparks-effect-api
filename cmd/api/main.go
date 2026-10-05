@@ -15,6 +15,7 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/compile"
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
+	"github.com/andrewcgraves/sparks-effect-api/internal/errorreport"
 	"github.com/andrewcgraves/sparks-effect-api/internal/ids"
 	internlog "github.com/andrewcgraves/sparks-effect-api/internal/logger"
 	"github.com/andrewcgraves/sparks-effect-api/internal/metrics"
@@ -24,6 +25,10 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 	"github.com/joho/godotenv"
 )
+
+// release is the commit this binary was built from, stamped in by the
+// Dockerfile's -ldflags. A local `go build` leaves it "dev".
+var release = "dev"
 
 func main() {
 	_ = godotenv.Load()
@@ -42,6 +47,12 @@ func main() {
 	m, shutdownMetrics, err := metrics.Setup(ctx, cfg.ExportMetrics, lg)
 	if err != nil {
 		lg.Error("failed to set up metrics export", "error", err)
+		os.Exit(1)
+	}
+
+	reporter, shutdownReports, err := errorreport.Setup(ctx, cfg.ReportErrors, release, lg)
+	if err != nil {
+		lg.Error("failed to set up error reporting", "error", err)
 		os.Exit(1)
 	}
 
@@ -87,7 +98,7 @@ func main() {
 	}
 
 	compiles := compile.NewRunner(deps, cfg.BoardingWait, m)
-	srv := server.New(cfg, store, deps, publisher, compiles, lg, m)
+	srv := server.New(cfg, store, deps, publisher, compiles, lg, m, reporter)
 
 	go func() {
 		lg.Info("listening", "addr", srv.Addr)
@@ -120,6 +131,9 @@ func main() {
 	// push rather than lost with the process.
 	if err := shutdownMetrics(shutdownCtx); err != nil {
 		lg.Error("could not flush metrics", "error", err)
+	}
+	if err := shutdownReports(shutdownCtx); err != nil {
+		lg.Error("could not flush error reports", "error", err)
 	}
 }
 
