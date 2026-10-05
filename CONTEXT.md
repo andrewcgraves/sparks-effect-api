@@ -216,6 +216,9 @@ through a node both of them touch.
   refused with 429 and `backlog_full`. The cap is per deployment, not per caller.
   Per-caller floods of the expensive POSTs are refused separately with 429 and
   `rate_limited`.
+- **Queue position** — for a `queued` routing job, the count of in-flight jobs
+  created before it: the jobs a FIFO worker taking one at a time will finish
+  first. `0` means next. Reported on the poll, never stored (SPA-437).
 - **Reuse** / **reused** — answering an isochrone request with an earlier
   succeeded routing job instead of minting one (SPA-331). Reused only when the
   graph, mode, budget, owner and origin (to five decimal places) agree, and the
@@ -323,6 +326,42 @@ The four values of `transit.JobStatus*`, shared by compile jobs and routing jobs
 (`POST /api/internal/routing-jobs/{id}/running`) answers 404 for a job that is
 missing *or* already terminal — which is how a job the API gave up on and failed
 stops a late worker from reviving it.
+
+An **interrupted** compile job is one left `queued` or `running` with no
+goroutine left to finish it, because compiles run inside the API process and
+that process exited mid-compile. Shutdown waits for in-flight compiles up to
+its grace period. Boot fails every unfinished job before it enqueues any of its own, with
+`error = "interrupted by restart"`. `GET /api/jobs/{id}` fails one older than
+`handler.CompileJobInterruptedAfter`, which a boot never reached, with a
+message telling the author to compile again. Say *interrupted* about compile
+jobs, not *stale*: that word belongs to graphs.
+
+### Compile outcome
+
+The `outcome` label on the `compile_jobs_total` metric (SPA-433). It is the
+terminal job status the compile wrote, `succeeded` or `failed`, or `error`
+when no status could be written at all, for example when the database was
+unreachable. `error` is a metric value only and never a job status: that job
+is left wherever it was.
+
+### Routing status
+
+The three values `GET /api/routing/status` answers in `status`
+(`handler.RoutingStatus*`). *Contact* is the last authenticated
+`/api/internal/*` request from the worker. A job is *waiting* when it has been
+queued and in flight for over 60 s, or was enqueued over 60 s ago with no
+contact since.
+
+| Status | Means |
+| --- | --- |
+| `offline` | A job is waiting and there has been no contact for 2 minutes. Live plotting is down |
+| `degraded` | A queued job is waiting but the worker is in contact. It is up and behind |
+| `ok` | Neither. A silent worker with nothing waiting is idle, not down |
+
+The enqueue half of *waiting* exists because polling fails a job still
+`queued` after `handler.RoutingJobStaleAfter` (90 s), before two minutes of
+silence can pass. Without it, a visitor's job would leave the queue before the
+worker counted as gone.
 
 ## Where the rest of the vocabulary lives
 

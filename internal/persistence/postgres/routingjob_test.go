@@ -353,6 +353,117 @@ func TestCountInFlightRoutingJobs(t *testing.T) {
 	}
 }
 
+func TestRoutingQueueSnapshot(t *testing.T) {
+	ctx := context.Background()
+	repo, url := freshRepo(t)
+	seedCompileJob(t, repo, routingCompileJobID)
+
+	snapshot := func() handler.RoutingQueue {
+		t.Helper()
+		q, err := repo.RoutingQueueSnapshot(ctx, 5*time.Minute)
+		if err != nil {
+			t.Fatalf("RoutingQueueSnapshot: %v", err)
+		}
+		return q
+	}
+
+	if q := snapshot(); q != (handler.RoutingQueue{}) {
+		t.Fatalf("empty table = %+v, want nothing in flight and nothing queued", q)
+	}
+
+	const (
+		older   = "00000000-0000-400b-8002-0000000000a1"
+		newer   = "00000000-0000-400b-8002-0000000000a2"
+		running = "00000000-0000-400b-8002-0000000000a3"
+		done    = "00000000-0000-400b-8002-0000000000a4"
+		ancient = "00000000-0000-400b-8002-0000000000a5"
+	)
+	for id, status := range map[string]string{
+		older: transit.JobStatusQueued, newer: transit.JobStatusQueued,
+		running: transit.JobStatusRunning, done: transit.JobStatusFailed, ancient: transit.JobStatusQueued,
+	} {
+		j := transit.RoutingJob{ID: id, Status: status, CompileJobID: routingCompileJobID,
+			Mode: transit.TravelModeWalk, BudgetMins: 30}
+		if err := repo.CreateRoutingJob(ctx, &j); err != nil {
+			t.Fatalf("CreateRoutingJob %s: %v", id, err)
+		}
+	}
+	// The running job is the oldest row in the window, so it shows the oldest
+	// wait is read from queued jobs only; the ancient one is an abandoned row
+	// outside it, as CountInFlightRoutingJobs ignores.
+	execSQL(t, url, `UPDATE routing_jobs SET created_at = now() - interval '3 minutes' WHERE id = $1`, running)
+	execSQL(t, url, `UPDATE routing_jobs SET created_at = now() - interval '2 minutes' WHERE id = $1`, older)
+	execSQL(t, url, `UPDATE routing_jobs SET created_at = now() - interval '4 minutes' WHERE id = $1`, done)
+	execSQL(t, url, `UPDATE routing_jobs SET created_at = now() - interval '10 minutes' WHERE id = $1`, ancient)
+
+	q := snapshot()
+	if q.InFlight != 3 {
+		t.Errorf("in flight = %d, want 3: both queued jobs and the running one", q.InFlight)
+	}
+	if waited := time.Since(q.OldestQueuedAt); waited < 115*time.Second || waited > 125*time.Second {
+		t.Errorf("oldest queued job waited %s, want about 2m", waited)
+	}
+}
+
+func TestCountInFlightRoutingJobsBefore(t *testing.T) {
+	ctx := context.Background()
+	repo, url := freshRepo(t)
+	seedCompileJob(t, repo, routingCompileJobID)
+
+	const (
+		running = "00000000-0000-400b-8002-0000000000b1"
+		first   = "00000000-0000-400b-8002-0000000000b2"
+		second  = "00000000-0000-400b-8002-0000000000b3"
+		done    = "00000000-0000-400b-8002-0000000000b4"
+		ancient = "00000000-0000-400b-8002-0000000000b5"
+	)
+	ages := map[string]struct {
+		status string
+		age    string
+	}{
+		ancient: {transit.JobStatusQueued, "10 minutes"},
+		running: {transit.JobStatusRunning, "40 seconds"},
+		done:    {transit.JobStatusSucceeded, "35 seconds"},
+		first:   {transit.JobStatusQueued, "30 seconds"},
+		second:  {transit.JobStatusQueued, "20 seconds"},
+	}
+	createdAt := map[string]time.Time{}
+	for id, row := range ages {
+		j := transit.RoutingJob{ID: id, Status: row.status, CompileJobID: routingCompileJobID,
+			Mode: transit.TravelModeWalk, BudgetMins: 30}
+		if err := repo.CreateRoutingJob(ctx, &j); err != nil {
+			t.Fatalf("CreateRoutingJob %s: %v", id, err)
+		}
+		execSQL(t, url, `UPDATE routing_jobs SET created_at = now() - $2::interval WHERE id = $1`, id, row.age)
+		got, ok, err := repo.GetRoutingJobByID(ctx, id)
+		if err != nil || !ok {
+			t.Fatalf("GetRoutingJobByID %s: found %v, %v", id, ok, err)
+		}
+		createdAt[id] = got.CreatedAt
+	}
+
+	ahead := func(id string) int {
+		t.Helper()
+		n, err := repo.CountInFlightRoutingJobsBefore(ctx, createdAt[id], 5*time.Minute)
+		if err != nil {
+			t.Fatalf("CountInFlightRoutingJobsBefore: %v", err)
+		}
+		return n
+	}
+
+	// Only in-flight jobs created earlier are ahead: not the finished one, not
+	// the abandoned one outside the window, and not one created later.
+	if n := ahead(second); n != 2 {
+		t.Errorf("ahead of the second queued job = %d, want 2 (the running job and the first queued one)", n)
+	}
+	if n := ahead(first); n != 1 {
+		t.Errorf("ahead of the first queued job = %d, want 1 (the running job)", n)
+	}
+	if n := ahead(running); n != 0 {
+		t.Errorf("ahead of the running job = %d, want 0", n)
+	}
+}
+
 func TestMarkRoutingJobRunning(t *testing.T) {
 	ctx := context.Background()
 	repo, _ := freshRepo(t)

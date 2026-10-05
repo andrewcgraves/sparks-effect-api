@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/compile"
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
 	"github.com/andrewcgraves/sparks-effect-api/internal/logger"
 	"github.com/andrewcgraves/sparks-effect-api/internal/routing"
@@ -106,6 +107,9 @@ var publiclyCacheable = map[string]bool{
 	"GET /api/prerendered-isochrones/{id}":             true,
 	"GET /api/published-services":                      true,
 	"GET /api/services/{slug}/publication":             true,
+	// Not tagged: a live reading with nothing to revalidate against, so it
+	// sets its own short max-age (SPA-442) and carries no identity.
+	"GET /api/routing/status": true,
 }
 
 func TestEveryRouteButThePublicReadsIsPrivate(t *testing.T) {
@@ -114,7 +118,8 @@ func TestEveryRouteButThePublicReadsIsPrivate(t *testing.T) {
 		t.Fatalf("NewStore: %v", err)
 	}
 	cfg := config.Config{Port: "8080", SessionTTL: time.Hour, WorkerToken: workerToken}
-	h, patterns := routes(cfg, store, newStubDeps(), &routing.FakePublisher{}, logger.Discard())
+	deps := newStubDeps()
+	h, patterns := routes(cfg, store, deps, &routing.FakePublisher{}, compile.NewRunner(deps, cfg.BoardingWait, nil), logger.Discard(), nil)
 
 	if len(patterns) < 50 {
 		t.Fatalf("walked %d patterns; the table was not recorded", len(patterns))

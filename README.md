@@ -206,7 +206,7 @@ The four policies, overridable by env, are disabled only by `PER_MIN=0`
 | Compile | All three compile POSTs (one shared limiter) | 10/min, burst 3 |
 
 Ordinary CRUD, routing-job polling, public scenario/graph reads, `/healthz`,
-`/readyz`, and `/api/internal/*` are not limited here.
+`/readyz`, `/api/routing/status`, and `/api/internal/*` are not limited here.
 
 ### Polling a routing job
 
@@ -216,6 +216,29 @@ publication's `POST /api/services/{slug}/publication/isochrone`, and is
 readable by anyone holding its id — a v4 UUID, unguessable. An **owned** job,
 from one of the authored isochrones, answers 404 to anyone but its owner or an
 admin, so a caller cannot probe which job ids exist.
+
+While the job is `queued`, the response also carries `queue_position`: the
+number of in-flight jobs created before it, so `0` means it is next (SPA-437).
+It is absent once the job is `running` or finished, and absent if the count
+could not be read. It is counted on each poll, not stored.
+
+### Routing status
+
+`GET /api/routing/status` says whether live plotting is working, so the
+website can warn a visitor before they wait out the 120 s deadline (SPA-442).
+It is public and cached for ten seconds:
+
+```json
+{"status": "ok", "oldest_queued_secs": 0, "inflight": 0}
+```
+
+`inflight` and `oldest_queued_secs` count routing jobs younger than
+`handler.RoutingJobStaleAfter`, as the backlog cap does. `status` is one of the
+three [routing statuses](CONTEXT.md#routing-status). Worker contact is any
+authenticated `/api/internal/*` request, which the worker's 30 s heartbeat to
+`GET /api/internal/worker` guarantees while it is up. Contact is held in this
+process's memory, so a restart starts the clock again and a second replica
+would not see the first one's contact.
 
 ## Seed data
 
@@ -398,6 +421,51 @@ JOB=$(curl -s -X POST http://localhost:8080/api/isochrone \
 
 curl -s "http://localhost:8080/api/routing-jobs/$JOB" | jq '{status, error}'
 ```
+
+## Metrics
+
+The API pushes OpenTelemetry metrics over OTLP/HTTP to the same Grafana Cloud
+stack as the cluster (SPA-433). It is pushed rather than scraped because the
+API runs on Railway, outside the cluster Alloy scrapes. Every 60 s, and once
+more on shutdown.
+
+| Series in Grafana | Labels | Recorded |
+|---|---|---|
+| `http_requests_total` | `route`, `method`, `status_class` | every request |
+| `http_request_duration_seconds` (histogram) | `route` | every request |
+| `compile_jobs_total` | `kind`, `outcome` (`succeeded`, `failed`, `error`) | each compile job |
+| `compile_duration_seconds` (histogram) | `kind` | each compile job |
+| `isochrone_backlog_inflight` (gauge) | — | each isochrone enqueue the backlog cap counts |
+| `backlog_full_total` | — | each `backlog_full` 429 |
+| `rate_limited_total` | `limiter` (`isochrone`, `snap_stops`, `login`, `compile`) | each `rate_limited` 429 |
+
+Labels are kept bounded because the free-tier active-series budget is tight
+(SPA-296). `route` is the mux pattern a request matched (`/api/scenarios/{slug}`),
+never the path it asked for, and `unmatched` when it matched none. `method` is
+one of the standard methods or `other`. `kind` is a known compile job kind or
+`other`. The instruments are named without `_total` or a unit suffix, because
+Grafana Cloud's OTLP ingest adds both.
+
+Export is configured entirely by the standard OpenTelemetry variables, which the
+exporter reads itself:
+
+```sh
+OTEL_EXPORTER_OTLP_ENDPOINT=https://otlp-gateway-prod-us-west-0.grafana.net/otlp
+OTEL_EXPORTER_OTLP_HEADERS="Authorization=Basic <base64 of instance-id:token>"
+OTEL_RESOURCE_ATTRIBUTES=service.namespace=staging
+```
+
+Grafana Cloud's OpenTelemetry card (stack → Configure) produces the first two.
+The service name defaults to `sparks-effect-api`, and Grafana derives `job` from
+the namespace and name, so the setting above makes it
+`job="staging/sparks-effect-api"`. The namespace is what keeps staging and
+production apart, both on dashboards and in the alert rules, which group by
+`job`. Use `service.namespace` rather than `deployment.environment`, because
+Grafana Cloud does not reliably put the latter on every series.
+
+With no endpoint set, nothing is exported and boot logs one `info` line saying
+so. That is the local default. An allowed-origin CORS preflight is answered
+before the mux, so it counts under `route="unmatched"` alongside real 404s.
 
 ## Persistence
 

@@ -3,6 +3,7 @@ package handler_test
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
@@ -19,6 +20,23 @@ type fakeRoutingStore struct {
 	reusable   *transit.RoutingJob
 	reuseErr   error
 	reuseAsked []transit.RoutingJob
+
+	// What CountInFlightRoutingJobsBefore answers, and what it was last asked. The
+	// counting rule is the postgres repo's and tested there.
+	ahead       int
+	aheadErr    error
+	aheadOf     time.Time
+	aheadWithin time.Duration
+}
+
+func (f *fakeRoutingStore) CountInFlightRoutingJobsBefore(_ context.Context, createdAt time.Time, within time.Duration) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.aheadOf, f.aheadWithin = createdAt, within
+	if f.aheadErr != nil {
+		return 0, f.aheadErr
+	}
+	return f.ahead, nil
 }
 
 func (f *fakeRoutingStore) FindReusableRoutingJob(_ context.Context, want transit.RoutingJob) (transit.RoutingJob, bool, error) {

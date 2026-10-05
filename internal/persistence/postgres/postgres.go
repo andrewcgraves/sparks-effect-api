@@ -853,6 +853,39 @@ func (r *Repo) CompleteJob(ctx context.Context, id string, result transit.Transi
 	return nil
 }
 
+const interruptedByRestart = "interrupted by restart"
+
+func (r *Repo) FailInterruptedJobs(ctx context.Context) (int64, error) {
+	// Compiles run in-process, so a job still unfinished when a process boots
+	// has no goroutine left to finish it (SPA-431). There is deliberately no
+	// time cutoff: created_at is the database's clock and a boot time would be
+	// the API's, and skew between them misfiles rows. The caller sweeps before
+	// it enqueues anything instead.
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE jobs SET status = $1, error = $2, updated_at = now()
+		 WHERE status = ANY($3)`,
+		transit.JobStatusFailed, interruptedByRestart,
+		[]string{transit.JobStatusQueued, transit.JobStatusRunning})
+	if err != nil {
+		return 0, wrap("FailInterruptedJobs", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+func (r *Repo) FailInterruptedJob(ctx context.Context, id, errMsg string) (bool, error) {
+	// Guarded on the job still being unfinished, so a compile that completes
+	// between the caller's read and this write keeps its result.
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE jobs SET status = $2, error = $3, updated_at = now()
+		 WHERE id = $1 AND status = ANY($4)`,
+		id, transit.JobStatusFailed, errMsg,
+		[]string{transit.JobStatusQueued, transit.JobStatusRunning})
+	if err != nil {
+		return false, wrap("FailInterruptedJob", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
 func (r *Repo) ListJobs(ctx context.Context) ([]transit.Job, error) {
 	rows, err := r.pool.Query(ctx, `SELECT `+jobColumns+` FROM jobs ORDER BY created_at DESC`)
 	if err != nil {
@@ -971,15 +1004,27 @@ func (r *Repo) queryRoutingJob(ctx context.Context, op, sql string, args ...any)
 }
 
 func (r *Repo) CountInFlightRoutingJobs(ctx context.Context, within time.Duration) (int, error) {
+	return r.countInFlightRoutingJobs(ctx, "CountInFlightRoutingJobs", within, nil)
+}
+
+func (r *Repo) CountInFlightRoutingJobsBefore(ctx context.Context, createdAt time.Time, within time.Duration) (int, error) {
+	return r.countInFlightRoutingJobs(ctx, "CountInFlightRoutingJobsBefore", within, &createdAt)
+}
+
+// A nil before counts the whole backlog; otherwise only the jobs created
+// earlier, which is a queued job's queue position.
+func (r *Repo) countInFlightRoutingJobs(ctx context.Context, op string, within time.Duration, before *time.Time) (int, error) {
 	var n int
 	err := r.pool.QueryRow(ctx,
 		`SELECT count(*) FROM routing_jobs
-		 WHERE status = ANY($1) AND created_at > $2`,
+		 WHERE status = ANY($1) AND created_at > $2
+		   AND ($3::timestamptz IS NULL OR created_at < $3)`,
 		[]string{transit.JobStatusQueued, transit.JobStatusRunning},
 		time.Now().Add(-within),
+		before,
 	).Scan(&n)
 	if err != nil {
-		return 0, wrap("CountInFlightRoutingJobs", err)
+		return 0, wrap(op, err)
 	}
 	return n, nil
 }

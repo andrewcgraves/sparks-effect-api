@@ -11,9 +11,11 @@ import (
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
+	"github.com/andrewcgraves/sparks-effect-api/internal/compile"
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/httpcache"
+	"github.com/andrewcgraves/sparks-effect-api/internal/metrics"
 	"github.com/andrewcgraves/sparks-effect-api/internal/persistence/postgres"
 	"github.com/andrewcgraves/sparks-effect-api/internal/ratelimit"
 	"github.com/andrewcgraves/sparks-effect-api/internal/routing"
@@ -36,7 +38,7 @@ type AuthDeps interface {
 	handler.OwnedTravelTimesStore
 	handler.OwnedServiceStore
 	handler.OwnedRouteStore
-	handler.RoutingStore
+	handler.RoutingJobPollStore
 	handler.WorkerStore
 	handler.RoutingBacklogStore
 	handler.PrerenderedStore
@@ -46,6 +48,7 @@ type AuthDeps interface {
 	handler.HandoverStore
 	handler.AccountTokenStore
 	handler.RetentionStore
+	handler.RoutingQueueStore
 	GetSessionUser(ctx context.Context, tokenHash string) (account.User, bool, error)
 }
 
@@ -58,8 +61,8 @@ var (
 	_ handler.Pinger = (*routing.AMQPPublisher)(nil)
 )
 
-func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routing.Publisher, lg *slog.Logger) *http.Server {
-	h, _ := routes(cfg, store, deps, publisher, lg)
+func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routing.Publisher, compiles *compile.Runner, lg *slog.Logger, m *metrics.Metrics) *http.Server {
+	h, _ := routes(cfg, store, deps, publisher, compiles, lg, m)
 	return &http.Server{
 		Addr:              ":" + cfg.Port,
 		Handler:           h,
@@ -95,7 +98,8 @@ func (t *routeTable) HandleFunc(pattern string, h func(http.ResponseWriter, *htt
 	t.Handle(pattern, http.HandlerFunc(h))
 }
 
-func routes(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routing.Publisher, lg *slog.Logger) (http.Handler, []string) {
+func routes(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routing.Publisher, compiles *compile.Runner,
+	lg *slog.Logger, m *metrics.Metrics) (http.Handler, []string) {
 	mux := &routeTable{ServeMux: http.NewServeMux()}
 
 	mux.HandleFunc("GET /healthz", handler.Health)
@@ -103,6 +107,14 @@ func routes(cfg config.Config, store *transit.Store, deps AuthDeps, publisher ro
 	// (SPA-379). Both bare: a probe carries no identity and must not spend a
 	// rate-limit bucket.
 	mux.HandleFunc("GET /readyz", handler.Ready(pinger(deps), pinger(publisher), lg))
+
+	// Every enqueue below goes through the watch, so the routing status can
+	// tell a job the worker never answered (SPA-442). Wrapped only after
+	// readiness has taken the publisher's Pinger, which the wrapper hides.
+	watch := handler.NewWorkerWatch(time.Now)
+	if publisher != nil {
+		publisher = watch.Publisher(publisher)
+	}
 
 	// Public reads: the curated scenario data, unauthenticated by design.
 	//
@@ -133,21 +145,22 @@ func routes(cfg config.Config, store *transit.Store, deps AuthDeps, publisher ro
 	// "disabled" warning is logged once (SPA-219).
 	capBacklog := passThrough
 	if deps != nil {
-		capBacklog = handler.CapIsochroneBacklog(deps, cfg.MaxInFlightIsochrones, lg)
+		capBacklog = handler.CapIsochroneBacklog(deps, cfg.MaxInFlightIsochrones, lg, m)
 	}
 
 	clientIP := ratelimit.ClientIP(cfg.TrustedProxyCount)
-	limitIso := ratelimit.Limit(ratelimit.New(cfg.RateLimitIsochrone.RatePerMinute, cfg.RateLimitIsochrone.Burst), clientIP)
-	limitSnap := ratelimit.Limit(ratelimit.New(cfg.RateLimitSnapStops.RatePerMinute, cfg.RateLimitSnapStops.Burst), clientIP)
-	limitLogin := ratelimit.Limit(ratelimit.New(cfg.RateLimitLogin.RatePerMinute, cfg.RateLimitLogin.Burst), clientIP)
-	limitCompile := ratelimit.Limit(ratelimit.New(cfg.RateLimitCompile.RatePerMinute, cfg.RateLimitCompile.Burst), clientIP)
+	limitIso := ratelimit.Limit(ratelimit.New(cfg.RateLimitIsochrone.RatePerMinute, cfg.RateLimitIsochrone.Burst), clientIP, m.RateLimited("isochrone"))
+	limitSnap := ratelimit.Limit(ratelimit.New(cfg.RateLimitSnapStops.RatePerMinute, cfg.RateLimitSnapStops.Burst), clientIP, m.RateLimited("snap_stops"))
+	limitLogin := ratelimit.Limit(ratelimit.New(cfg.RateLimitLogin.RatePerMinute, cfg.RateLimitLogin.Burst), clientIP, m.RateLimited("login"))
+	limitCompile := ratelimit.Limit(ratelimit.New(cfg.RateLimitCompile.RatePerMinute, cfg.RateLimitCompile.Burst), clientIP, m.RateLimited("compile"))
 
 	registerRouteRoutes(mux, deps, limitSnap)
 	registerCompileRoutes(mux, deps, publisher, capBacklog, limitIso, lg)
 	registerPrerenderedRoutes(mux, deps, tags)
 	registerPublishedServiceRoutes(mux, deps, tags)
-	registerAuthRoutes(mux, cfg, deps, publisher, tags, capBacklog, limitLogin, limitIso, limitCompile, lg)
-	registerWorkerRoutes(mux, cfg, deps)
+	registerAuthRoutes(mux, cfg, deps, publisher, compiles, tags, capBacklog, limitLogin, limitIso, limitCompile, lg)
+	registerWorkerRoutes(mux, cfg, deps, watch)
+	registerRoutingStatusRoutes(mux, deps, watch)
 
 	// Private by default, outside cors so a preflight is too: the public reads
 	// opt in themselves, and an authenticated or OptionalAuth answer is never
@@ -157,7 +170,7 @@ func routes(cfg config.Config, store *transit.Store, deps AuthDeps, publisher ro
 	// traceid.Middleware runs outermost: logRequests reads the trace id it
 	// attaches, and every handler downstream that enqueues routing work
 	// forwards the same id to the worker (see handler.enqueueIsochrone).
-	return traceid.Middleware(logRequests(lg, compressJSON(h))), mux.patterns
+	return traceid.Middleware(logRequests(lg, m, compressJSON(h))), mux.patterns
 }
 
 func registerRouteRoutes(mux *routeTable, deps AuthDeps, limitSnap func(http.Handler) http.Handler) {
@@ -254,7 +267,7 @@ func requirePublisher(publisher routing.Publisher, h http.Handler) http.Handler 
 	return h
 }
 
-func registerAuthRoutes(mux *routeTable, cfg config.Config, deps AuthDeps, publisher routing.Publisher, tags httpcache.Tagger,
+func registerAuthRoutes(mux *routeTable, cfg config.Config, deps AuthDeps, publisher routing.Publisher, compiles *compile.Runner, tags httpcache.Tagger,
 	capBacklog, limitLogin, limitIso, limitCompile func(http.Handler) http.Handler, lg *slog.Logger) {
 	if deps == nil {
 		for _, pattern := range []string{
@@ -312,7 +325,7 @@ func registerAuthRoutes(mux *routeTable, cfg config.Config, deps AuthDeps, publi
 	// Async compile jobs: any authenticated caller may trigger a compile or
 	// poll a job. JobStatus enforces ownership itself (see its doc comment),
 	// since "not found" there means something different from "not admin".
-	mux.Handle("POST /api/scenarios/{slug}/compile", authenticated(limitCompile(handler.CompileScenario(deps, cfg.BoardingWait))))
+	mux.Handle("POST /api/scenarios/{slug}/compile", authenticated(limitCompile(handler.CompileScenario(deps, compiles))))
 	mux.Handle("GET /api/jobs/{id}", authenticated(handler.JobStatus(deps)))
 
 	// Owner-scoped CRUD over the seeded route model. Distinct from the public
@@ -382,7 +395,7 @@ func registerAuthRoutes(mux *routeTable, cfg config.Config, deps AuthDeps, publi
 	mux.Handle("DELETE /api/services/{slug}", authenticated(handler.DeleteService(deps)))
 	// Compiling a single service is the degenerate scenario compile; owner-scoped
 	// like the rest of the authored surface.
-	mux.Handle("POST /api/services/{slug}/compile", authenticated(limitCompile(handler.CompileUserService(deps, cfg.BoardingWait))))
+	mux.Handle("POST /api/services/{slug}/compile", authenticated(limitCompile(handler.CompileUserService(deps, compiles))))
 	// Read that compile back, and plot over it, without wrapping the service in
 	// a scenario first (SPA-140). Twins of the /api/user-scenarios pair below,
 	// owner-scoped identically. The database-less 503 list above needs no entry
@@ -434,7 +447,7 @@ func registerAuthRoutes(mux *routeTable, cfg config.Config, deps AuthDeps, publi
 	mux.Handle("DELETE /api/user-scenarios/{slug}", authenticated(handler.DeleteUserScenario(deps)))
 	// Compile a user scenario's curated members into one graph, then read it back
 	// by slug. Both owner-scoped, unlike the public seeded /api/scenarios/{slug}/graph.
-	mux.Handle("POST /api/user-scenarios/{slug}/compile", authenticated(limitCompile(handler.CompileUserScenario(deps, cfg.BoardingWait))))
+	mux.Handle("POST /api/user-scenarios/{slug}/compile", authenticated(limitCompile(handler.CompileUserScenario(deps, compiles))))
 	mux.Handle("GET /api/user-scenarios/{slug}/graph", authenticated(handler.UserScenarioGraph(deps)))
 	// The user-authored counterpart to POST /api/isochrone (SPA-83): computes
 	// over the scenario's compiled graph rather than the seeded store, and
@@ -463,7 +476,17 @@ func registerAuthRoutes(mux *routeTable, cfg config.Config, deps AuthDeps, publi
 		adminOnly(handler.CreatePrerenderedIsochrone(deps)))
 }
 
-func registerWorkerRoutes(mux *routeTable, cfg config.Config, deps AuthDeps) {
+// Bare, like /readyz: the website asks on behalf of every visitor, and the
+// answer carries no job, origin or owner, so there is nothing to scope.
+func registerRoutingStatusRoutes(mux *routeTable, deps AuthDeps, watch *handler.WorkerWatch) {
+	if deps == nil {
+		mux.HandleFunc("GET /api/routing/status", noDatabase("routing status is unavailable"))
+		return
+	}
+	mux.HandleFunc("GET /api/routing/status", handler.RoutingStatus(deps, watch))
+}
+
+func registerWorkerRoutes(mux *routeTable, cfg config.Config, deps AuthDeps, watch *handler.WorkerWatch) {
 	const unavailable = "worker API is unavailable"
 	if deps == nil {
 		mux.HandleFunc("/api/internal/", noDatabase(unavailable))
@@ -473,7 +496,10 @@ func registerWorkerRoutes(mux *routeTable, cfg config.Config, deps AuthDeps) {
 		mux.HandleFunc("/api/internal/", serviceUnavailable(unavailable+": no WORKER_TOKEN configured"))
 		return
 	}
-	gate := auth.RequireWorkerToken(cfg.WorkerToken)
+	// Contact is recorded inside the token check: a request anyone could send
+	// is no proof the worker is alive.
+	requireWorker := auth.RequireWorkerToken(cfg.WorkerToken)
+	gate := func(h http.Handler) http.Handler { return requireWorker(watch.RecordContact(h)) }
 	mux.Handle("GET /api/internal/worker", gate(handler.WorkerReady()))
 	mux.Handle("POST /api/internal/routing-jobs/{id}/running", gate(handler.WorkerMarkRunning(deps)))
 	mux.Handle("POST /api/internal/routing-jobs/{id}/succeeded", gate(handler.WorkerMarkSucceeded(deps)))
@@ -507,11 +533,17 @@ func (s *statusRecorder) WriteHeader(status int) {
 	s.ResponseWriter.WriteHeader(status)
 }
 
-func logRequests(lg *slog.Logger, next http.Handler) http.Handler {
+func logRequests(lg *slog.Logger, m *metrics.Metrics, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		start := time.Now()
 		next.ServeHTTP(rec, r)
+		elapsed := time.Since(start)
+
+		// The mux sets r.Pattern on this same request: cors passes it through
+		// unchanged, and nothing between here and the mux calls WithContext.
+		// An unmatched path leaves it empty.
+		m.Request(r.Context(), r.Pattern, r.Method, rec.status, elapsed)
 
 		// Probes are polled on a timer by the platform and uptime monitors;
 		// at info they would drown the requests worth reading.
@@ -524,7 +556,7 @@ func logRequests(lg *slog.Logger, next http.Handler) http.Handler {
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", rec.status,
-			"duration_ms", time.Since(start).Milliseconds(),
+			"duration_ms", elapsed.Milliseconds(),
 			"trace_id", trace,
 		)
 	})

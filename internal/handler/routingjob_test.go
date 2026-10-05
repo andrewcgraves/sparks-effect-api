@@ -22,7 +22,7 @@ var (
 	pollAdmin    = account.User{ID: "admin-1", Email: "admin@example.com", IsAdmin: true}
 )
 
-func pollAs(t *testing.T, store handler.RoutingStore, id string, user account.User) *httptest.ResponseRecorder {
+func pollAs(t *testing.T, store handler.RoutingJobPollStore, id string, user account.User) *httptest.ResponseRecorder {
 	t.Helper()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/routing-jobs/{id}", handler.RoutingJobStatus(store))
@@ -284,5 +284,88 @@ func TestRoutingJobStatus_staleJobLeftUnchangedWhenTheFailWriteFails(t *testing.
 	}
 	if got := decodeRoutingJob(t, rec).Status; got != transit.JobStatusQueued {
 		t.Errorf("status = %q, want queued (unchanged, since the fail write itself failed)", got)
+	}
+}
+
+// --- the queue position (SPA-437) ---
+
+func pollFields(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
+	t.Helper()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body.String())
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &fields); err != nil {
+		t.Fatalf("unmarshal %q: %v", rec.Body.String(), err)
+	}
+	return fields
+}
+
+func TestRoutingJobStatus_queuedJobCarriesItsQueuePosition(t *testing.T) {
+	createdAt := time.Now().Add(-10 * time.Second)
+	store := &fakeRoutingStore{ahead: 2}
+	store.put(transit.RoutingJob{ID: "job-third", Status: transit.JobStatusQueued, CreatedAt: createdAt})
+
+	fields := pollFields(t, pollAs(t, store, "job-third", account.User{}))
+	if got := fields["queue_position"]; got != float64(2) {
+		t.Errorf("queue_position = %v, want 2", got)
+	}
+	// Ahead means in flight and created earlier, so it is counted over the
+	// backlog's own window from this job's created_at.
+	if !store.aheadOf.Equal(createdAt) {
+		t.Errorf("counted jobs ahead of %v, want this job's created_at %v", store.aheadOf, createdAt)
+	}
+	if store.aheadWithin != handler.RoutingJobStaleAfter {
+		t.Errorf("counted over %v, want RoutingJobStaleAfter (%v)", store.aheadWithin, handler.RoutingJobStaleAfter)
+	}
+}
+
+func TestRoutingJobStatus_queuedJobAtTheFrontIsPositionZero(t *testing.T) {
+	store := &fakeRoutingStore{}
+	store.put(transit.RoutingJob{ID: "job-next", Status: transit.JobStatusQueued, CreatedAt: time.Now()})
+
+	// Zero is an answer, not an absence: a missing field means the job is not
+	// waiting in the queue at all.
+	fields := pollFields(t, pollAs(t, store, "job-next", account.User{}))
+	if got, ok := fields["queue_position"]; !ok || got != float64(0) {
+		t.Errorf("queue_position = %v (present %v), want 0", got, ok)
+	}
+}
+
+func TestRoutingJobStatus_onlyAQueuedJobCarriesAQueuePosition(t *testing.T) {
+	stale := time.Now().Add(-2 * handler.RoutingJobStaleAfter)
+	for _, tc := range []struct {
+		name string
+		job  transit.RoutingJob
+	}{
+		{"running", transit.RoutingJob{ID: "job-running", Status: transit.JobStatusRunning, CreatedAt: time.Now()}},
+		{"succeeded", transit.RoutingJob{ID: "job-succeeded", Status: transit.JobStatusSucceeded, CreatedAt: time.Now()}},
+		{"failed", transit.RoutingJob{ID: "job-failed", Status: transit.JobStatusFailed, CreatedAt: time.Now()}},
+		{"queued but failed for staleness", transit.RoutingJob{ID: "job-stale", Status: transit.JobStatusQueued, CreatedAt: stale}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &fakeRoutingStore{ahead: 3}
+			store.put(tc.job)
+
+			fields := pollFields(t, pollAs(t, store, tc.job.ID, account.User{}))
+			if got, ok := fields["queue_position"]; ok {
+				t.Errorf("queue_position = %v, want none for a %v job", got, fields["status"])
+			}
+		})
+	}
+}
+
+func TestRoutingJobStatus_queuePositionIsLeftOutWhenItCannotBeCounted(t *testing.T) {
+	store := &fakeRoutingStore{aheadErr: fmt.Errorf("database is on fire")}
+	store.put(transit.RoutingJob{ID: "job-queued", Status: transit.JobStatusQueued, CreatedAt: time.Now()})
+
+	// The position is a courtesy; failing the poll over it would turn a slow
+	// count into a visitor's failed isochrone.
+	fields := pollFields(t, pollAs(t, store, "job-queued", account.User{}))
+	if got, ok := fields["queue_position"]; ok {
+		t.Errorf("queue_position = %v, want none when the count failed", got)
+	}
+	if fields["status"] != transit.JobStatusQueued {
+		t.Errorf("status = %v, want queued", fields["status"])
 	}
 }

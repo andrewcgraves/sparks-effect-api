@@ -13,6 +13,7 @@ import (
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
+	"github.com/andrewcgraves/sparks-effect-api/internal/compile"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
@@ -33,6 +34,24 @@ type fakeCompileStore struct {
 	getJobErr      error
 	getGraphErr    error
 	completed      chan transit.Job
+	// Runs just before FailInterruptedJob writes, to land a finish in the
+	// window between JobStatus's read and its write.
+	beforeFail func()
+}
+
+func (f *fakeCompileStore) FailInterruptedJob(_ context.Context, id, errMsg string) (bool, error) {
+	if f.beforeFail != nil {
+		f.beforeFail()
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	j, ok := f.jobs[id]
+	if !ok || (j.Status != transit.JobStatusQueued && j.Status != transit.JobStatusRunning) {
+		return false, nil
+	}
+	j.Status, j.Error = transit.JobStatusFailed, errMsg
+	f.jobs[id] = j
+	return true, nil
 }
 
 func newFakeCompileStore() *fakeCompileStore {
@@ -379,7 +398,7 @@ func TestCompileScenarioReturnsQueuedJobAndCompilesAsync(t *testing.T) {
 	store := newFakeCompileStore()
 	store.compilableFixture()
 
-	rec := postAs(t, handler.CompileScenario(store, transit.DefaultBoardingWaitPolicy()), "/api/scenarios/scenario-a/compile", "slug", "scenario-a",
+	rec := postAs(t, handler.CompileScenario(store, compile.NewRunner(store, transit.DefaultBoardingWaitPolicy(), nil)), "/api/scenarios/scenario-a/compile", "slug", "scenario-a",
 		account.User{ID: "user-1"})
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202; body %s", rec.Code, rec.Body.String())
@@ -416,7 +435,7 @@ func TestCompileScenarioFailsJobOnBadScenarioData(t *testing.T) {
 	store.compilableFixture()
 	store.services[0].VehicleTypeID = "no-such-vehicle-type"
 
-	rec := postAs(t, handler.CompileScenario(store, transit.DefaultBoardingWaitPolicy()), "/api/scenarios/scenario-a/compile", "slug", "scenario-a",
+	rec := postAs(t, handler.CompileScenario(store, compile.NewRunner(store, transit.DefaultBoardingWaitPolicy(), nil)), "/api/scenarios/scenario-a/compile", "slug", "scenario-a",
 		account.User{ID: "user-1"})
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202; body %s", rec.Code, rec.Body.String())
@@ -436,7 +455,7 @@ func TestCompileScenarioRequiresAuth(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/scenarios/scenario-a/compile", nil)
 	req.SetPathValue("slug", "scenario-a")
 	rec := httptest.NewRecorder()
-	handler.CompileScenario(store, transit.DefaultBoardingWaitPolicy()).ServeHTTP(rec, req)
+	handler.CompileScenario(store, compile.NewRunner(store, transit.DefaultBoardingWaitPolicy(), nil)).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", rec.Code)
@@ -445,7 +464,7 @@ func TestCompileScenarioRequiresAuth(t *testing.T) {
 
 func TestCompileScenarioUnknownSlugIsNotFound(t *testing.T) {
 	store := newFakeCompileStore()
-	rec := postAs(t, handler.CompileScenario(store, transit.DefaultBoardingWaitPolicy()), "/api/scenarios/no-such-scenario/compile", "slug", "no-such-scenario",
+	rec := postAs(t, handler.CompileScenario(store, compile.NewRunner(store, transit.DefaultBoardingWaitPolicy(), nil)), "/api/scenarios/no-such-scenario/compile", "slug", "no-such-scenario",
 		account.User{ID: "user-1"})
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rec.Code)
@@ -456,7 +475,7 @@ func TestCompileScenarioReportsStorageFailure(t *testing.T) {
 	store := newFakeCompileStore()
 	store.createJobErr = errors.New("database is down")
 
-	rec := postAs(t, handler.CompileScenario(store, transit.DefaultBoardingWaitPolicy()), "/api/scenarios/scenario-a/compile", "slug", "scenario-a",
+	rec := postAs(t, handler.CompileScenario(store, compile.NewRunner(store, transit.DefaultBoardingWaitPolicy(), nil)), "/api/scenarios/scenario-a/compile", "slug", "scenario-a",
 		account.User{ID: "user-1"})
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", rec.Code)
@@ -469,7 +488,7 @@ func TestCompileScenarioReportsStorageFailure(t *testing.T) {
 func TestJobStatusReturnsJobForItsOwner(t *testing.T) {
 	store := newFakeCompileStore()
 	owner := "user-1"
-	store.jobs["job-1"] = transit.Job{ID: "job-1", Kind: "compile", Status: transit.JobStatusRunning, OwnerID: &owner}
+	store.jobs["job-1"] = transit.Job{ID: "job-1", Kind: "compile", Status: transit.JobStatusRunning, OwnerID: &owner, CreatedAt: time.Now()}
 
 	user := account.User{ID: "user-1"}
 	rec := getWithPathValueAs(t, handler.JobStatus(store), "/api/jobs/job-1", "id", "job-1", &user)
@@ -482,6 +501,76 @@ func TestJobStatusReturnsJobForItsOwner(t *testing.T) {
 	}
 	if got.Status != transit.JobStatusRunning {
 		t.Errorf("status = %q, want running", got.Status)
+	}
+}
+
+func TestJobStatusFailsACompileJobLeftUnfinishedPastTheBound(t *testing.T) {
+	for _, status := range []string{transit.JobStatusQueued, transit.JobStatusRunning} {
+		t.Run(status, func(t *testing.T) {
+			store := newFakeCompileStore()
+			owner := "user-1"
+			store.jobs["job-1"] = transit.Job{ID: "job-1", Kind: transit.JobKindCompileUserService, Status: status,
+				OwnerID: &owner, CreatedAt: time.Now().Add(-2 * handler.CompileJobInterruptedAfter)}
+
+			user := account.User{ID: owner}
+			for _, read := range []string{"first", "second"} {
+				rec := getWithPathValueAs(t, handler.JobStatus(store), "/api/jobs/job-1", "id", "job-1", &user)
+				if rec.Code != http.StatusOK {
+					t.Fatalf("%s read: status = %d, want 200; body %s", read, rec.Code, rec.Body.String())
+				}
+				var got transit.Job
+				if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+					t.Fatalf("decode: %v", err)
+				}
+				if got.Status != transit.JobStatusFailed || got.Error == "" {
+					t.Errorf("%s read: job = %s/%q, want failed with a message", read, got.Status, got.Error)
+				}
+			}
+		})
+	}
+}
+
+func TestJobStatusKeepsACompileThatFinishesBetweenItsReadAndItsWrite(t *testing.T) {
+	store := newFakeCompileStore()
+	owner := "user-1"
+	store.jobs["job-1"] = transit.Job{ID: "job-1", Kind: transit.JobKindCompileUserService, Status: transit.JobStatusRunning,
+		OwnerID: &owner, CreatedAt: time.Now().Add(-2 * handler.CompileJobInterruptedAfter)}
+	store.beforeFail = func() {
+		store.mu.Lock()
+		defer store.mu.Unlock()
+		j := store.jobs["job-1"]
+		j.Status = transit.JobStatusSucceeded
+		store.jobs["job-1"] = j
+	}
+
+	user := account.User{ID: owner}
+	rec := getWithPathValueAs(t, handler.JobStatus(store), "/api/jobs/job-1", "id", "job-1", &user)
+	var got transit.Job
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Status != transit.JobStatusSucceeded {
+		t.Errorf("response status = %q, want the succeeded the compile reached", got.Status)
+	}
+	if stored := store.jobs["job-1"]; stored.Status != transit.JobStatusSucceeded {
+		t.Errorf("stored status = %q, want succeeded left alone", stored.Status)
+	}
+}
+
+func TestJobStatusNeverRewritesAFinishedCompileJob(t *testing.T) {
+	store := newFakeCompileStore()
+	owner := "user-1"
+	store.jobs["job-1"] = transit.Job{ID: "job-1", Kind: transit.JobKindCompileUserService, Status: transit.JobStatusSucceeded,
+		OwnerID: &owner, CreatedAt: time.Now().Add(-2 * handler.CompileJobInterruptedAfter)}
+
+	user := account.User{ID: owner}
+	rec := getWithPathValueAs(t, handler.JobStatus(store), "/api/jobs/job-1", "id", "job-1", &user)
+	var got transit.Job
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Status != transit.JobStatusSucceeded {
+		t.Errorf("status = %q, want succeeded left alone", got.Status)
 	}
 }
 
@@ -500,7 +589,7 @@ func TestJobStatusHidesOtherUsersJobsAsNotFound(t *testing.T) {
 func TestJobStatusAdminCanViewAnyJob(t *testing.T) {
 	store := newFakeCompileStore()
 	owner := "user-2"
-	store.jobs["job-1"] = transit.Job{ID: "job-1", Kind: "compile", Status: transit.JobStatusRunning, OwnerID: &owner}
+	store.jobs["job-1"] = transit.Job{ID: "job-1", Kind: "compile", Status: transit.JobStatusRunning, OwnerID: &owner, CreatedAt: time.Now()}
 
 	admin := account.User{ID: "admin-1", IsAdmin: true}
 	rec := getWithPathValueAs(t, handler.JobStatus(store), "/api/jobs/job-1", "id", "job-1", &admin)

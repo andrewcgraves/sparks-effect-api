@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/andrewcgraves/sparks-effect-api/internal/metrics"
 )
 
 const BacklogFullErrorCode = "backlog_full"
@@ -18,7 +20,7 @@ type RoutingBacklogStore interface {
 	CountInFlightRoutingJobs(ctx context.Context, within time.Duration) (int, error)
 }
 
-func CapIsochroneBacklog(store RoutingBacklogStore, limit int, log *slog.Logger) func(http.Handler) http.Handler {
+func CapIsochroneBacklog(store RoutingBacklogStore, limit int, log *slog.Logger, m *metrics.Metrics) func(http.Handler) http.Handler {
 	if limit <= 0 {
 		log.Warn("isochrone enqueue cap disabled; routing backlog is unbounded",
 			"max_inflight_isochrones", limit)
@@ -33,6 +35,7 @@ func CapIsochroneBacklog(store RoutingBacklogStore, limit int, log *slog.Logger)
 				next.ServeHTTP(w, r)
 				return
 			}
+			m.BacklogInFlight(r.Context(), inFlight)
 			if inFlight < limit {
 				next.ServeHTTP(w, r)
 				return
@@ -40,6 +43,7 @@ func CapIsochroneBacklog(store RoutingBacklogStore, limit int, log *slog.Logger)
 
 			log.WarnContext(r.Context(), "routing: isochrone refused, backlog full",
 				"in_flight", inFlight, "limit", limit)
+			m.BacklogFull(r.Context())
 			w.Header().Set("Retry-After", strconv.Itoa(int(backlogRetryAfter.Seconds())))
 			writeErrorCode(w, http.StatusTooManyRequests, BacklogFullErrorCode, backlogFullMessage)
 		})

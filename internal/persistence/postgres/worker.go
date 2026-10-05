@@ -12,7 +12,10 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-var _ handler.WorkerStore = (*Repo)(nil)
+var (
+	_ handler.WorkerStore       = (*Repo)(nil)
+	_ handler.RoutingQueueStore = (*Repo)(nil)
+)
 
 func (r *Repo) MarkRoutingJobRunning(ctx context.Context, id string) error {
 	return r.execRoutingJob(ctx, "MarkRoutingJobRunning", id,
@@ -38,6 +41,26 @@ func nullTime(t time.Time) *time.Time {
 		return nil
 	}
 	return &t
+}
+
+func (r *Repo) RoutingQueueSnapshot(ctx context.Context, within time.Duration) (handler.RoutingQueue, error) {
+	var q handler.RoutingQueue
+	var oldest *time.Time
+	err := r.pool.QueryRow(ctx,
+		`SELECT count(*), min(created_at) FILTER (WHERE status = $2)
+		   FROM routing_jobs
+		  WHERE status = ANY($1) AND created_at > $3`,
+		[]string{transit.JobStatusQueued, transit.JobStatusRunning},
+		transit.JobStatusQueued,
+		time.Now().Add(-within),
+	).Scan(&q.InFlight, &oldest)
+	if err != nil {
+		return handler.RoutingQueue{}, wrap("RoutingQueueSnapshot", err)
+	}
+	if oldest != nil {
+		q.OldestQueuedAt = *oldest
+	}
+	return q, nil
 }
 
 func (r *Repo) execRoutingJob(ctx context.Context, op, id, sql string, args ...any) error {
