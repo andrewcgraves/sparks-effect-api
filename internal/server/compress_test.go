@@ -184,3 +184,24 @@ func TestGzipKeepsEveryByteOfAChunkedBody(t *testing.T) {
 		t.Errorf("decompressed %d bytes, want %d", len(got), len(strings.Join(chunks, "")))
 	}
 }
+
+// An explicit gzip entry outranks the wildcard wherever each falls in the list
+// (RFC 9110 §12.5.3), so a refusal of gzip holds even beside "*".
+func TestAcceptsGzipLetsAnExplicitEntryOverrideTheWildcard(t *testing.T) {
+	for header, want := range map[string]bool{
+		"gzip":            true,
+		"br, gzip;q=0.5":  true,
+		"*":               true,
+		"*;q=0, gzip":     true,
+		"gzip;q=0, *":     false,
+		"*, gzip;q=0":     false,
+		"GZIP;Q=0, *;q=1": false,
+		"identity":        false,
+		"*;q=0":           false,
+		"":                false,
+	} {
+		if got := acceptsGzip(header); got != want {
+			t.Errorf("acceptsGzip(%q) = %v, want %v", header, got, want)
+		}
+	}
+}

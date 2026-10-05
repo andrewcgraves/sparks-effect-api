@@ -65,21 +65,28 @@ func gzipTag(etag string) string {
 }
 
 func acceptsGzip(header string) bool {
+	// An explicit gzip entry decides; the wildcard speaks only for codings
+	// the client did not name (RFC 9110 §12.5.3).
+	wildcard := false
 	for coding := range strings.SplitSeq(header, ",") {
 		name, params, _ := strings.Cut(coding, ";")
-		name = strings.ToLower(strings.TrimSpace(name))
-		if name != "gzip" && name != "*" {
-			continue
-		}
-		q, found := strings.CutPrefix(strings.TrimSpace(params), "q=")
-		if !found {
-			return true
-		}
-		if v, err := strconv.ParseFloat(q, 64); err == nil && v > 0 {
-			return true
+		switch strings.ToLower(strings.TrimSpace(name)) {
+		case "gzip":
+			return qualityAboveZero(params)
+		case "*":
+			wildcard = qualityAboveZero(params)
 		}
 	}
-	return false
+	return wildcard
+}
+
+func qualityAboveZero(params string) bool {
+	params = strings.TrimSpace(params)
+	if len(params) < 2 || !strings.EqualFold(params[:2], "q=") {
+		return true
+	}
+	v, err := strconv.ParseFloat(params[2:], 64)
+	return err == nil && v > 0
 }
 
 func isJSON(contentType string) bool {
