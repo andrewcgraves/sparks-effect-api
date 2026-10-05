@@ -8,15 +8,16 @@ how to do one, and what happened the last time we did.
 
 Irreplaceable: `users`, `user_services` and their children
 (`user_service_frequency_windows`, `service_handovers`), `user_scenarios` and
-their children (`user_scenario_services`), `service_publications`,
-`account_tokens`, and the user-owned rows in `routes`, `scenarios`,
-`stations` and `services`.
+their links (`user_scenario_services`), `service_publications`,
+`account_tokens`, the authored rows (`owner_id` set) in `routes`,
+`scenarios`, `stations` and `services`, and curated rows that came in
+through the admin routes rather than the embedded seed.
 
 Can be discarded: `sessions`. Everyone signs in again.
 
 Regenerable: `jobs`, `routing_jobs`, `isochrone_cache` and
-`prerendered_isochrones`. Seeded scenarios reconcile from the embedded YAML
-on boot (README → Persistence) and graphs recompile.
+`prerendered_isochrones`. Seeded rows reconcile from the embedded YAML on
+boot (README → Persistence) and compile jobs re-run.
 
 Author-level export to a file (SPA-241) is not a database backup.
 
@@ -27,19 +28,25 @@ Author-level export to a file (SPA-241) is not a database backup.
 | Railway service | `Postgres`, project `sparks-effect` | same |
 | Image | `ghcr.io/railwayapp-templates/postgres-ssl:18.6` | same |
 | Volume | `postgres-volume`, 500 MB, `sfo` | |
-| Volume backup schedule | **none** (checked 2026-10-05) | **none** |
-| Volume backups held | **none** (checked 2026-10-05) | **none** |
+| Volume backup schedule | **none** | **none** |
+| Retention | n/a, nothing is kept | n/a |
+| Volume backups held | **none** | **none** |
+| Where backups live | on the volume, inside Railway | same |
 | Point-in-time recovery | disabled; blocked by the `:18.6` pin | disabled |
 
-Check it again with:
+Checked 2026-10-05 UTC. Check it again with the commands below, and update
+the table whenever it changes. The CLI keeps volume backups and schedules
+under `railway postgres pitr` even though they are not PITR: those commands
+work with PITR disabled.
 
 ```sh
-railway postgres -p 80a8d788-742e-4dc1-9722-dabcc1757bbd -e production -s Postgres pitr schedule list
-railway postgres -p 80a8d788-742e-4dc1-9722-dabcc1757bbd -e production -s Postgres pitr backup list
-railway postgres -p 80a8d788-742e-4dc1-9722-dabcc1757bbd -e production -s Postgres pitr status
+PROJECT=80a8d788-742e-4dc1-9722-dabcc1757bbd
+railway postgres -p $PROJECT -s Postgres -e production pitr schedule list
+railway postgres -p $PROJECT -s Postgres -e production pitr backup list
+railway postgres -p $PROJECT -s Postgres -e production pitr status
 ```
 
-Update the table whenever it changes.
+The commands below assume `PROJECT` is set the same way.
 
 ## The target
 
@@ -59,7 +66,7 @@ Take an on-demand backup before anything risky, such as a migration that
 drops or rewrites a column:
 
 ```sh
-railway postgres -s Postgres -e production pitr backup create --name pre-<what>
+railway postgres -p $PROJECT -s Postgres -e production pitr backup create --name pre-<what>
 ```
 
 Manual backups are limited to 50% of the volume's size. Grow the volume
@@ -73,11 +80,9 @@ tick Daily and Weekly. Do the same in `staging`.
 CLI:
 
 ```sh
-railway postgres -s Postgres -e production pitr schedule set --daily --weekly
-railway postgres -s Postgres -e staging    pitr schedule set --daily --weekly
+railway postgres -p $PROJECT -s Postgres -e production pitr schedule set --daily --weekly
+railway postgres -p $PROJECT -s Postgres -e staging    pitr schedule set --daily --weekly
 ```
-
-Neither redeploys anything.
 
 ### What volume backups do not cover
 
@@ -93,7 +98,8 @@ weeks, into a **new sibling service**, leaving production untouched. It
 needs the image on the major tag first (`postgres-ssl:18`, not `:18.6`),
 which is a production database redeploy. That is a follow-up, not done
 here. A nightly `pg_dump` to storage outside Railway would close the third
-gap.
+gap. It has not been added: daily and weekly volume backups meet the 7-day
+bar on their own, and PITR is the better next step.
 
 ## Who can restore
 
@@ -110,7 +116,7 @@ backup is gone. Stop and think about which backup you want.
 1. Find the backup.
 
    ```sh
-   railway postgres -s Postgres -e production pitr backup list
+   railway postgres -p $PROJECT -s Postgres -e production pitr backup list
    ```
 
 2. Restore it. In the dashboard, open the Backups tab, find the backup by
@@ -123,7 +129,7 @@ backup is gone. Stop and think about which backup you want.
    yet, so prefer the dashboard, where the staged change can be reviewed:
 
    ```sh
-   railway postgres -s Postgres -e production pitr backup restore <backup-id>
+   railway postgres -p $PROJECT -s Postgres -e production pitr backup restore <backup-id>
    ```
 
 3. Restart `sparks-effect-api` so its pool reconnects. Boot runs migrations
@@ -189,6 +195,9 @@ change to the backup setup, and at least once a quarter.
 1. **Volume restore, staging.** Take a staging backup and record the row
    counts. Restore that backup in place on staging. Time from **Deploy** to
    `Postgres` healthy and the staging API answering. Recount.
+   This exercises Railway's restore path and gives its duration, but on
+   staging data. A production volume backup can only be restored onto
+   production, so no drill restores one anywhere else.
 2. **Production data, scratch.** Take a [logical dump](#restore-a-logical-dump)
    of production into a scratch database. Time the dump and the restore
    separately. Compare row counts against production taken at the same
@@ -201,5 +210,5 @@ change to the backup setup, and at least once a quarter.
 | _pending_ | volume restore, staging | | | | | |
 | _pending_ | production dump → scratch | | | | | |
 
-Not yet run. Backups were not enabled on 2026-10-05 (see
+Not yet run. Backups were not enabled on 2026-10-05 UTC (see
 [Where things stand](#where-things-stand)), and the drill waits on that.
