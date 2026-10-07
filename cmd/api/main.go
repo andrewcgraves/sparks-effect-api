@@ -26,10 +26,6 @@ import (
 	"github.com/joho/godotenv"
 )
 
-// release is the commit this binary was built from, stamped in by the
-// Dockerfile's -ldflags. A local `go build` leaves it "dev".
-var release = "dev"
-
 func main() {
 	_ = godotenv.Load()
 	cfg := config.Load()
@@ -50,6 +46,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	// A local `go build` has no BUILD_SHA, so its reports say "dev".
+	release := cfg.BuildSHA
+	if release == "" {
+		release = "dev"
+	}
 	reporter, shutdownReports, err := errorreport.Setup(ctx, cfg.ReportErrors, release, lg)
 	if err != nil {
 		lg.Error("failed to set up error reporting", "error", err)

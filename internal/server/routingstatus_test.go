@@ -29,7 +29,7 @@ func TestOnlyAnAuthenticatedWorkerRequestCountsAsContact(t *testing.T) {
 	watch := handler.NewWorkerWatch(func() time.Time { return now })
 	deps := newStubDeps()
 	deps.queue = handler.RoutingQueue{InFlight: 1, OldestQueuedAt: now.Add(-70 * time.Second)}
-	mux := http.NewServeMux()
+	mux := &routeTable{ServeMux: http.NewServeMux()}
 	registerWorkerRoutes(mux, config.Config{WorkerToken: workerToken}, deps, watch)
 	registerRoutingStatusRoutes(mux, deps, watch)
 	now = now.Add(2 * time.Minute)

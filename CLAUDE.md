@@ -11,6 +11,8 @@ Use the Makefile for all build/test tasks (Go project).
 - `make itest` — the full raced integration suite against throwaway Postgres and
   RabbitMQ containers, which is what CI gates on
 - `make vet` / `make lint` — static checks
+- `make vulncheck` — `govulncheck` over both modules. Needs the network, so it
+  is not in `dev-workflow`; CI runs it
 - `make tidy` — `go mod tidy`
 - `make clean` — remove build artifacts
 

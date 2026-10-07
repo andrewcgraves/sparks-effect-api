@@ -318,6 +318,36 @@ without — no `DATABASE_URL` or no `AMQP_URL` — reads `"disabled"` and does n
 fail the check, so a local run with neither answers 200. Both probes log at
 debug, not info.
 
+## Compression and caching
+
+JSON bodies of 1 KB or more are gzipped for clients that send
+`Accept-Encoding: gzip`, except under `/api/internal/`, which is the worker's
+contract and stays uncompressed. Expect about 3.5–4× on geometry-heavy bodies
+(publications, alignments, prerendered isochrones), since full-precision
+coordinates do not compress much, and 5–8× on the rest.
+
+Every response is `Cache-Control: private, no-store` unless it is one of the
+identity-free public reads, which answer
+`public, max-age=60, stale-while-revalidate=600` with a strong `ETag` and
+honour `If-None-Match` with `304`:
+
+| Read | The tag changes when |
+|------|----------------------|
+| `GET /api/scenarios`, `/api/scenarios/{slug}` and its `routes`, `services`, `stations`, `travel-times` | the build or the boarding-wait policy changes |
+| `GET /api/services/{slug}/publication` | it is republished (new pin, new `published_at`) or its author is renamed |
+| `GET /api/prerendered-isochrones/{id}` | the row's `updated_at` moves, or it becomes outdated |
+| `GET /api/scenarios/{slug}/prerendered-isochrones`, `GET /api/published-services` | the body does (the tag is a hash of it) |
+
+A gzipped body carries its tag with `-gzip` inside the quotes, since a strong
+tag names exact bytes. Either copy revalidates with its own tag.
+
+Every tag also folds in the commit the image was built from (CI passes it as the
+`BUILD_SHA` build argument), so after a deploy that changes a response's shape,
+no client is told by a `304` to keep the old body. A binary built without it, such as `make run`,
+uses a per-process value, so its tags last only until it restarts. The OptionalAuth
+reads (`GET /api/routes/{slug}`, `GET /api/scenarios/{slug}/graph`,
+`GET /api/routing-jobs/{id}`) answer per caller, so they stay private.
+
 ## CORS
 
 Cross-origin requests are allowed from the project's own frontends, always and
@@ -459,7 +489,7 @@ Each record is `ERROR` severity, body `internal error`, and carries:
 The resource carries `service.name=sparks-effect-api`, `service.namespace` from
 `OTEL_RESOURCE_ATTRIBUTES` (so staging and production stay apart, as for
 metrics), and `service.version`, the commit the image was built from. CI passes
-it as the `RELEASE` build arg, and production re-tags the same image, so it
+it as the `BUILD_SHA` build arg, and production re-tags the same image, so it
 keeps the SHA. Nothing from the request itself (headers, body) is attached.
 
 In Grafana they are in Loki:
@@ -779,6 +809,7 @@ CI environments match. Use `make db-up DOCKER=podman` to use podman.
 | `make run`              | Build and run the API locally                        |
 | `make lint`             | Run `golangci-lint`                                  |
 | `make vet`              | Run `go vet`                                         |
+| `make vulncheck`        | Run `govulncheck` over both modules (needs network)  |
 | `make check-contract`   | Diff the golden fixtures against the worker           |
 | `make dev-workflow`     | Run test, vet, lint, and build — full verification   |
 | `make tidy`             | Sync `go.mod`/`go.sum` with imports                  |

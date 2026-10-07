@@ -45,6 +45,9 @@ jobs:
         run: golangci-lint run ./...
         working-directory: contract
 
+      - name: Vulnerability scan
+        run: make vulncheck
+
   # The golden fixtures are duplicated in the routing-worker repo. Drift is a
   # contract break, not a test failure — keep this job separate so a red
   # light reads as "the contract moved" rather than "a test broke".
@@ -131,7 +134,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            RELEASE=${{ github.sha }}
+            BUILD_SHA=${{ github.sha }}
 
   # Staging is whatever `main` last published. Linear's staging pipeline is a
   # separate stream from production because the two environments can (and do)
