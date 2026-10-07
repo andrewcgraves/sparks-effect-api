@@ -20,6 +20,8 @@ const (
 	RuleMinLength    = "min_length"
 	RuleMatchesEmail = "matches_email"
 	RuleCommon       = "common"
+	RuleOrder        = "order"
+	RuleOverlap      = "overlap"
 )
 
 type ValidationFault struct {

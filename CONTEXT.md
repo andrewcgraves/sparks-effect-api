@@ -153,7 +153,10 @@ everyday one.
 - **Headway** — seconds between consecutive departures. `half_headway` is
   `min(headway) / 2` across a service's windows.
 - **Frequency window** — a `start_time`/`end_time` pair with a headway. A
-  service carries a list of them.
+  service carries a list of them. Times are `HH:MM` from `00:00` to `23:59`,
+  `end_time` is after `start_time` (no window crosses midnight), and windows
+  are half-open, so one ending at `10:00` may meet one starting at `10:00` but
+  no two may overlap.
 - **Run time** — time in motion, dwell excluded. The intended semantics of a
   `segment_run_times.yaml` segment (`run_seconds`, and `reverse_run_seconds`
   when present), and what `SegmentTime.RunSeconds` holds.

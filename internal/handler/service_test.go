@@ -1014,6 +1014,51 @@ func decodeValidationFault(t *testing.T, rec *httptest.ResponseRecorder) validat
 	return body
 }
 
+func TestBadFrequencyWindowsAreTypedFaultsOnCreateAndUpdate(t *testing.T) {
+	windowBody := func(windows string) string {
+		return `{"route_slug":"diagonal","name":"X",
+			"vehicle":{"max_speed_kmh":100,"acceleration_ms2":1,"deceleration_ms2":1},
+			"stops":[{"name":"A","lat":1,"lng":1},{"name":"B","lat":2,"lng":2}],
+			"frequency_windows":` + windows + `}`
+	}
+	tests := []struct {
+		name, windows, field, rule string
+		index                      int
+	}{
+		{"a malformed time", `[{"start_time":"banana","end_time":"10:00","headway_s":900}]`,
+			"frequency_windows.start_time", "format", 0},
+		{"an end before the start", `[{"start_time":"22:00","end_time":"06:00","headway_s":900}]`,
+			"frequency_windows.end_time", "order", 0},
+		{"overlapping windows", `[{"start_time":"06:00","end_time":"22:00","headway_s":1800},
+			{"start_time":"07:00","end_time":"09:00","headway_s":300}]`,
+			"frequency_windows", "overlap", 1},
+	}
+	for _, tc := range tests {
+		for _, method := range []string{http.MethodPost, http.MethodPut} {
+			t.Run(method+" "+tc.name, func(t *testing.T) {
+				store := newFakeServiceStore()
+				target := "/api/services"
+				if method == http.MethodPut {
+					seedService(store, "svc-1", "seeded", svcOwner.ID)
+					target = "/api/services/seeded"
+				}
+				rec := serveAs(t, store, svcOwner, method, target, windowBody(tc.windows))
+				got := decodeValidationFault(t, rec)
+				if got.Code != handler.ValidationErrorCode {
+					t.Errorf("code = %q, want %q", got.Code, handler.ValidationErrorCode)
+				}
+				if len(got.Detail.Faults) != 1 {
+					t.Fatalf("got %d faults, want 1: %+v", len(got.Detail.Faults), got.Detail.Faults)
+				}
+				f := got.Detail.Faults[0]
+				if f.Field != tc.field || f.Rule != tc.rule || f.Index == nil || *f.Index != tc.index {
+					t.Errorf("fault = %+v, want %s/%s at index %d", f, tc.field, tc.rule, tc.index)
+				}
+			})
+		}
+	}
+}
+
 func TestCreateRequiresARouteSlug(t *testing.T) {
 	body := `{"name":"No route","vehicle":{"max_speed_kmh":100,"acceleration_ms2":1,"deceleration_ms2":1},
 		"stops":[{"name":"A","lat":1,"lng":1},{"name":"B","lat":2,"lng":2}]}`

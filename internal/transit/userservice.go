@@ -123,21 +123,81 @@ func (s UserService) Validate() error {
 		faults = append(faults, fault.Whole("vehicle.dwell_s", fault.RuleNonNegative,
 			"vehicle.dwell_s must not be negative"))
 	}
-	for i, fw := range s.FrequencyWindows {
-		if strings.TrimSpace(fw.StartTime) == "" {
-			faults = append(faults, fault.At("frequency_windows.start_time", i, fault.RuleRequired,
-				fmt.Sprintf("frequency window %d: start_time is required", i)))
-		}
-		if strings.TrimSpace(fw.EndTime) == "" {
-			faults = append(faults, fault.At("frequency_windows.end_time", i, fault.RuleRequired,
-				fmt.Sprintf("frequency window %d: end_time is required", i)))
-		}
+	faults = append(faults, validateFrequencyWindows(s.FrequencyWindows)...)
+	return faults.Err()
+}
+
+type clockSpan struct {
+	index      int
+	start, end int
+}
+
+func validateFrequencyWindows(windows []FrequencyWindow) fault.ValidationFaults {
+	var faults fault.ValidationFaults
+	var spans []clockSpan
+	for i, fw := range windows {
+		start, startOK := clockTime("start_time", i, fw.StartTime, &faults)
+		end, endOK := clockTime("end_time", i, fw.EndTime, &faults)
 		if fw.HeadwayS <= 0 {
 			faults = append(faults, fault.At("frequency_windows.headway_s", i, fault.RulePositive,
 				fmt.Sprintf("frequency window %d: headway_s must be positive", i)))
 		}
+		if !startOK || !endOK {
+			continue
+		}
+		// Windows crossing midnight are not supported: a late-night service
+		// is authored as two windows, one each side of 00:00.
+		if end <= start {
+			faults = append(faults, fault.At("frequency_windows.end_time", i, fault.RuleOrder,
+				fmt.Sprintf("frequency window %d: end_time must be after start_time", i)))
+			continue
+		}
+		// Spans are half-open, so a window ending at 10:00 and one starting
+		// at 10:00 meet without overlapping. The fault goes on the later
+		// window in the list, naming the first earlier one it collides with.
+		for _, prev := range spans {
+			if start < prev.end && prev.start < end {
+				faults = append(faults, fault.At("frequency_windows", i, fault.RuleOverlap,
+					fmt.Sprintf("frequency window %d: overlaps frequency window %d", i, prev.index)))
+				break
+			}
+		}
+		spans = append(spans, clockSpan{index: i, start: start, end: end})
 	}
-	return faults.Err()
+	return faults
+}
+
+func clockTime(name string, i int, value string, faults *fault.ValidationFaults) (int, bool) {
+	field := "frequency_windows." + name
+	if strings.TrimSpace(value) == "" {
+		*faults = append(*faults, fault.At(field, i, fault.RuleRequired,
+			fmt.Sprintf("frequency window %d: %s is required", i, name)))
+		return 0, false
+	}
+	minutes, ok := parseClock(value)
+	if !ok {
+		*faults = append(*faults, fault.At(field, i, fault.RuleFormat,
+			fmt.Sprintf("frequency window %d: %s must be HH:MM between 00:00 and 23:59", i, name)))
+	}
+	return minutes, ok
+}
+
+func parseClock(value string) (int, bool) {
+	if len(value) != 5 || value[2] != ':' {
+		return 0, false
+	}
+	digits := [4]byte{value[0], value[1], value[3], value[4]}
+	for _, d := range digits {
+		if d < '0' || d > '9' {
+			return 0, false
+		}
+	}
+	hour := int(digits[0]-'0')*10 + int(digits[1]-'0')
+	minute := int(digits[2]-'0')*10 + int(digits[3]-'0')
+	if hour > 23 || minute > 59 {
+		return 0, false
+	}
+	return hour*60 + minute, true
 }
 
 func (s *UserService) NormalizeStops() {
