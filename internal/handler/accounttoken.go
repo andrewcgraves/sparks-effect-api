@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -79,8 +78,7 @@ func CreateInvite(store AccountTokenStore, websiteURL string) http.HandlerFunc {
 		// The same up-front 409 as CreateUser; the UNIQUE constraint on
 		// users.email still decides a concurrent race.
 		if _, exists, err := store.GetUserByEmail(r.Context(), email); err != nil {
-			slog.ErrorContext(r.Context(), "handler: checking existing user failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
+			writeInternalError(r.Context(), w, "checking existing user", err)
 			return
 		} else if exists {
 			writeError(w, http.StatusConflict, "an account with that email already exists")
@@ -89,14 +87,12 @@ func CreateInvite(store AccountTokenStore, websiteURL string) http.HandlerFunc {
 
 		id, err := ids.NewUUID()
 		if err != nil {
-			slog.ErrorContext(r.Context(), "handler: generating user id failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
+			writeInternalError(r.Context(), w, "generating user id", err)
 			return
 		}
 		token, tokenHash, err := auth.NewToken()
 		if err != nil {
-			slog.ErrorContext(r.Context(), "handler: minting invite token failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
+			writeInternalError(r.Context(), w, "minting invite token", err)
 			return
 		}
 
@@ -107,8 +103,7 @@ func CreateInvite(store AccountTokenStore, websiteURL string) http.HandlerFunc {
 			Purpose:   account.TokenPurposeInvite,
 			ExpiresAt: time.Now().Add(inviteTTL),
 		}); err != nil {
-			slog.ErrorContext(r.Context(), "handler: creating invite failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
+			writeInternalError(r.Context(), w, "creating invite", err)
 			return
 		}
 
@@ -120,8 +115,7 @@ func CreateResetLink(store AccountTokenStore, websiteURL string) http.HandlerFun
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, found, err := store.GetUserByID(r.Context(), r.PathValue("id"))
 		if err != nil {
-			slog.ErrorContext(r.Context(), "handler: looking up user for reset link failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
+			writeInternalError(r.Context(), w, "looking up user for reset link", err)
 			return
 		}
 		if !found {
@@ -131,8 +125,7 @@ func CreateResetLink(store AccountTokenStore, websiteURL string) http.HandlerFun
 
 		token, tokenHash, err := auth.NewToken()
 		if err != nil {
-			slog.ErrorContext(r.Context(), "handler: minting reset token failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
+			writeInternalError(r.Context(), w, "minting reset token", err)
 			return
 		}
 		// Issued for a disabled account too: the link does nothing until the
@@ -143,8 +136,7 @@ func CreateResetLink(store AccountTokenStore, websiteURL string) http.HandlerFun
 			Purpose:   account.TokenPurposeReset,
 			ExpiresAt: time.Now().Add(resetTTL),
 		}); err != nil {
-			slog.ErrorContext(r.Context(), "handler: creating reset token failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
+			writeInternalError(r.Context(), w, "creating reset token", err)
 			return
 		}
 
@@ -156,8 +148,7 @@ func AccountToken(store AccountTokenStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tok, user, found, err := store.GetAccountToken(r.Context(), auth.HashToken(r.PathValue("token")))
 		if err != nil {
-			slog.ErrorContext(r.Context(), "handler: reading account token failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
+			writeInternalError(r.Context(), w, "reading account token", err)
 			return
 		}
 		if !found {
@@ -184,8 +175,7 @@ func RedeemAccountToken(store AccountTokenStore, sessionTTL time.Duration, hashe
 		// a token used or disabled in between still answers 404.
 		_, user, found, err := store.GetAccountToken(r.Context(), tokenHash)
 		if err != nil {
-			slog.ErrorContext(r.Context(), "handler: reading account token failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
+			writeInternalError(r.Context(), w, "reading account token", err)
 			return
 		}
 		if !found {
@@ -199,14 +189,12 @@ func RedeemAccountToken(store AccountTokenStore, sessionTTL time.Duration, hashe
 
 		hash, err := hasher.Hash(req.Password)
 		if err != nil {
-			slog.ErrorContext(r.Context(), "handler: hashing password failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
+			writeInternalError(r.Context(), w, "hashing password", err)
 			return
 		}
 		session, sessionHash, err := auth.NewToken()
 		if err != nil {
-			slog.ErrorContext(r.Context(), "handler: minting session token failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
+			writeInternalError(r.Context(), w, "minting session token", err)
 			return
 		}
 
@@ -214,8 +202,7 @@ func RedeemAccountToken(store AccountTokenStore, sessionTTL time.Duration, hashe
 		user, redeemed, err := store.RedeemAccountToken(r.Context(), tokenHash, hash,
 			account.Session{TokenHash: sessionHash, ExpiresAt: expiresAt})
 		if err != nil {
-			slog.ErrorContext(r.Context(), "handler: redeeming account token failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
+			writeInternalError(r.Context(), w, "redeeming account token", err)
 			return
 		}
 		if !redeemed {

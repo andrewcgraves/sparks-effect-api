@@ -119,7 +119,7 @@ func TestEveryRouteButThePublicReadsIsPrivate(t *testing.T) {
 	}
 	cfg := config.Config{Port: "8080", SessionTTL: time.Hour, WorkerToken: workerToken}
 	deps := newStubDeps()
-	h, patterns := routes(cfg, store, deps, &routing.FakePublisher{}, compile.NewRunner(deps, cfg.BoardingWait, nil), logger.Discard(), nil)
+	h, patterns := routes(cfg, store, deps, &routing.FakePublisher{}, compile.NewRunner(deps, cfg.BoardingWait, nil), logger.Discard(), nil, nil)
 
 	if len(patterns) < 50 {
 		t.Fatalf("walked %d patterns; the table was not recorded", len(patterns))

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 	"strings"
 
@@ -60,8 +59,7 @@ func CreateUser(store UserStore, hasher auth.Hasher) http.HandlerFunc {
 		// users.email is still the authority under a concurrent create; this
 		// only spares the common case an opaque database error.
 		if _, exists, err := store.GetUserByEmail(r.Context(), email); err != nil {
-			slog.ErrorContext(r.Context(), "handler: checking existing user failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
+			writeInternalError(r.Context(), w, "checking existing user", err)
 			return
 		} else if exists {
 			writeError(w, http.StatusConflict, "an account with that email already exists")
@@ -70,15 +68,13 @@ func CreateUser(store UserStore, hasher auth.Hasher) http.HandlerFunc {
 
 		hash, err := hasher.Hash(req.Password)
 		if err != nil {
-			slog.ErrorContext(r.Context(), "handler: hashing password failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
+			writeInternalError(r.Context(), w, "hashing password", err)
 			return
 		}
 
 		id, err := ids.NewUUID()
 		if err != nil {
-			slog.ErrorContext(r.Context(), "handler: generating user id failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
+			writeInternalError(r.Context(), w, "generating user id", err)
 			return
 		}
 
@@ -89,8 +85,7 @@ func CreateUser(store UserStore, hasher auth.Hasher) http.HandlerFunc {
 			IsAdmin: req.IsAdmin,
 		}
 		if err := store.CreateUser(r.Context(), user, hash); err != nil {
-			slog.ErrorContext(r.Context(), "handler: creating user failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
+			writeInternalError(r.Context(), w, "creating user", err)
 			return
 		}
 

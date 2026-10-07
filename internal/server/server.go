@@ -13,6 +13,7 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/compile"
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
+	"github.com/andrewcgraves/sparks-effect-api/internal/errorreport"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/httpcache"
 	"github.com/andrewcgraves/sparks-effect-api/internal/metrics"
@@ -61,8 +62,8 @@ var (
 	_ handler.Pinger = (*routing.AMQPPublisher)(nil)
 )
 
-func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routing.Publisher, compiles *compile.Runner, lg *slog.Logger, m *metrics.Metrics) *http.Server {
-	h, _ := routes(cfg, store, deps, publisher, compiles, lg, m)
+func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routing.Publisher, compiles *compile.Runner, lg *slog.Logger, m *metrics.Metrics, rep *errorreport.Reporter) *http.Server {
+	h, _ := routes(cfg, store, deps, publisher, compiles, lg, m, rep)
 	return &http.Server{
 		Addr:              ":" + cfg.Port,
 		Handler:           h,
@@ -99,7 +100,7 @@ func (t *routeTable) HandleFunc(pattern string, h func(http.ResponseWriter, *htt
 }
 
 func routes(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routing.Publisher, compiles *compile.Runner,
-	lg *slog.Logger, m *metrics.Metrics) (http.Handler, []string) {
+	lg *slog.Logger, m *metrics.Metrics, rep *errorreport.Reporter) (http.Handler, []string) {
 	mux := &routeTable{ServeMux: http.NewServeMux()}
 
 	mux.HandleFunc("GET /healthz", handler.Health)
@@ -170,7 +171,10 @@ func routes(cfg config.Config, store *transit.Store, deps AuthDeps, publisher ro
 	// traceid.Middleware runs outermost: logRequests reads the trace id it
 	// attaches, and every handler downstream that enqueues routing work
 	// forwards the same id to the worker (see handler.enqueueIsochrone).
-	return traceid.Middleware(logRequests(lg, m, compressJSON(h))), mux.patterns
+	// The reporter swaps the request's context, so it goes outside
+	// logRequests, which reads r.Pattern back off the request it passed
+	// on; Recover goes inside it, so a panic's 500 is logged and counted.
+	return traceid.Middleware(rep.Middleware(logRequests(lg, m, errorreport.Recover(compressJSON(h))))), mux.patterns
 }
 
 func registerRouteRoutes(mux *routeTable, deps AuthDeps, limitSnap func(http.Handler) http.Handler) {

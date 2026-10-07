@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
+	"github.com/andrewcgraves/sparks-effect-api/internal/errorreport"
 	"github.com/andrewcgraves/sparks-effect-api/internal/ids"
 	"github.com/andrewcgraves/sparks-effect-api/internal/routing"
 	"github.com/andrewcgraves/sparks-effect-api/internal/traceid"
@@ -73,6 +74,8 @@ func enqueueIsochrone(w http.ResponseWriter, r *http.Request, store RoutingStore
 	trace, _ := traceid.FromContext(r.Context())
 	if err := publisher.Publish(r.Context(), routing.MessageFor(job, graph, trace)); err != nil {
 		failUnpublishedJob(store, job.ID, err)
+		// A broker the API cannot reach is ours to fix, not the caller's.
+		errorreport.Capture(r.Context(), "publishing routing job", err)
 		writeErrorCode(w, http.StatusBadGateway, PublishFailedErrorCode,
 			"could not enqueue the isochrone; the routing job was marked failed")
 		return

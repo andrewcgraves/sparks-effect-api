@@ -15,6 +15,7 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/compile"
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
+	"github.com/andrewcgraves/sparks-effect-api/internal/errorreport"
 	"github.com/andrewcgraves/sparks-effect-api/internal/ids"
 	internlog "github.com/andrewcgraves/sparks-effect-api/internal/logger"
 	"github.com/andrewcgraves/sparks-effect-api/internal/metrics"
@@ -42,6 +43,17 @@ func main() {
 	m, shutdownMetrics, err := metrics.Setup(ctx, cfg.ExportMetrics, lg)
 	if err != nil {
 		lg.Error("failed to set up metrics export", "error", err)
+		os.Exit(1)
+	}
+
+	// A local `go build` has no BUILD_SHA, so its reports say "dev".
+	release := cfg.BuildSHA
+	if release == "" {
+		release = "dev"
+	}
+	reporter, shutdownReports, err := errorreport.Setup(ctx, cfg.ReportErrors, release, lg)
+	if err != nil {
+		lg.Error("failed to set up error reporting", "error", err)
 		os.Exit(1)
 	}
 
@@ -87,7 +99,7 @@ func main() {
 	}
 
 	compiles := compile.NewRunner(deps, cfg.BoardingWait, m)
-	srv := server.New(cfg, store, deps, publisher, compiles, lg, m)
+	srv := server.New(cfg, store, deps, publisher, compiles, lg, m, reporter)
 
 	go func() {
 		lg.Info("listening", "addr", srv.Addr)
@@ -120,6 +132,9 @@ func main() {
 	// push rather than lost with the process.
 	if err := shutdownMetrics(shutdownCtx); err != nil {
 		lg.Error("could not flush metrics", "error", err)
+	}
+	if err := shutdownReports(shutdownCtx); err != nil {
+		lg.Error("could not flush error reports", "error", err)
 	}
 }
 

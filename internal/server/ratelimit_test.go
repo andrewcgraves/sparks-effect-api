@@ -32,7 +32,7 @@ func newRateLimitedServer(t *testing.T, deps AuthDeps, cfg config.Config) http.H
 	if cfg.SessionTTL == 0 {
 		cfg.SessionTTL = time.Hour
 	}
-	return New(cfg, store, deps, &routing.FakePublisher{}, compile.NewRunner(deps, cfg.BoardingWait, nil), logger.Discard(), nil).Handler
+	return New(cfg, store, deps, &routing.FakePublisher{}, compile.NewRunner(deps, cfg.BoardingWait, nil), logger.Discard(), nil, nil).Handler
 }
 
 func assertRateLimited(t *testing.T, rec *httptest.ResponseRecorder) {

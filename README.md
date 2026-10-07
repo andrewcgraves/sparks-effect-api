@@ -467,6 +467,41 @@ With no endpoint set, nothing is exported and boot logs one `info` line saying
 so. That is the local default. An allowed-origin CORS preflight is answered
 before the mux, so it counts under `route="unmatched"` alongside real 404s.
 
+## Error reports
+
+Every internal error (each 500 answered through `writeInternalError`, a session
+lookup the auth middleware could not complete, a routing job the broker would
+not take, and any handler panic) is sent to Grafana Cloud as an OTLP log record
+(SPA-380), over the same gateway and with the same `OTEL_EXPORTER_OTLP_*`
+credentials as the metrics above. 4xx answers are the caller's mistake and are
+never reported. A panic is answered with a 500 rather than a dropped connection.
+
+Each record is `ERROR` severity, body `internal error`, and carries:
+
+| Attribute | Value |
+|---|---|
+| `trace_id` | the request's `X-Trace-Id`, so it links to the access log and the worker's logs |
+| `route` | the mux pattern matched, `GET /api/auth/me` |
+| `op` | what the handler was doing |
+| `exception.message` | the error text, with any `Bearer <token>` redacted |
+| `exception.type`, `exception.stacktrace` | `panic` and its stack, for a panic only |
+
+The resource carries `service.name=sparks-effect-api`, `service.namespace` from
+`OTEL_RESOURCE_ATTRIBUTES` (so staging and production stay apart, as for
+metrics), and `service.version`, the commit the image was built from. CI passes
+it as the `BUILD_SHA` build arg, and production re-tags the same image, so it
+keeps the SHA. Nothing from the request itself (headers, body) is attached.
+
+In Grafana they are in Loki:
+
+```logql
+{service_name="sparks-effect-api", service_namespace="production"} | severity_text="ERROR"
+```
+
+and the alert is a Loki rule on `count_over_time` of that query over 5m being
+above 0. With no endpoint set, nothing is sent, and boot logs one `info` line
+saying so.
+
 ## Persistence
 
 Domain data (scenarios, routes, stations, vehicle types, services, jobs, users)
