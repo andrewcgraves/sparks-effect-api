@@ -127,22 +127,28 @@ func (s UserService) Validate() error {
 	return faults.Err()
 }
 
-type clockSpan struct {
+type windowSpan struct {
 	index      int
 	start, end int
 }
 
 func validateFrequencyWindows(windows []FrequencyWindow) fault.ValidationFaults {
 	var faults fault.ValidationFaults
-	var spans []clockSpan
+	var spans []windowSpan
 	for i, fw := range windows {
-		start, startOK := clockTime("start_time", i, fw.StartTime, &faults)
-		end, endOK := clockTime("end_time", i, fw.EndTime, &faults)
+		start, startFault := parseWindowTime("start_time", i, fw.StartTime)
+		if startFault != nil {
+			faults = append(faults, *startFault)
+		}
+		end, endFault := parseWindowTime("end_time", i, fw.EndTime)
+		if endFault != nil {
+			faults = append(faults, *endFault)
+		}
 		if fw.HeadwayS <= 0 {
 			faults = append(faults, fault.At("frequency_windows.headway_s", i, fault.RulePositive,
 				fmt.Sprintf("frequency window %d: headway_s must be positive", i)))
 		}
-		if !startOK || !endOK {
+		if startFault != nil || endFault != nil {
 			continue
 		}
 		// Windows crossing midnight are not supported: a late-night service
@@ -162,27 +168,27 @@ func validateFrequencyWindows(windows []FrequencyWindow) fault.ValidationFaults 
 				break
 			}
 		}
-		spans = append(spans, clockSpan{index: i, start: start, end: end})
+		spans = append(spans, windowSpan{index: i, start: start, end: end})
 	}
 	return faults
 }
 
-func clockTime(name string, i int, value string, faults *fault.ValidationFaults) (int, bool) {
+func parseWindowTime(name string, i int, value string) (int, *fault.ValidationFault) {
 	field := "frequency_windows." + name
 	if strings.TrimSpace(value) == "" {
-		*faults = append(*faults, fault.At(field, i, fault.RuleRequired,
-			fmt.Sprintf("frequency window %d: %s is required", i, name)))
-		return 0, false
+		f := fault.At(field, i, fault.RuleRequired, fmt.Sprintf("frequency window %d: %s is required", i, name))
+		return 0, &f
 	}
-	minutes, ok := parseClock(value)
+	minutes, ok := minutesOfDay(value)
 	if !ok {
-		*faults = append(*faults, fault.At(field, i, fault.RuleFormat,
-			fmt.Sprintf("frequency window %d: %s must be HH:MM between 00:00 and 23:59", i, name)))
+		f := fault.At(field, i, fault.RuleFormat,
+			fmt.Sprintf("frequency window %d: %s must be HH:MM between 00:00 and 23:59", i, name))
+		return 0, &f
 	}
-	return minutes, ok
+	return minutes, nil
 }
 
-func parseClock(value string) (int, bool) {
+func minutesOfDay(value string) (int, bool) {
 	if len(value) != 5 || value[2] != ':' {
 		return 0, false
 	}
