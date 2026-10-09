@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"slices"
 	"sync"
+	"unicode/utf8"
 )
 
 type SeedSink interface {
@@ -103,6 +104,9 @@ func loadEmbeddedScenario(slug string) (embeddedScenario, error) {
 	if err := unmarshalFile(dataFS, base+"/scenario.yaml", &seed.scenario); err != nil {
 		return embeddedScenario{}, err
 	}
+	if err := validateScenarioSeed(seed.scenario); err != nil {
+		return embeddedScenario{}, err
+	}
 	if err := unmarshalFile(dataFS, base+"/vehicle_types.yaml", &seed.vehicleTypes); err != nil {
 		return embeddedScenario{}, err
 	}
@@ -160,6 +164,16 @@ func writeEmbeddedScenario(ctx context.Context, sink SeedSink, seed embeddedScen
 	}
 	if err := sink.UpsertTravelTimes(ctx, seed.travelTimes); err != nil {
 		return fmt.Errorf("upserting travel times: %w", err)
+	}
+	return nil
+}
+
+func validateScenarioSeed(sc Scenario) error {
+	// A curated scenario's subtext shares the bound UserService.Validate()
+	// holds an authored service's to. Seed YAML has no client to read a fault,
+	// so breaking it fails the load, which fails boot and the test suite.
+	if utf8.RuneCountInString(sc.Subtext) > MaxSubtextChars {
+		return fmt.Errorf("scenario %q: subtext must be at most %d characters", sc.Slug, MaxSubtextChars)
 	}
 	return nil
 }
