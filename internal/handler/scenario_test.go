@@ -476,3 +476,49 @@ func TestScenarioTravelTimes_notFound(t *testing.T) {
 		t.Errorf("error: want 'scenario not found', got %q", body["error"])
 	}
 }
+
+const caHSRSubtext = "Electrified · High-speed rail · Greenfield"
+
+func TestScenarioBySlug_carriesItsSubtext(t *testing.T) {
+	store := mustNewStore(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/scenarios/ca-hsr", nil)
+	req.SetPathValue("slug", "ca-hsr")
+	rec := httptest.NewRecorder()
+
+	ScenarioBySlug(store)(rec, req)
+
+	var body struct {
+		Subtext string `json:"subtext"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body.Subtext != caHSRSubtext {
+		t.Errorf("subtext = %q, want %q", body.Subtext, caHSRSubtext)
+	}
+}
+
+func TestScenarios_listCarriesSubtext(t *testing.T) {
+	store := mustNewStore(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/scenarios", nil)
+	rec := httptest.NewRecorder()
+
+	Scenarios(store)(rec, req)
+
+	var body []struct {
+		Slug    string `json:"slug"`
+		Subtext string `json:"subtext"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for _, sc := range body {
+		if sc.Slug == "ca-hsr" {
+			if sc.Subtext != caHSRSubtext {
+				t.Errorf("subtext = %q, want %q", sc.Subtext, caHSRSubtext)
+			}
+			return
+		}
+	}
+	t.Error("ca-hsr scenario not in list")
+}

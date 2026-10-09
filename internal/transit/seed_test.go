@@ -282,6 +282,26 @@ func TestSeedFromEmbedded_createError(t *testing.T) {
 	}
 }
 
+func TestValidateScenarioSeed(t *testing.T) {
+	tests := []struct {
+		name    string
+		subtext string
+		wantErr bool
+	}{
+		{name: "no subtext", subtext: "", wantErr: false},
+		{name: "subtext at the bound", subtext: strings.Repeat("·", MaxSubtextChars), wantErr: false},
+		{name: "subtext over the bound", subtext: strings.Repeat("a", MaxSubtextChars+1), wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateScenarioSeed(Scenario{Slug: "s", Subtext: tc.subtext})
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestValidateSegmentRoutes(t *testing.T) {
 	routes := []Route{{ID: "route-1"}, {ID: "route-2"}}
 

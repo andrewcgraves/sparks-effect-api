@@ -10,6 +10,7 @@ type scenarioListItem struct {
 	ID          string `json:"id"`
 	Slug        string `json:"slug"`
 	Name        string `json:"name"`
+	Subtext     string `json:"subtext"`
 	Description string `json:"description"`
 }
 
@@ -35,6 +36,7 @@ type scenarioDetail struct {
 	ID          string            `json:"id"`
 	Slug        string            `json:"slug"`
 	Name        string            `json:"name"`
+	Subtext     string            `json:"subtext"`
 	Description string            `json:"description"`
 	Routes      []transit.Route   `json:"routes"`
 	Stations    []transit.Station `json:"stations"`
@@ -50,6 +52,7 @@ func Scenarios(store *transit.Store) http.HandlerFunc {
 				ID:          sc.ID,
 				Slug:        sc.Slug,
 				Name:        sc.Name,
+				Subtext:     sc.Subtext,
 				Description: sc.Description,
 			})
 		}
@@ -94,6 +97,7 @@ func ScenarioBySlug(store *transit.Store) http.HandlerFunc {
 			ID:          sc.ID,
 			Slug:        sc.Slug,
 			Name:        sc.Name,
+			Subtext:     sc.Subtext,
 			Description: sc.Description,
 			Routes:      routes,
 			Stations:    stations,

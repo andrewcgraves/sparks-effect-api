@@ -64,6 +64,44 @@ func TestReconcileSeedRestoresADriftedSeededStation(t *testing.T) {
 	}
 }
 
+func TestReconcileSeedFillsAnExistingScenarioSubtext(t *testing.T) {
+	repo, _ := freshRepo(t)
+	ctx := context.Background()
+
+	if _, err := transit.SeedIfEmpty(ctx, repo); err != nil {
+		t.Fatalf("SeedIfEmpty: %v", err)
+	}
+	sc, ok, err := repo.GetScenarioBySlug(ctx, "ca-hsr")
+	if err != nil || !ok {
+		t.Fatalf("GetScenarioBySlug: ok=%v err=%v", ok, err)
+	}
+	const want = "Electrified · High-speed rail · Greenfield"
+	if sc.Subtext != want {
+		t.Fatalf("seeded subtext = %q, want %q", sc.Subtext, want)
+	}
+
+	// A database seeded before the column existed holds the column default.
+	sc.Subtext = ""
+	if err := repo.UpdateScenario(ctx, sc); err != nil {
+		t.Fatalf("UpdateScenario: %v", err)
+	}
+
+	written, err := transit.ReconcileSeed(ctx, repo)
+	if err != nil {
+		t.Fatalf("ReconcileSeed: %v", err)
+	}
+	if written != 1 {
+		t.Fatalf("ReconcileSeed wrote %d rows, want 1 (the scenario)", written)
+	}
+	got, ok, err := repo.GetScenarioBySlug(ctx, "ca-hsr")
+	if err != nil || !ok {
+		t.Fatalf("GetScenarioBySlug after reconcile: ok=%v err=%v", ok, err)
+	}
+	if got.Subtext != want {
+		t.Errorf("subtext after reconcile = %q, want %q", got.Subtext, want)
+	}
+}
+
 func TestReconcileSeedDoesNotClobberAnAuthoredScenario(t *testing.T) {
 	repo, _ := freshRepo(t)
 	ctx := context.Background()

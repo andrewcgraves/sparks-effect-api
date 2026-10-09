@@ -78,9 +78,9 @@ func Migrate(ctx context.Context, databaseURL string) error {
 
 func (r *Repo) CreateScenario(ctx context.Context, sc transit.Scenario) error {
 	_, err := r.pool.Exec(ctx,
-		`INSERT INTO scenarios (id, slug, name, description, owner_id)
-		 VALUES ($1, $2, $3, $4, $5)`,
-		sc.ID, sc.Slug, sc.Name, sc.Description, sc.OwnerID)
+		`INSERT INTO scenarios (id, slug, name, subtext, description, owner_id)
+		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		sc.ID, sc.Slug, sc.Name, sc.Subtext, sc.Description, sc.OwnerID)
 	return wrap("CreateScenario", err)
 }
 
@@ -88,7 +88,7 @@ func (r *Repo) GetScenarioByID(ctx context.Context, id string) (transit.Scenario
 	var sc transit.Scenario
 	err := r.pool.QueryRow(ctx,
 		`SELECT `+scenarioColumns+` FROM scenarios WHERE id = $1`,
-		id).Scan(&sc.ID, &sc.Slug, &sc.Name, &sc.Description, &sc.OwnerID)
+		id).Scan(&sc.ID, &sc.Slug, &sc.Name, &sc.Subtext, &sc.Description, &sc.OwnerID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return transit.Scenario{}, false, nil
 	}
@@ -102,7 +102,7 @@ func (r *Repo) GetScenarioBySlug(ctx context.Context, slug string) (transit.Scen
 	var sc transit.Scenario
 	err := r.pool.QueryRow(ctx,
 		`SELECT `+scenarioColumns+` FROM scenarios WHERE slug = $1`,
-		slug).Scan(&sc.ID, &sc.Slug, &sc.Name, &sc.Description, &sc.OwnerID)
+		slug).Scan(&sc.ID, &sc.Slug, &sc.Name, &sc.Subtext, &sc.Description, &sc.OwnerID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return transit.Scenario{}, false, nil
 	}
@@ -130,7 +130,7 @@ func (r *Repo) ListScenariosByOwner(ctx context.Context, ownerID string) ([]tran
 	return scanScenarios(rows, "ListScenariosByOwner")
 }
 
-const scenarioColumns = `id, slug, name, description, owner_id`
+const scenarioColumns = `id, slug, name, subtext, description, owner_id`
 
 func scanScenarios(rows pgx.Rows, op string) ([]transit.Scenario, error) {
 	defer rows.Close()
@@ -138,7 +138,7 @@ func scanScenarios(rows pgx.Rows, op string) ([]transit.Scenario, error) {
 	var out []transit.Scenario
 	for rows.Next() {
 		var sc transit.Scenario
-		if err := rows.Scan(&sc.ID, &sc.Slug, &sc.Name, &sc.Description, &sc.OwnerID); err != nil {
+		if err := rows.Scan(&sc.ID, &sc.Slug, &sc.Name, &sc.Subtext, &sc.Description, &sc.OwnerID); err != nil {
 			return nil, wrap(op+" scan", err)
 		}
 		out = append(out, sc)

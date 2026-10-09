@@ -94,6 +94,30 @@ func TestReconcileSeed_restoresADriftedStation(t *testing.T) {
 	}
 }
 
+func TestReconcileSeed_restoresADriftedScenarioSubtext(t *testing.T) {
+	sink := &fakeSeedSink{}
+	if _, err := ReconcileSeed(context.Background(), sink); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	want := sink.scenarios[0].Subtext
+	if want == "" {
+		t.Fatal("seeded ca-hsr scenario has no subtext")
+	}
+	// A row written before the column existed reads back with its default.
+	sink.scenarios[0].Subtext = ""
+
+	written, err := ReconcileSeed(context.Background(), sink)
+	if err != nil {
+		t.Fatalf("ReconcileSeed: %v", err)
+	}
+	if written != 1 || sink.updates != 1 {
+		t.Fatalf("wrote %d rows with %d updates, want 1 and 1 (the scenario)", written, sink.updates)
+	}
+	if got := sink.scenarios[0].Subtext; got != want {
+		t.Errorf("subtext = %q, want %q", got, want)
+	}
+}
+
 func TestReconcileSeed_skipsAnAuthoredScenarioWithASeededSlug(t *testing.T) {
 	owner := "owner-1"
 	sink := &fakeSeedSink{
