@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -50,8 +49,7 @@ func Login(store AuthStore, ttl time.Duration, hasher auth.Hasher) http.HandlerF
 		// created as "User@Example.com" can be logged into as typed.
 		user, hash, found, err := store.GetUserCredentialsByEmail(r.Context(), normalizeEmail(req.Email))
 		if err != nil {
-			slog.ErrorContext(r.Context(), "handler: login credential lookup failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
+			writeInternalError(r.Context(), w, "login credential lookup", err)
 			return
 		}
 		// An unknown email still pays for a bcrypt comparison, so the two
@@ -69,8 +67,7 @@ func Login(store AuthStore, ttl time.Duration, hasher auth.Hasher) http.HandlerF
 
 		token, tokenHash, err := auth.NewToken()
 		if err != nil {
-			slog.ErrorContext(r.Context(), "handler: minting session token failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
+			writeInternalError(r.Context(), w, "minting session token", err)
 			return
 		}
 
@@ -80,8 +77,7 @@ func Login(store AuthStore, ttl time.Duration, hasher auth.Hasher) http.HandlerF
 			UserID:    user.ID,
 			ExpiresAt: expiresAt,
 		}); err != nil {
-			slog.ErrorContext(r.Context(), "handler: creating session failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
+			writeInternalError(r.Context(), w, "creating session", err)
 			return
 		}
 
@@ -99,8 +95,7 @@ func Logout(store AuthStore) http.HandlerFunc {
 			return
 		}
 		if err := store.DeleteSession(r.Context(), auth.HashToken(token)); err != nil {
-			slog.ErrorContext(r.Context(), "handler: deleting session failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
+			writeInternalError(r.Context(), w, "deleting session", err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -164,8 +159,7 @@ func UpdateMe(store AccountStore) http.HandlerFunc {
 
 		updated, found, err := store.UpdateUserName(r.Context(), user.ID, name)
 		if err != nil {
-			slog.ErrorContext(r.Context(), "handler: updating user name failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
+			writeInternalError(r.Context(), w, "updating user name", err)
 			return
 		}
 		if !found {
@@ -198,8 +192,7 @@ func ChangePassword(store AccountStore, hasher auth.Hasher) http.HandlerFunc {
 		// same stored hash and the same disabled filter login does.
 		_, hash, found, err := store.GetUserCredentialsByEmail(r.Context(), user.Email)
 		if err != nil {
-			slog.ErrorContext(r.Context(), "handler: change-password credential lookup failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
+			writeInternalError(r.Context(), w, "change-password credential lookup", err)
 			return
 		}
 		if !found || !auth.VerifyPassword(hash, req.CurrentPassword) {
@@ -214,8 +207,7 @@ func ChangePassword(store AccountStore, hasher auth.Hasher) http.HandlerFunc {
 
 		newHash, err := hasher.Hash(req.NewPassword)
 		if err != nil {
-			slog.ErrorContext(r.Context(), "handler: hashing password failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
+			writeInternalError(r.Context(), w, "hashing password", err)
 			return
 		}
 		changed, err := store.ChangePassword(r.Context(), account.PasswordChange{
@@ -225,8 +217,7 @@ func ChangePassword(store AccountStore, hasher auth.Hasher) http.HandlerFunc {
 			KeepTokenHash: auth.HashToken(token),
 		})
 		if err != nil {
-			slog.ErrorContext(r.Context(), "handler: changing password failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
+			writeInternalError(r.Context(), w, "changing password", err)
 			return
 		}
 		if !changed {
@@ -247,8 +238,7 @@ func RevokeAllSessions(store AccountStore) http.HandlerFunc {
 			return
 		}
 		if err := store.DeleteUserSessions(r.Context(), user.ID); err != nil {
-			slog.ErrorContext(r.Context(), "handler: revoking sessions failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
+			writeInternalError(r.Context(), w, "revoking sessions", err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)

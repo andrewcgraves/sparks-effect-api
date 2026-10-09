@@ -5,7 +5,10 @@ import (
 	"errors"
 	"testing"
 
+	"go.opentelemetry.io/otel/attribute"
+
 	"github.com/andrewcgraves/sparks-effect-api/internal/compile"
+	"github.com/andrewcgraves/sparks-effect-api/internal/metrics/metricstest"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
@@ -188,7 +191,7 @@ func scenarioJob() transit.Job {
 func TestCompileRunsThenSucceeds(t *testing.T) {
 	store := fixtureStore()
 
-	if err := compile.Compile(context.Background(), store, scenarioJob(), transit.DefaultBoardingWaitPolicy()); err != nil {
+	if err := compile.Compile(context.Background(), store, scenarioJob(), transit.DefaultBoardingWaitPolicy(), nil); err != nil {
 		t.Fatalf("Compile() error = %v, want nil", err)
 	}
 
@@ -211,7 +214,7 @@ func TestCompileUserScenario(t *testing.T) {
 	store := userFixtureStore()
 	job := transit.Job{ID: "job-2", Kind: transit.JobKindCompileUserScenario, UserScenarioID: ptr("uscn-1")}
 
-	if err := compile.Compile(context.Background(), store, job, transit.DefaultBoardingWaitPolicy()); err != nil {
+	if err := compile.Compile(context.Background(), store, job, transit.DefaultBoardingWaitPolicy(), nil); err != nil {
 		t.Fatalf("Compile() error = %v, want nil", err)
 	}
 	if store.completedWith == nil || len(store.completedWith.Services) != 1 {
@@ -229,7 +232,7 @@ func TestCompileUserService(t *testing.T) {
 	store := userFixtureStore()
 	job := transit.Job{ID: "job-3", Kind: transit.JobKindCompileUserService, UserServiceID: ptr("usvc-1")}
 
-	if err := compile.Compile(context.Background(), store, job, transit.DefaultBoardingWaitPolicy()); err != nil {
+	if err := compile.Compile(context.Background(), store, job, transit.DefaultBoardingWaitPolicy(), nil); err != nil {
 		t.Fatalf("Compile() error = %v, want nil", err)
 	}
 	if store.completedWith == nil || len(store.completedWith.Services) != 1 {
@@ -244,7 +247,7 @@ func TestCompileUserServiceNotFoundFailsJob(t *testing.T) {
 	store := userFixtureStore()
 	job := transit.Job{ID: "job-4", Kind: transit.JobKindCompileUserService, UserServiceID: ptr("gone")}
 
-	if err := compile.Compile(context.Background(), store, job, transit.DefaultBoardingWaitPolicy()); err != nil {
+	if err := compile.Compile(context.Background(), store, job, transit.DefaultBoardingWaitPolicy(), nil); err != nil {
 		t.Fatalf("Compile() error = %v, want nil (a missing target belongs on the job)", err)
 	}
 	if len(store.statusCalls) != 2 || store.statusCalls[1] != transit.JobStatusFailed {
@@ -259,7 +262,7 @@ func TestCompileUnknownKindFailsJob(t *testing.T) {
 	store := fixtureStore()
 	job := transit.Job{ID: "job-5", Kind: "compute", ScenarioID: ptr("sc-1")}
 
-	if err := compile.Compile(context.Background(), store, job, transit.DefaultBoardingWaitPolicy()); err != nil {
+	if err := compile.Compile(context.Background(), store, job, transit.DefaultBoardingWaitPolicy(), nil); err != nil {
 		t.Fatalf("Compile() error = %v, want nil", err)
 	}
 	if len(store.statusCalls) != 2 || store.statusCalls[1] != transit.JobStatusFailed {
@@ -271,7 +274,7 @@ func TestCompileRecordsFailureOnBadScenarioData(t *testing.T) {
 	store := fixtureStore()
 	store.services[0].VehicleTypeID = "no-such-vehicle-type"
 
-	if err := compile.Compile(context.Background(), store, scenarioJob(), transit.DefaultBoardingWaitPolicy()); err != nil {
+	if err := compile.Compile(context.Background(), store, scenarioJob(), transit.DefaultBoardingWaitPolicy(), nil); err != nil {
 		t.Fatalf("Compile() error = %v, want nil (failure belongs on the job)", err)
 	}
 
@@ -290,7 +293,7 @@ func TestCompileRecordsFailureWhenLoadingScenarioDataFails(t *testing.T) {
 	store := fixtureStore()
 	store.listErr = errors.New("connection reset")
 
-	if err := compile.Compile(context.Background(), store, scenarioJob(), transit.DefaultBoardingWaitPolicy()); err != nil {
+	if err := compile.Compile(context.Background(), store, scenarioJob(), transit.DefaultBoardingWaitPolicy(), nil); err != nil {
 		t.Fatalf("Compile() error = %v, want nil", err)
 	}
 	if len(store.statusCalls) != 2 || store.statusCalls[1] != transit.JobStatusFailed {
@@ -302,7 +305,7 @@ func TestCompileReturnsErrorWhenItCannotMarkRunning(t *testing.T) {
 	store := fixtureStore()
 	store.updateErr = errors.New("database is down")
 
-	if err := compile.Compile(context.Background(), store, scenarioJob(), transit.DefaultBoardingWaitPolicy()); err == nil {
+	if err := compile.Compile(context.Background(), store, scenarioJob(), transit.DefaultBoardingWaitPolicy(), nil); err == nil {
 		t.Error("Compile() error = nil, want an error when the job cannot be marked running")
 	}
 }
@@ -311,7 +314,7 @@ func TestCompileSucceedsForAnEmptyScenario(t *testing.T) {
 	store := fixtureStore()
 	store.services = nil
 
-	if err := compile.Compile(context.Background(), store, scenarioJob(), transit.DefaultBoardingWaitPolicy()); err != nil {
+	if err := compile.Compile(context.Background(), store, scenarioJob(), transit.DefaultBoardingWaitPolicy(), nil); err != nil {
 		t.Fatalf("Compile() error = %v, want nil", err)
 	}
 	if store.completedWith == nil || len(store.completedWith.Services) != 0 {
@@ -322,7 +325,7 @@ func TestCompileSucceedsForAnEmptyScenario(t *testing.T) {
 func TestCompileUsesCalibratedRunTimes(t *testing.T) {
 	store := fixtureStore()
 
-	if err := compile.Compile(context.Background(), store, scenarioJob(), transit.DefaultBoardingWaitPolicy()); err != nil {
+	if err := compile.Compile(context.Background(), store, scenarioJob(), transit.DefaultBoardingWaitPolicy(), nil); err != nil {
 		t.Fatalf("Compile() error = %v, want nil", err)
 	}
 	if store.completedWith == nil || len(store.completedWith.Services) != 1 {
@@ -346,5 +349,46 @@ func TestCompileUsesCalibratedRunTimes(t *testing.T) {
 	if len(store.completedWith.Nodes) != len(store.stations) {
 		t.Errorf("len(Nodes) = %d, want %d (one per station)",
 			len(store.completedWith.Nodes), len(store.stations))
+	}
+}
+
+func TestCompileReportsKindAndOutcome(t *testing.T) {
+	m, reader := metricstest.New(t)
+	bw := transit.DefaultBoardingWaitPolicy()
+
+	if err := compile.Compile(context.Background(), fixtureStore(), scenarioJob(), bw, m); err != nil {
+		t.Fatalf("Compile() error = %v", err)
+	}
+	broken := fixtureStore()
+	broken.services[0].VehicleTypeID = "no-such-vehicle-type"
+	if err := compile.Compile(context.Background(), broken, scenarioJob(), bw, m); err != nil {
+		t.Fatalf("Compile() error = %v", err)
+	}
+	down := fixtureStore()
+	down.updateErr = errors.New("database is down")
+	if err := compile.Compile(context.Background(), down, scenarioJob(), bw, m); err == nil {
+		t.Fatal("Compile() error = nil, want one")
+	}
+	if err := compile.Compile(context.Background(), fixtureStore(), transit.Job{ID: "job-5", Kind: "compute", ScenarioID: ptr("sc-1")}, bw, m); err != nil {
+		t.Fatalf("Compile() error = %v", err)
+	}
+
+	kind := attribute.String("kind", transit.JobKindCompileScenario)
+	for _, tc := range []struct {
+		attrs []attribute.KeyValue
+		want  int64
+	}{
+		{[]attribute.KeyValue{kind, attribute.String("outcome", "succeeded")}, 1},
+		{[]attribute.KeyValue{kind, attribute.String("outcome", "failed")}, 1},
+		{[]attribute.KeyValue{kind, attribute.String("outcome", "error")}, 1},
+		// An unrecognised kind must not mint a label value of its own.
+		{[]attribute.KeyValue{attribute.String("kind", "other"), attribute.String("outcome", "failed")}, 1},
+	} {
+		if got := reader.Count(t, "compile_jobs", tc.attrs...); got != tc.want {
+			t.Errorf("compile_jobs%v = %d, want %d", tc.attrs, got, tc.want)
+		}
+	}
+	if got := reader.Count(t, "compile_duration", kind); got != 3 {
+		t.Errorf("compile_duration count = %d, want 3", got)
 	}
 }

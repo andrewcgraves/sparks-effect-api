@@ -132,6 +132,104 @@ func TestValidateAcceptsNoFrequencyWindows(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsBadFrequencyWindows(t *testing.T) {
+	tests := []struct {
+		name    string
+		windows []transit.FrequencyWindow
+		want    string
+		field   string
+		rule    string
+		index   int
+	}{
+		{"malformed start", []transit.FrequencyWindow{{StartTime: "banana", EndTime: "10:00", HeadwayS: 900}},
+			"HH:MM", "frequency_windows.start_time", fault.RuleFormat, 0},
+		{"single-digit hour", []transit.FrequencyWindow{{StartTime: "6:00", EndTime: "10:00", HeadwayS: 900}},
+			"HH:MM", "frequency_windows.start_time", fault.RuleFormat, 0},
+		{"hour out of range", []transit.FrequencyWindow{{StartTime: "06:00", EndTime: "24:00", HeadwayS: 900}},
+			"HH:MM", "frequency_windows.end_time", fault.RuleFormat, 0},
+		{"minute out of range", []transit.FrequencyWindow{{StartTime: "06:60", EndTime: "10:00", HeadwayS: 900}},
+			"HH:MM", "frequency_windows.start_time", fault.RuleFormat, 0},
+		{"seconds included", []transit.FrequencyWindow{{StartTime: "06:00", EndTime: "10:00:00", HeadwayS: 900}},
+			"HH:MM", "frequency_windows.end_time", fault.RuleFormat, 0},
+		{"ends before it starts", []transit.FrequencyWindow{{StartTime: "22:00", EndTime: "06:00", HeadwayS: 900}},
+			"after start_time", "frequency_windows.end_time", fault.RuleOrder, 0},
+		{"zero length", []transit.FrequencyWindow{{StartTime: "06:00", EndTime: "06:00", HeadwayS: 900}},
+			"after start_time", "frequency_windows.end_time", fault.RuleOrder, 0},
+		{"overlaps an earlier window", []transit.FrequencyWindow{
+			{StartTime: "06:00", EndTime: "10:00", HeadwayS: 900},
+			{StartTime: "09:30", EndTime: "12:00", HeadwayS: 600},
+		}, "overlaps frequency window 0", "frequency_windows", fault.RuleOverlap, 1},
+		{"overlaps out of order", []transit.FrequencyWindow{
+			{StartTime: "12:00", EndTime: "18:00", HeadwayS: 900},
+			{StartTime: "06:00", EndTime: "22:00", HeadwayS: 600},
+		}, "overlaps frequency window 0", "frequency_windows", fault.RuleOverlap, 1},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := validUserService()
+			svc.FrequencyWindows = tc.windows
+			err := svc.Validate()
+			if err == nil {
+				t.Fatalf("Validate: expected error mentioning %q, got nil", tc.want)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Validate: got %q, want it to mention %q", err, tc.want)
+			}
+			got := mustValidationFaults(t, err)
+			if len(got) != 1 {
+				t.Fatalf("got %d faults, want 1: %+v", len(got), got)
+			}
+			assertFault(t, got[0], tc.field, tc.rule, fault.Index(tc.index))
+		})
+	}
+}
+
+func TestValidateAcceptsAdjacentFrequencyWindows(t *testing.T) {
+	// Windows are half-open: one ending at 10:00 and the next starting at
+	// 10:00 meet without overlapping, in either order.
+	svc := validUserService()
+	svc.FrequencyWindows = []transit.FrequencyWindow{
+		{StartTime: "10:00", EndTime: "23:59", HeadwayS: 1800},
+		{StartTime: "00:00", EndTime: "10:00", HeadwayS: 900},
+	}
+	if err := svc.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}
+
+func TestValidateReportsEveryOverlappingWindow(t *testing.T) {
+	svc := validUserService()
+	svc.FrequencyWindows = []transit.FrequencyWindow{
+		{StartTime: "06:00", EndTime: "22:00", HeadwayS: 1800},
+		{StartTime: "07:00", EndTime: "09:00", HeadwayS: 300},
+		{StartTime: "16:00", EndTime: "19:00", HeadwayS: 300},
+	}
+	got := mustValidationFaults(t, svc.Validate())
+	if len(got) != 2 {
+		t.Fatalf("got %d faults, want 2: %+v", len(got), got)
+	}
+	assertFault(t, got[0], "frequency_windows", fault.RuleOverlap, fault.Index(1))
+	assertFault(t, got[1], "frequency_windows", fault.RuleOverlap, fault.Index(2))
+}
+
+func TestValidateSkipsOverlapForWindowsThatAreAlreadyWrong(t *testing.T) {
+	// A window that is malformed or backwards has no meaningful span, so it
+	// gets its own fault and no overlap fault on top.
+	svc := validUserService()
+	svc.FrequencyWindows = []transit.FrequencyWindow{
+		{StartTime: "06:00", EndTime: "22:00", HeadwayS: 1800},
+		{StartTime: "banana", EndTime: "09:00", HeadwayS: 300},
+		{StartTime: "21:00", EndTime: "07:00", HeadwayS: 300},
+	}
+	got := mustValidationFaults(t, svc.Validate())
+	if len(got) != 2 {
+		t.Fatalf("got %d faults, want 2: %+v", len(got), got)
+	}
+	assertFault(t, got[0], "frequency_windows.start_time", fault.RuleFormat, fault.Index(1))
+	assertFault(t, got[1], "frequency_windows.end_time", fault.RuleOrder, fault.Index(2))
+}
+
 func TestNormalizeStopsRenumbersInOrder(t *testing.T) {
 	// Ordering is the contract: stops come back in the order given, with a
 	// dense 0..n-1 sequence, regardless of what seq the client sent.

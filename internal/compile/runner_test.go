@@ -42,7 +42,7 @@ func (g *gatedStore) CompleteJob(ctx context.Context, id string, result transit.
 
 func TestRunnerDrainWaitsForAnInFlightCompile(t *testing.T) {
 	store := newGatedStore()
-	runner := compile.NewRunner(store, transit.DefaultBoardingWaitPolicy())
+	runner := compile.NewRunner(store, transit.DefaultBoardingWaitPolicy(), nil)
 
 	runner.Enqueue(scenarioJob())
 	<-store.started
@@ -67,7 +67,7 @@ func TestRunnerDrainWaitsForAnInFlightCompile(t *testing.T) {
 
 func TestRunnerDrainReportsCompilesItAbandonsAtTheDeadline(t *testing.T) {
 	store := newGatedStore()
-	runner := compile.NewRunner(store, transit.DefaultBoardingWaitPolicy())
+	runner := compile.NewRunner(store, transit.DefaultBoardingWaitPolicy(), nil)
 	t.Cleanup(func() {
 		close(store.release)
 		runner.Drain(context.Background())
@@ -91,7 +91,7 @@ func TestRunnerDrainReportsCompilesItAbandonsAtTheDeadline(t *testing.T) {
 func TestRunnerRunsNothingEnqueuedOnceDrainHasBegun(t *testing.T) {
 	store := newGatedStore()
 	close(store.release)
-	runner := compile.NewRunner(store, transit.DefaultBoardingWaitPolicy())
+	runner := compile.NewRunner(store, transit.DefaultBoardingWaitPolicy(), nil)
 	runner.Drain(context.Background())
 
 	// A handler still running past a timed-out Shutdown can get here. Its row
@@ -106,7 +106,7 @@ func TestRunnerRunsNothingEnqueuedOnceDrainHasBegun(t *testing.T) {
 }
 
 func TestRunnerDrainWithNothingInFlightReturnsAtOnce(t *testing.T) {
-	runner := compile.NewRunner(fixtureStore(), transit.DefaultBoardingWaitPolicy())
+	runner := compile.NewRunner(fixtureStore(), transit.DefaultBoardingWaitPolicy(), nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

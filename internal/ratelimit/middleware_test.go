@@ -42,7 +42,7 @@ func TestLimitUnderLimitReachesHandler(t *testing.T) {
 		reached = true
 		w.WriteHeader(http.StatusAccepted)
 	})
-	h := Limit(New(60, 5), ClientIP(0))(next)
+	h := Limit(New(60, 5), ClientIP(0), nil)(next)
 
 	rec := do(h, "")
 	if rec.Code != http.StatusAccepted {
@@ -59,7 +59,7 @@ func TestLimitOverLimitReturns429(t *testing.T) {
 		reached++
 		w.WriteHeader(http.StatusOK)
 	})
-	h := Limit(New(1, 1), ClientIP(0))(next)
+	h := Limit(New(1, 1), ClientIP(0), nil)(next)
 
 	if rec := do(h, ""); rec.Code != http.StatusOK {
 		t.Fatalf("first status = %d, want 200", rec.Code)
@@ -96,7 +96,7 @@ func TestLimitOverLimitReturns429(t *testing.T) {
 }
 
 func TestLimitDifferentIPsAreIndependent(t *testing.T) {
-	h := Limit(New(1, 1), ClientIP(0))(okHandler())
+	h := Limit(New(1, 1), ClientIP(0), nil)(okHandler())
 
 	if rec := do(h, "192.0.2.1:1"); rec.Code != http.StatusAccepted {
 		t.Fatalf("first IP status = %d, want 202", rec.Code)
@@ -107,7 +107,7 @@ func TestLimitDifferentIPsAreIndependent(t *testing.T) {
 }
 
 func TestLimitSameIPSharesBucket(t *testing.T) {
-	h := Limit(New(1, 1), ClientIP(0))(okHandler())
+	h := Limit(New(1, 1), ClientIP(0), nil)(okHandler())
 
 	if rec := do(h, "192.0.2.1:1"); rec.Code != http.StatusAccepted {
 		t.Fatalf("first status = %d, want 202", rec.Code)
@@ -119,7 +119,7 @@ func TestLimitSameIPSharesBucket(t *testing.T) {
 
 func TestLimitAuthenticatedUsersShareIPAndHaveSeparateUserBuckets(t *testing.T) {
 	lim := New(1, 2)
-	inner := Limit(lim, ClientIP(0))(okHandler())
+	inner := Limit(lim, ClientIP(0), nil)(okHandler())
 
 	// Burst 2: two users on the same IP each get one request (IP still has
 	// tokens, and each user bucket is independent). A third request from
@@ -144,7 +144,7 @@ func TestLimitAuthenticatedUsersShareIPAndHaveSeparateUserBuckets(t *testing.T) 
 
 func TestLimitExhaustedUserDoesNotBlockAnotherUserOnAFreshIP(t *testing.T) {
 	lim := New(1, 1)
-	inner := Limit(lim, ClientIP(0))(okHandler())
+	inner := Limit(lim, ClientIP(0), nil)(okHandler())
 	alice := withUser("alice", inner)
 	bob := withUser("bob", inner)
 
@@ -163,7 +163,7 @@ func TestLimitExhaustedUserDoesNotBlockAnotherUserOnAFreshIP(t *testing.T) {
 
 func TestLimitSharedIPDenialDoesNotSpendUserToken(t *testing.T) {
 	lim := New(1, 1)
-	inner := Limit(lim, ClientIP(0))(okHandler())
+	inner := Limit(lim, ClientIP(0), nil)(okHandler())
 	alice := withUser("alice", inner)
 	bob := withUser("bob", inner)
 	shared := "192.0.2.10:1"
@@ -180,7 +180,7 @@ func TestLimitSharedIPDenialDoesNotSpendUserToken(t *testing.T) {
 }
 
 func TestLimitDisabledNever429s(t *testing.T) {
-	h := Limit(New(0, 1), ClientIP(0))(okHandler())
+	h := Limit(New(0, 1), ClientIP(0), nil)(okHandler())
 	for i := 0; i < 20; i++ {
 		if rec := do(h, ""); rec.Code != http.StatusAccepted {
 			t.Fatalf("request %d status = %d, want 202 with the limiter disabled", i, rec.Code)
@@ -189,7 +189,7 @@ func TestLimitDisabledNever429s(t *testing.T) {
 }
 
 func TestLimitNilLimiterIsPassThrough(t *testing.T) {
-	h := Limit(nil, ClientIP(0))(okHandler())
+	h := Limit(nil, ClientIP(0), nil)(okHandler())
 	if rec := do(h, ""); rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202", rec.Code)
 	}

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -12,7 +13,10 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/compile"
 	"github.com/andrewcgraves/sparks-effect-api/internal/config"
+	"github.com/andrewcgraves/sparks-effect-api/internal/errorreport"
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
+	"github.com/andrewcgraves/sparks-effect-api/internal/httpcache"
+	"github.com/andrewcgraves/sparks-effect-api/internal/metrics"
 	"github.com/andrewcgraves/sparks-effect-api/internal/persistence/postgres"
 	"github.com/andrewcgraves/sparks-effect-api/internal/ratelimit"
 	"github.com/andrewcgraves/sparks-effect-api/internal/routing"
@@ -35,7 +39,7 @@ type AuthDeps interface {
 	handler.OwnedTravelTimesStore
 	handler.OwnedServiceStore
 	handler.OwnedRouteStore
-	handler.RoutingStore
+	handler.RoutingJobPollStore
 	handler.WorkerStore
 	handler.RoutingBacklogStore
 	handler.PrerenderedStore
@@ -58,8 +62,46 @@ var (
 	_ handler.Pinger = (*routing.AMQPPublisher)(nil)
 )
 
-func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routing.Publisher, compiles *compile.Runner, lg *slog.Logger) *http.Server {
-	mux := http.NewServeMux()
+func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routing.Publisher, compiles *compile.Runner, lg *slog.Logger, m *metrics.Metrics, rep *errorreport.Reporter) *http.Server {
+	h, _ := routes(cfg, store, deps, publisher, compiles, lg, m, rep)
+	return &http.Server{
+		Addr:              ":" + cfg.Port,
+		Handler:           h,
+		ReadHeaderTimeout: 5 * time.Second,
+		// Headers and body together. The largest body any route accepts is an
+		// 8 MiB route ingest, and the public ones are capped at 4 KiB, so 15 s
+		// only cuts off a client trickling its body in to hold the connection.
+		ReadTimeout: 15 * time.Second,
+		// No handler waits on the worker: isochrones and compiles enqueue and
+		// answer with a job id. The slowest response is a compiled graph or
+		// publication read, a few seconds at worst, so 60 s is headroom for a
+		// slow client downloading it rather than for slow work.
+		WriteTimeout: 60 * time.Second,
+		// Long enough that the SPA's burst of reads on a page reuses one
+		// connection, short enough that abandoned keep-alives are reclaimed.
+		IdleTimeout: 120 * time.Second,
+	}
+}
+
+// Records every pattern it registers, so a test can walk the whole route
+// table rather than a hand-kept copy of it.
+type routeTable struct {
+	*http.ServeMux
+	patterns []string
+}
+
+func (t *routeTable) Handle(pattern string, h http.Handler) {
+	t.patterns = append(t.patterns, pattern)
+	t.ServeMux.Handle(pattern, h)
+}
+
+func (t *routeTable) HandleFunc(pattern string, h func(http.ResponseWriter, *http.Request)) {
+	t.Handle(pattern, http.HandlerFunc(h))
+}
+
+func routes(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routing.Publisher, compiles *compile.Runner,
+	lg *slog.Logger, m *metrics.Metrics, rep *errorreport.Reporter) (http.Handler, []string) {
+	mux := &routeTable{ServeMux: http.NewServeMux()}
 
 	mux.HandleFunc("GET /healthz", handler.Health)
 	// Liveness above stays cheap; readiness asks the database and the broker
@@ -82,12 +124,21 @@ func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routi
 	// compiled TransitGraph store and must keep answering exactly what they
 	// answer today. Rather than repurpose /api/scenarios/{slug} for both, the
 	// new resource lives at a path of its own — see registerAuthRoutes.
-	mux.HandleFunc("GET /api/scenarios", handler.Scenarios(store))
-	mux.HandleFunc("GET /api/scenarios/{slug}", handler.ScenarioBySlug(store))
-	mux.HandleFunc("GET /api/scenarios/{slug}/routes", handler.ScenarioRoutes(store))
-	mux.HandleFunc("GET /api/scenarios/{slug}/services", handler.ScenarioServices(store, cfg.BoardingWait))
-	mux.HandleFunc("GET /api/scenarios/{slug}/stations", handler.ScenarioStations(store))
-	mux.HandleFunc("GET /api/scenarios/{slug}/travel-times", handler.ScenarioTravelTimes(store))
+	//
+	// The store is built once at boot from the seed, so what each of these
+	// answers is fixed for the process: its tag needs only the build, the
+	// path, and the one setting that shapes the bodies.
+	tags := httpcache.NewTagger(cfg.BuildSHA)
+	curatedVersion := fmt.Sprintf("curated %+v", cfg.BoardingWait)
+	curated := func(h http.Handler) http.Handler {
+		return httpcache.PathTagged(tags, curatedVersion, h)
+	}
+	mux.Handle("GET /api/scenarios", curated(handler.Scenarios(store)))
+	mux.Handle("GET /api/scenarios/{slug}", curated(handler.ScenarioBySlug(store)))
+	mux.Handle("GET /api/scenarios/{slug}/routes", curated(handler.ScenarioRoutes(store)))
+	mux.Handle("GET /api/scenarios/{slug}/services", curated(handler.ScenarioServices(store, cfg.BoardingWait)))
+	mux.Handle("GET /api/scenarios/{slug}/stations", curated(handler.ScenarioStations(store)))
+	mux.Handle("GET /api/scenarios/{slug}/travel-times", curated(handler.ScenarioTravelTimes(store)))
 
 	// One cap shared by every isochrone endpoint: they enqueue onto the
 	// same queue for the same single worker, so a per-endpoint ceiling would
@@ -95,48 +146,38 @@ func New(cfg config.Config, store *transit.Store, deps AuthDeps, publisher routi
 	// "disabled" warning is logged once (SPA-219).
 	capBacklog := passThrough
 	if deps != nil {
-		capBacklog = handler.CapIsochroneBacklog(deps, cfg.MaxInFlightIsochrones, lg)
+		capBacklog = handler.CapIsochroneBacklog(deps, cfg.MaxInFlightIsochrones, lg, m)
 	}
 
 	clientIP := ratelimit.ClientIP(cfg.TrustedProxyCount)
-	limitIso := ratelimit.Limit(ratelimit.New(cfg.RateLimitIsochrone.RatePerMinute, cfg.RateLimitIsochrone.Burst), clientIP)
-	limitSnap := ratelimit.Limit(ratelimit.New(cfg.RateLimitSnapStops.RatePerMinute, cfg.RateLimitSnapStops.Burst), clientIP)
-	limitLogin := ratelimit.Limit(ratelimit.New(cfg.RateLimitLogin.RatePerMinute, cfg.RateLimitLogin.Burst), clientIP)
-	limitCompile := ratelimit.Limit(ratelimit.New(cfg.RateLimitCompile.RatePerMinute, cfg.RateLimitCompile.Burst), clientIP)
+	limitIso := ratelimit.Limit(ratelimit.New(cfg.RateLimitIsochrone.RatePerMinute, cfg.RateLimitIsochrone.Burst), clientIP, m.RateLimited("isochrone"))
+	limitSnap := ratelimit.Limit(ratelimit.New(cfg.RateLimitSnapStops.RatePerMinute, cfg.RateLimitSnapStops.Burst), clientIP, m.RateLimited("snap_stops"))
+	limitLogin := ratelimit.Limit(ratelimit.New(cfg.RateLimitLogin.RatePerMinute, cfg.RateLimitLogin.Burst), clientIP, m.RateLimited("login"))
+	limitCompile := ratelimit.Limit(ratelimit.New(cfg.RateLimitCompile.RatePerMinute, cfg.RateLimitCompile.Burst), clientIP, m.RateLimited("compile"))
 
 	registerRouteRoutes(mux, deps, limitSnap)
 	registerCompileRoutes(mux, deps, publisher, capBacklog, limitIso, lg)
-	registerPrerenderedRoutes(mux, deps)
-	registerPublishedServiceRoutes(mux, deps)
-	registerAuthRoutes(mux, cfg, deps, publisher, compiles, capBacklog, limitLogin, limitIso, limitCompile, lg)
+	registerPrerenderedRoutes(mux, deps, tags)
+	registerPublishedServiceRoutes(mux, deps, tags)
+	registerAuthRoutes(mux, cfg, deps, publisher, compiles, tags, capBacklog, limitLogin, limitIso, limitCompile, lg)
 	registerWorkerRoutes(mux, cfg, deps, watch)
 	registerRoutingStatusRoutes(mux, deps, watch)
 
-	h := cors(mux, cfg.AllowLocalhostCORS)
+	// Private by default, outside cors so a preflight is too: the public reads
+	// opt in themselves, and an authenticated or OptionalAuth answer is never
+	// stored for the next caller.
+	h := httpcache.DefaultPrivate(cors(mux, cfg.AllowLocalhostCORS))
 
-	return &http.Server{
-		Addr: ":" + cfg.Port,
-		// traceid.Middleware runs outermost: logRequests reads the trace id it
-		// attaches, and every handler downstream that enqueues routing work
-		// forwards the same id to the worker (see handler.enqueueIsochrone).
-		Handler:           traceid.Middleware(logRequests(lg, h)),
-		ReadHeaderTimeout: 5 * time.Second,
-		// Headers and body together. The largest body any route accepts is an
-		// 8 MiB route ingest, and the public ones are capped at 4 KiB, so 15 s
-		// only cuts off a client trickling its body in to hold the connection.
-		ReadTimeout: 15 * time.Second,
-		// No handler waits on the worker: isochrones and compiles enqueue and
-		// answer with a job id. The slowest response is a compiled graph or
-		// publication read, a few seconds at worst, so 60 s is headroom for a
-		// slow client downloading it rather than for slow work.
-		WriteTimeout: 60 * time.Second,
-		// Long enough that the SPA's burst of reads on a page reuses one
-		// connection, short enough that abandoned keep-alives are reclaimed.
-		IdleTimeout: 120 * time.Second,
-	}
+	// traceid.Middleware runs outermost: logRequests reads the trace id it
+	// attaches, and every handler downstream that enqueues routing work
+	// forwards the same id to the worker (see handler.enqueueIsochrone).
+	// The reporter swaps the request's context, so it goes outside
+	// logRequests, which reads r.Pattern back off the request it passed
+	// on; Recover goes inside it, so a panic's 500 is logged and counted.
+	return traceid.Middleware(rep.Middleware(logRequests(lg, m, errorreport.Recover(compressJSON(h))))), mux.patterns
 }
 
-func registerRouteRoutes(mux *http.ServeMux, deps AuthDeps, limitSnap func(http.Handler) http.Handler) {
+func registerRouteRoutes(mux *routeTable, deps AuthDeps, limitSnap func(http.Handler) http.Handler) {
 	if deps == nil {
 		// The collection needs its own entry alongside the subtree: /api/routes/
 		// does not serve /api/routes, it makes the mux answer that path with a
@@ -162,7 +203,7 @@ func registerRouteRoutes(mux *http.ServeMux, deps AuthDeps, limitSnap func(http.
 	mux.Handle("POST /api/routes/{slug}/snap-stops", optional(limitSnap(handler.SnapStops(deps))))
 }
 
-func registerCompileRoutes(mux *http.ServeMux, deps AuthDeps, publisher routing.Publisher,
+func registerCompileRoutes(mux *routeTable, deps AuthDeps, publisher routing.Publisher,
 	capBacklog, limitIso func(http.Handler) http.Handler, lg *slog.Logger) {
 	if deps == nil {
 		mux.HandleFunc("GET /api/scenarios/{slug}/graph", noDatabase("compiled graph storage is unavailable"))
@@ -186,18 +227,18 @@ func registerCompileRoutes(mux *http.ServeMux, deps AuthDeps, publisher routing.
 	mux.Handle("GET /api/routing-jobs/{id}", optional(handler.RoutingJobStatus(deps)))
 }
 
-func registerPrerenderedRoutes(mux *http.ServeMux, deps AuthDeps) {
+func registerPrerenderedRoutes(mux *routeTable, deps AuthDeps, tags httpcache.Tagger) {
 	const unavailable = "prerendered isochrone storage is unavailable"
 	if deps == nil {
 		mux.HandleFunc("/api/scenarios/{slug}/prerendered-isochrones", noDatabase(unavailable))
 		mux.HandleFunc("/api/prerendered-isochrones/{id}", noDatabase(unavailable))
 		return
 	}
-	mux.HandleFunc("GET /api/scenarios/{slug}/prerendered-isochrones", handler.PrerenderedIsochrones(deps))
-	mux.HandleFunc("GET /api/prerendered-isochrones/{id}", handler.PrerenderedIsochrone(deps))
+	mux.HandleFunc("GET /api/scenarios/{slug}/prerendered-isochrones", handler.PrerenderedIsochrones(deps, tags))
+	mux.HandleFunc("GET /api/prerendered-isochrones/{id}", handler.PrerenderedIsochrone(deps, tags))
 }
 
-func registerPublishedServiceRoutes(mux *http.ServeMux, deps AuthDeps) {
+func registerPublishedServiceRoutes(mux *routeTable, deps AuthDeps, tags httpcache.Tagger) {
 	if deps == nil {
 		mux.HandleFunc("/api/published-services", noDatabase("publication storage is unavailable"))
 		return
@@ -211,7 +252,7 @@ func registerPublishedServiceRoutes(mux *http.ServeMux, deps AuthDeps) {
 	// Bare, not OptionalAuth: the answer is the same for every caller, so
 	// there is no identity for it to read. Curated scenarios stay at
 	// GET /api/scenarios; a page that wants both calls both.
-	mux.HandleFunc("GET /api/published-services", handler.PublishedServices(deps))
+	mux.HandleFunc("GET /api/published-services", handler.PublishedServices(deps, tags))
 }
 
 // A component that cannot be pinged — no database, no broker, or the
@@ -230,7 +271,7 @@ func requirePublisher(publisher routing.Publisher, h http.Handler) http.Handler 
 	return h
 }
 
-func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, publisher routing.Publisher, compiles *compile.Runner,
+func registerAuthRoutes(mux *routeTable, cfg config.Config, deps AuthDeps, publisher routing.Publisher, compiles *compile.Runner, tags httpcache.Tagger,
 	capBacklog, limitLogin, limitIso, limitCompile func(http.Handler) http.Handler, lg *slog.Logger) {
 	if deps == nil {
 		for _, pattern := range []string{
@@ -377,7 +418,7 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 	// (ADR-0005). The draft reads, its isochrone and the compile above stay
 	// authenticated: publishing opens this resource, not those. The
 	// database-less 503 comes from the "/api/services/" entry.
-	mux.Handle("GET /api/services/{slug}/publication", handler.GetServicePublication(deps))
+	mux.Handle("GET /api/services/{slug}/publication", handler.GetServicePublication(deps, tags))
 	// Plot over that snapshot (SPA-357): the pinned graph only, and an
 	// ownerless routing job whoever asks, so the reader who enqueued it can
 	// poll it back without a session. Bare for the same reason as the read
@@ -441,7 +482,7 @@ func registerAuthRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, pu
 
 // Bare, like /readyz: the website asks on behalf of every visitor, and the
 // answer carries no job, origin or owner, so there is nothing to scope.
-func registerRoutingStatusRoutes(mux *http.ServeMux, deps AuthDeps, watch *handler.WorkerWatch) {
+func registerRoutingStatusRoutes(mux *routeTable, deps AuthDeps, watch *handler.WorkerWatch) {
 	if deps == nil {
 		mux.HandleFunc("GET /api/routing/status", noDatabase("routing status is unavailable"))
 		return
@@ -449,7 +490,7 @@ func registerRoutingStatusRoutes(mux *http.ServeMux, deps AuthDeps, watch *handl
 	mux.HandleFunc("GET /api/routing/status", handler.RoutingStatus(deps, watch))
 }
 
-func registerWorkerRoutes(mux *http.ServeMux, cfg config.Config, deps AuthDeps, watch *handler.WorkerWatch) {
+func registerWorkerRoutes(mux *routeTable, cfg config.Config, deps AuthDeps, watch *handler.WorkerWatch) {
 	const unavailable = "worker API is unavailable"
 	if deps == nil {
 		mux.HandleFunc("/api/internal/", noDatabase(unavailable))
@@ -496,11 +537,17 @@ func (s *statusRecorder) WriteHeader(status int) {
 	s.ResponseWriter.WriteHeader(status)
 }
 
-func logRequests(lg *slog.Logger, next http.Handler) http.Handler {
+func logRequests(lg *slog.Logger, m *metrics.Metrics, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		start := time.Now()
 		next.ServeHTTP(rec, r)
+		elapsed := time.Since(start)
+
+		// The mux sets r.Pattern on this same request: cors passes it through
+		// unchanged, and nothing between here and the mux calls WithContext.
+		// An unmatched path leaves it empty.
+		m.Request(r.Context(), r.Pattern, r.Method, rec.status, elapsed)
 
 		// Probes are polled on a timer by the platform and uptime monitors;
 		// at info they would drown the requests worth reading.
@@ -513,7 +560,7 @@ func logRequests(lg *slog.Logger, next http.Handler) http.Handler {
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", rec.status,
-			"duration_ms", time.Since(start).Milliseconds(),
+			"duration_ms", elapsed.Milliseconds(),
 			"trace_id", trace,
 		)
 	})
@@ -529,6 +576,9 @@ const sparksEffectHost = "sparks-effect.app"
 
 func cors(next http.Handler, allowLocalhost bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Whether or not this origin is allowed, or there is one: the answer
+		// differs by Origin either way, and a shared cache must key on it.
+		w.Header().Add("Vary", "Origin")
 		origin := r.Header.Get("Origin")
 		if originAllowed(origin, allowLocalhost) {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
@@ -538,7 +588,6 @@ func cors(next http.Handler, allowLocalhost bool) http.Handler {
 			// Retry-After on a capped isochrone's 429 (SPA-219) is invisible
 			// to the SPA, which is the one caller it is written for.
 			w.Header().Set("Access-Control-Expose-Headers", "Retry-After")
-			w.Header().Add("Vary", "Origin")
 
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)

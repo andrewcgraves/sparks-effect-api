@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/account"
+	"github.com/andrewcgraves/sparks-effect-api/internal/errorreport"
 )
 
 type SessionLookup func(ctx context.Context, tokenHash string) (account.User, bool, error)
@@ -41,6 +42,7 @@ func RequireAuth(lookup SessionLookup) func(http.Handler) http.Handler {
 				// Answering 401 here would tell a legitimate user their
 				// session was invalid and send them to re-login pointlessly.
 				slog.ErrorContext(r.Context(), "auth: session lookup failed", "error", err)
+				errorreport.Capture(r.Context(), "session lookup", err)
 				writeErr(w, http.StatusInternalServerError, "internal error")
 				return
 			}

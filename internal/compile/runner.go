@@ -5,12 +5,14 @@ import (
 	"log/slog"
 	"sync"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/metrics"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
 type Runner struct {
 	store        Store
 	boardingWait transit.BoardingWaitPolicy
+	metrics      *metrics.Metrics
 
 	wg       sync.WaitGroup
 	mu       sync.Mutex
@@ -18,8 +20,8 @@ type Runner struct {
 	inFlight map[string]struct{}
 }
 
-func NewRunner(store Store, boardingWait transit.BoardingWaitPolicy) *Runner {
-	return &Runner{store: store, boardingWait: boardingWait, inFlight: map[string]struct{}{}}
+func NewRunner(store Store, boardingWait transit.BoardingWaitPolicy, m *metrics.Metrics) *Runner {
+	return &Runner{store: store, boardingWait: boardingWait, metrics: m, inFlight: map[string]struct{}{}}
 }
 
 func (r *Runner) Enqueue(job transit.Job) {
@@ -46,7 +48,7 @@ func (r *Runner) Enqueue(job transit.Job) {
 			r.mu.Unlock()
 			r.wg.Done()
 		}()
-		if err := Compile(context.Background(), r.store, job, r.boardingWait); err != nil {
+		if err := Compile(context.Background(), r.store, job, r.boardingWait, r.metrics); err != nil {
 			slog.Error("compile: job failed", "job_id", job.ID, "error", err)
 		}
 	}()

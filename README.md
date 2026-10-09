@@ -217,6 +217,11 @@ readable by anyone holding its id — a v4 UUID, unguessable. An **owned** job,
 from one of the authored isochrones, answers 404 to anyone but its owner or an
 admin, so a caller cannot probe which job ids exist.
 
+While the job is `queued`, the response also carries `queue_position`: the
+number of in-flight jobs created before it, so `0` means it is next (SPA-437).
+It is absent once the job is `running` or finished, and absent if the count
+could not be read. It is counted on each poll, not stored.
+
 ### Routing status
 
 `GET /api/routing/status` says whether live plotting is working, so the
@@ -313,6 +318,36 @@ without — no `DATABASE_URL` or no `AMQP_URL` — reads `"disabled"` and does n
 fail the check, so a local run with neither answers 200. Both probes log at
 debug, not info.
 
+## Compression and caching
+
+JSON bodies of 1 KB or more are gzipped for clients that send
+`Accept-Encoding: gzip`, except under `/api/internal/`, which is the worker's
+contract and stays uncompressed. Expect about 3.5–4× on geometry-heavy bodies
+(publications, alignments, prerendered isochrones), since full-precision
+coordinates do not compress much, and 5–8× on the rest.
+
+Every response is `Cache-Control: private, no-store` unless it is one of the
+identity-free public reads, which answer
+`public, max-age=60, stale-while-revalidate=600` with a strong `ETag` and
+honour `If-None-Match` with `304`:
+
+| Read | The tag changes when |
+|------|----------------------|
+| `GET /api/scenarios`, `/api/scenarios/{slug}` and its `routes`, `services`, `stations`, `travel-times` | the build or the boarding-wait policy changes |
+| `GET /api/services/{slug}/publication` | it is republished (new pin, new `published_at`) or its author is renamed |
+| `GET /api/prerendered-isochrones/{id}` | the row's `updated_at` moves, or it becomes outdated |
+| `GET /api/scenarios/{slug}/prerendered-isochrones`, `GET /api/published-services` | the body does (the tag is a hash of it) |
+
+A gzipped body carries its tag with `-gzip` inside the quotes, since a strong
+tag names exact bytes. Either copy revalidates with its own tag.
+
+Every tag also folds in the commit the image was built from (CI passes it as the
+`BUILD_SHA` build argument), so after a deploy that changes a response's shape,
+no client is told by a `304` to keep the old body. A binary built without it, such as `make run`,
+uses a per-process value, so its tags last only until it restarts. The OptionalAuth
+reads (`GET /api/routes/{slug}`, `GET /api/scenarios/{slug}/graph`,
+`GET /api/routing-jobs/{id}`) answer per caller, so they stay private.
+
 ## CORS
 
 Cross-origin requests are allowed from the project's own frontends, always and
@@ -386,6 +421,86 @@ JOB=$(curl -s -X POST http://localhost:8080/api/isochrone \
 
 curl -s "http://localhost:8080/api/routing-jobs/$JOB" | jq '{status, error}'
 ```
+
+## Metrics
+
+The API pushes OpenTelemetry metrics over OTLP/HTTP to the same Grafana Cloud
+stack as the cluster (SPA-433). It is pushed rather than scraped because the
+API runs on Railway, outside the cluster Alloy scrapes. Every 60 s, and once
+more on shutdown.
+
+| Series in Grafana | Labels | Recorded |
+|---|---|---|
+| `http_requests_total` | `route`, `method`, `status_class` | every request |
+| `http_request_duration_seconds` (histogram) | `route` | every request |
+| `compile_jobs_total` | `kind`, `outcome` (`succeeded`, `failed`, `error`) | each compile job |
+| `compile_duration_seconds` (histogram) | `kind` | each compile job |
+| `isochrone_backlog_inflight` (gauge) | — | each isochrone enqueue the backlog cap counts |
+| `backlog_full_total` | — | each `backlog_full` 429 |
+| `rate_limited_total` | `limiter` (`isochrone`, `snap_stops`, `login`, `compile`) | each `rate_limited` 429 |
+
+Labels are kept bounded because the free-tier active-series budget is tight
+(SPA-296). `route` is the mux pattern a request matched (`/api/scenarios/{slug}`),
+never the path it asked for, and `unmatched` when it matched none. `method` is
+one of the standard methods or `other`. `kind` is a known compile job kind or
+`other`. The instruments are named without `_total` or a unit suffix, because
+Grafana Cloud's OTLP ingest adds both.
+
+Export is configured entirely by the standard OpenTelemetry variables, which the
+exporter reads itself:
+
+```sh
+OTEL_EXPORTER_OTLP_ENDPOINT=https://otlp-gateway-prod-us-west-0.grafana.net/otlp
+OTEL_EXPORTER_OTLP_HEADERS="Authorization=Basic <base64 of instance-id:token>"
+OTEL_RESOURCE_ATTRIBUTES=service.namespace=staging
+```
+
+Grafana Cloud's OpenTelemetry card (stack → Configure) produces the first two.
+The service name defaults to `sparks-effect-api`, and Grafana derives `job` from
+the namespace and name, so the setting above makes it
+`job="staging/sparks-effect-api"`. The namespace is what keeps staging and
+production apart, both on dashboards and in the alert rules, which group by
+`job`. Use `service.namespace` rather than `deployment.environment`, because
+Grafana Cloud does not reliably put the latter on every series.
+
+With no endpoint set, nothing is exported and boot logs one `info` line saying
+so. That is the local default. An allowed-origin CORS preflight is answered
+before the mux, so it counts under `route="unmatched"` alongside real 404s.
+
+## Error reports
+
+Every internal error (each 500 answered through `writeInternalError`, a session
+lookup the auth middleware could not complete, a routing job the broker would
+not take, and any handler panic) is sent to Grafana Cloud as an OTLP log record
+(SPA-380), over the same gateway and with the same `OTEL_EXPORTER_OTLP_*`
+credentials as the metrics above. 4xx answers are the caller's mistake and are
+never reported. A panic is answered with a 500 rather than a dropped connection.
+
+Each record is `ERROR` severity, body `internal error`, and carries:
+
+| Attribute | Value |
+|---|---|
+| `trace_id` | the request's `X-Trace-Id`, so it links to the access log and the worker's logs |
+| `route` | the mux pattern matched, `GET /api/auth/me` |
+| `op` | what the handler was doing |
+| `exception.message` | the error text, with any `Bearer <token>` redacted |
+| `exception.type`, `exception.stacktrace` | `panic` and its stack, for a panic only |
+
+The resource carries `service.name=sparks-effect-api`, `service.namespace` from
+`OTEL_RESOURCE_ATTRIBUTES` (so staging and production stay apart, as for
+metrics), and `service.version`, the commit the image was built from. CI passes
+it as the `BUILD_SHA` build arg, and production re-tags the same image, so it
+keeps the SHA. Nothing from the request itself (headers, body) is attached.
+
+In Grafana they are in Loki:
+
+```logql
+{service_name="sparks-effect-api", service_namespace="production"} | severity_text="ERROR"
+```
+
+and the alert is a Loki rule on `count_over_time` of that query over 5m being
+above 0. With no endpoint set, nothing is sent, and boot logs one `info` line
+saying so.
 
 ## Persistence
 
@@ -694,6 +809,7 @@ CI environments match. Use `make db-up DOCKER=podman` to use podman.
 | `make run`              | Build and run the API locally                        |
 | `make lint`             | Run `golangci-lint`                                  |
 | `make vet`              | Run `go vet`                                         |
+| `make vulncheck`        | Run `govulncheck` over both modules (needs network)  |
 | `make check-contract`   | Diff the golden fixtures against the worker           |
 | `make dev-workflow`     | Run test, vet, lint, and build — full verification   |
 | `make tidy`             | Sync `go.mod`/`go.sum` with imports                  |

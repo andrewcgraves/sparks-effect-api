@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/andrewcgraves/sparks-effect-api/internal/httpcache"
 	"github.com/andrewcgraves/sparks-effect-api/internal/routing"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
@@ -39,15 +40,28 @@ type publicationResponse struct {
 	*transit.TransitGraph
 }
 
-func GetServicePublication(store ServicePublicationStore) http.HandlerFunc {
+func GetServicePublication(store ServicePublicationStore, tags httpcache.Tagger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// No identity is read, so the response depends on the slug alone: the
 		// owner sees what everyone sees, and a shared cache cannot mix a draft
 		// into it. The draft stays at GET /api/services/{slug} (ADR-0005).
-		pub, job, ok := loadPublishedGraph(w, r, store)
+		pub, ok := loadPublication(w, r, store)
 		if !ok {
 			return
 		}
+		// A republish moves both the pin and published_at, and the pinned
+		// graph never changes under its job id; the byline is the one part
+		// read live rather than frozen at publish. Checked before the graph
+		// is loaded, because the graph is what a revalidation exists to skip.
+		etag := tags.ETag(pub.CompileJobID, pub.PublishedAt.UTC().Format(time.RFC3339Nano), pub.AuthorName)
+		if httpcache.NotModified(w, r, etag) {
+			return
+		}
+		job, ok := loadPinnedGraph(w, r, store, pub)
+		if !ok {
+			return
+		}
+		httpcache.MarkPublic(w, etag)
 		writeJSON(w, http.StatusOK, publicationResponse{ServicePublication: pub, TransitGraph: job.Result})
 	}
 }
@@ -91,37 +105,52 @@ func PublicationIsochrone(store PublicationIsochroneStore, publisher routing.Pub
 }
 
 func loadPublishedGraph(w http.ResponseWriter, r *http.Request, store ServicePublicationStore) (transit.ServicePublication, transit.Job, bool) {
+	pub, ok := loadPublication(w, r, store)
+	if !ok {
+		return transit.ServicePublication{}, transit.Job{}, false
+	}
+	job, ok := loadPinnedGraph(w, r, store, pub)
+	if !ok {
+		return transit.ServicePublication{}, transit.Job{}, false
+	}
+	return pub, job, true
+}
+
+func loadPublication(w http.ResponseWriter, r *http.Request, store ServicePublicationStore) (transit.ServicePublication, bool) {
 	pub, found, err := store.GetServicePublicationBySlug(r.Context(), r.PathValue("slug"))
 	if err != nil {
 		writeInternalError(r.Context(), w, "loading publication", err)
-		return transit.ServicePublication{}, transit.Job{}, false
+		return transit.ServicePublication{}, false
 	}
 	// Unpublished answers exactly as unknown does, before a first publish
 	// and after an unpublish alike. Anything else confirms to a stranger
 	// that a draft exists behind a guessed slug.
 	if !found {
 		writeError(w, http.StatusNotFound, "service not found")
-		return transit.ServicePublication{}, transit.Job{}, false
+		return transit.ServicePublication{}, false
 	}
+	return pub, true
+}
 
+func loadPinnedGraph(w http.ResponseWriter, r *http.Request, store ServicePublicationStore, pub transit.ServicePublication) (transit.Job, bool) {
 	job, found, err := store.GetSucceededCompileJob(r.Context(), pub.CompileJobID)
 	if err != nil {
 		writeInternalError(r.Context(), w, "loading published graph", err)
-		return transit.ServicePublication{}, transit.Job{}, false
+		return transit.Job{}, false
 	}
 	// The pin's foreign key holds the job for as long as it is pinned, so a
 	// miss means the publication just read was removed in between — most
 	// plausibly the service being deleted.
 	if !found {
 		writeError(w, http.StatusNotFound, "service not found")
-		return transit.ServicePublication{}, transit.Job{}, false
+		return transit.Job{}, false
 	}
 	if job.Result == nil {
 		writeInternalError(r.Context(), w, "loading published graph",
 			fmt.Errorf("pinned compile job %s has no graph", job.ID))
-		return transit.ServicePublication{}, transit.Job{}, false
+		return transit.Job{}, false
 	}
-	return pub, job, true
+	return job, true
 }
 
 func PublishService(store PublicationStore, boardingWait transit.BoardingWaitPolicy) http.HandlerFunc {

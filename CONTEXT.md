@@ -23,6 +23,11 @@ depends on the URL space you are in. This is the single most confusing thing in
 the codebase and it is not going to be renamed — so know which one you are
 holding.
 
+Visitors see neither word: the website's copy says *line* for a service,
+*network* for a scenario and *route* for an alignment, recorded in its
+[product vocabulary](https://github.com/andrewcgraves/sparks-effect-website/blob/trunk/CONTEXT.md#product-vocabulary).
+That is deliberate, so do not "correct" the copy back to the words here.
+
 | Term | Model | Lives at | Is |
 | --- | --- | --- | --- |
 | **Scenario** | `transit.Scenario` | `/api/scenarios` (public), `/api/me/scenarios` (owner-scoped) | The seeded world model: metadata plus routes, stations, services and segment times hanging off it |
@@ -148,7 +153,10 @@ everyday one.
 - **Headway** — seconds between consecutive departures. `half_headway` is
   `min(headway) / 2` across a service's windows.
 - **Frequency window** — a `start_time`/`end_time` pair with a headway. A
-  service carries a list of them.
+  service carries a list of them. Times are `HH:MM` from `00:00` to `23:59`,
+  `end_time` is after `start_time` (no window crosses midnight), and windows
+  are half-open, so one ending at `10:00` may meet one starting at `10:00` but
+  no two may overlap.
 - **Run time** — time in motion, dwell excluded. The intended semantics of a
   `segment_run_times.yaml` segment (`run_seconds`, and `reverse_run_seconds`
   when present), and what `SegmentTime.RunSeconds` holds.
@@ -216,6 +224,9 @@ through a node both of them touch.
   refused with 429 and `backlog_full`. The cap is per deployment, not per caller.
   Per-caller floods of the expensive POSTs are refused separately with 429 and
   `rate_limited`.
+- **Queue position** — for a `queued` routing job, the count of in-flight jobs
+  created before it: the jobs a FIFO worker taking one at a time will finish
+  first. `0` means next. Reported on the poll, never stored (SPA-437).
 - **Reuse** / **reused** — answering an isochrone request with an earlier
   succeeded routing job instead of minting one (SPA-331). Reused only when the
   graph, mode, budget, owner and origin (to five decimal places) agree, and the
@@ -333,6 +344,14 @@ its grace period. Boot fails every unfinished job before it enqueues any of its 
 message telling the author to compile again. Say *interrupted* about compile
 jobs, not *stale*: that word belongs to graphs.
 
+### Compile outcome
+
+The `outcome` label on the `compile_jobs_total` metric (SPA-433). It is the
+terminal job status the compile wrote, `succeeded` or `failed`, or `error`
+when no status could be written at all, for example when the database was
+unreachable. `error` is a metric value only and never a job status: that job
+is left wherever it was.
+
 ### Routing status
 
 The three values `GET /api/routing/status` answers in `status`
@@ -357,7 +376,7 @@ worker counted as gone.
 | Repository | Owns |
 | --- | --- |
 | [`sparks-effect-routing-worker`](https://github.com/andrewcgraves/sparks-effect-routing-worker/blob/main/CONTEXT.md) | Chain vocabulary: chaining, access and egress legs, starter station and starter walk, reached vs reachable, journey, leg, publication (of a queue message — a service's publication is defined here), the departure clock |
-| [`sparks-effect-website`](https://github.com/andrewcgraves/sparks-effect-website/blob/trunk/CONTEXT.md) | The time-remaining graph: view, lane, through, fork |
+| [`sparks-effect-website`](https://github.com/andrewcgraves/sparks-effect-website/blob/trunk/CONTEXT.md) | Product vocabulary (line, network, route, splash zone); the time-remaining graph: view, lane, through, fork |
 | [`kustomize-config`](https://github.com/andrewcgraves/kustomize-config/blob/main/CONTEXT.md) | Deployment vocabulary: overlay, pin, generation, cycling the map, tileset |
 
 Decisions — as opposed to definitions — belong in ADRs, not here. A term

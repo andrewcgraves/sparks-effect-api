@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
+	"github.com/andrewcgraves/sparks-effect-api/internal/errorreport"
 	"github.com/andrewcgraves/sparks-effect-api/internal/ids"
 	"github.com/andrewcgraves/sparks-effect-api/internal/traceid"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
@@ -335,5 +336,6 @@ func mintSlug(ctx context.Context, store ServiceStore, name string) (string, err
 func writeInternalError(ctx context.Context, w http.ResponseWriter, op string, err error) {
 	trace, _ := traceid.FromContext(ctx)
 	slog.ErrorContext(ctx, "handler: internal error", "op", op, "error", err, "trace_id", trace)
+	errorreport.Capture(ctx, op, err)
 	writeError(w, http.StatusInternalServerError, "internal error")
 }
