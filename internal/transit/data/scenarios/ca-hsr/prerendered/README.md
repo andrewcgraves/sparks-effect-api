@@ -4,9 +4,9 @@ Every `*.json` file in this directory is one curated, already-computed
 isochrone that ships with the `ca-hsr` scenario. `transit.SeedPrerenderedIsochrones`
 walks this directory on every boot (see `internal/transit/seed_prerendered.go`,
 called from `cmd/api/main.go` after `CompileSeededIfNeeded`) and inserts any
-file whose `id` is not already stored. Dropping a file in here is the whole of
-the deployment step — there is no code change, no migration, and no manual
-post-deploy action.
+file whose `id` is not already stored. Adding an entry is the whole of the
+deployment step: drop a file in here, with no code change, migration or
+manual post-deploy action. Retiring one does need a migration; see below.
 
 ## File format
 
@@ -14,11 +14,11 @@ One JSON object per file, self-describing:
 
 ```json
 {
-  "id": "0f1d3a6c-1c9a-4d5b-9f2e-8a1b2c3d4e5f",
-  "label": "San Jose — 240 min by bike",
-  "lat": 37.3297,
-  "lng": -121.9020,
-  "budget_mins": 240,
+  "id": "00000000-0000-4006-8001-000000000004",
+  "label": "San Jose (Diridon) - 60 min by bike",
+  "lat": 37.33,
+  "lng": -121.903,
+  "budget_mins": 60,
   "mode": "bike",
   "result": { }
 }
