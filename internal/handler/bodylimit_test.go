@@ -221,8 +221,10 @@ func TestWorkerMarkSucceeded_413_recordsNothing(t *testing.T) {
 }
 
 // The largest real chain result must keep fitting: refusing it fails the job.
+// The fixture is the San Jose 240-minute bike chain, once a ca-hsr prerendered
+// isochrone and kept here after SPA-439 retired it from the seed set.
 func TestWorkerMarkSucceeded_204_largestCommittedChainResult(t *testing.T) {
-	raw, err := os.ReadFile("../transit/data/scenarios/ca-hsr/prerendered/isochrone-sj-240-bike.json")
+	raw, err := os.ReadFile(filepath.Join("testdata", "chain-result-sj-240-bike.json"))
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
@@ -251,8 +253,8 @@ func TestWorkerMarkFailed_413_recordsNothing(t *testing.T) {
 }
 
 // The fixture is the put the San Jose 240-minute bike chain made: its twelve
-// egress polygons, taken from that job's result (the committed prerendered
-// isochrone-sj-240-bike.json) with the three properties the chain adds to each
+// egress polygons, taken from that job's result (testdata/
+// chain-result-sj-240-bike.json) with the three properties the chain adds to each
 // one stripped, which is the shape the worker caches. The result carries no
 // tileset stamp, so the fixture's tileset_at is supplied. The limits are sized
 // from it, so it must keep fitting under them.

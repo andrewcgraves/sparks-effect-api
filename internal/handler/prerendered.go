@@ -22,8 +22,8 @@ type PrerenderedStore interface {
 	CreatePrerenderedIsochrone(ctx context.Context, p *transit.PrerenderedIsochrone) error
 }
 
-// The largest committed payload, isochrone-sj-240-bike.json, is 499,890
-// bytes. 2 MiB leaves four times that for a bigger budget or a finer mode.
+// The largest chain result on record, testdata/chain-result-sj-240-bike.json,
+// is 499,890 bytes. 2 MiB leaves four times that for a bigger budget or a finer mode.
 const maxPrerenderedBodyBytes = 2 << 20
 
 type prerenderedResponse struct {
