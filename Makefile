@@ -206,7 +206,7 @@ $(GOLANGCI_LINT):
 #
 # Standard-library findings are reported against the `go` on PATH, not the
 # version in go.mod, so a local run on an older toolchain can fail where CI,
-# on the latest patch of GO_VERSION, passes. GOTOOLCHAIN=go<patch> make
+# on GO_VERSION, passes. GOTOOLCHAIN=go<patch> make
 # vulncheck reproduces CI's answer.
 vulncheck: $(GOVULNCHECK)
 	$(GOVULNCHECK) ./...

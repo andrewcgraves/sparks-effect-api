@@ -280,7 +280,7 @@ and tags.
 
 ## Requirements
 
-- [Go](https://go.dev/dl/) 1.25+
+- [Go](https://go.dev/dl/) 1.26.9+
 - [Docker](https://www.docker.com/) (optional; for containerized runs and the
   database integration tests — podman also works)
 - `golangci-lint` (installed automatically by `make lint` if missing)
