@@ -9,7 +9,11 @@ on:
   pull_request:
 
 env:
-  GO_VERSION: "1.26"
+  # The exact patch, not just the minor: go.mod's `go` directive is the
+  # floor every toolchain must meet, and setup-go resolves a bare "1.26"
+  # from the runner's tool cache, which can lag the latest patch. Moves
+  # together with go.mod and the Dockerfile's golang image.
+  GO_VERSION: "1.26.9"
 
 jobs:
   check:
