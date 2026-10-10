@@ -615,6 +615,7 @@ scenario/route reads or `/api/internal/*`.
 | `GET /api/me/handovers` | authenticated | Your pending handovers, `{incoming, outgoing}`, with the service and the other party's display name |
 | `POST /api/handovers/{id}/cancel` | authenticated | Withdraw a pending offer you sent |
 | `POST /api/handovers/{id}/decline` | authenticated | Refuse a pending offer sent to you |
+| `POST /api/handovers/{id}/accept` | authenticated | Take ownership of a service offered to you, with its compile jobs and publication, in one transaction. 409 `service_in_scenarios` (detail lists the slugs) while the sender's scenarios still include it; 409 if the offer has closed or expired, or the sender no longer owns the service |
 | `POST /api/admin/users` | admin | Provision an account with a password (for scripts) |
 | `POST /api/admin/invites` | admin | Create an account and return its one-time invite link |
 | `POST /api/admin/users/{id}/reset-link` | admin | Return a one-time password-reset link |
@@ -758,11 +759,28 @@ Five rules, all enforced server-side:
 - **Handover** — offering a service goes through `CanAccess` like any other
   write, so an admin may offer one on the owner's behalf (the owner stays the
   sender). Deciding does not: only the sender may cancel and only the
-  recipient may decline, and everyone else, an admin included, gets 404. The
-  offer answers 202 with one body whether or not `to_email` belongs to an
-  active account, so it cannot be used to discover who has one. A pending
-  offer past `expires_at` (14 days) reads as expired and can no longer be
-  cancelled or declined. Accepting is not built yet (SPA-389).
+  recipient may accept or decline, and everyone else, an admin included, gets
+  404. The offer answers 202 with one body whether or not `to_email` belongs
+  to an active account, so it cannot be used to discover who has one. A
+  pending offer past `expires_at` (14 days) reads as expired and can no
+  longer be cancelled, declined or accepted.
+- **Accepting a handover** moves the service in one transaction, with the
+  offer and the service rows locked, so two accepts of one offer succeed
+  exactly once. What moves: `user_services.owner_id`, and `owner_id` on the
+  service's compile `jobs` (the recipient polls `GET /api/jobs/{id}` on it).
+  What stays put: `service_publications` is keyed by the service and has no
+  owner, so the public page keeps answering identically; `routing_jobs` are
+  short-lived and left alone. A route the recipient cannot reference (owned,
+  and not by them) is **copied** to the recipient — new id and slug, same
+  geometry and segments, no scenario — and the service repointed; the
+  sender's route is never moved because they may use it elsewhere. A service
+  still in any of the sender's scenarios is **refused** with 409
+  `service_in_scenarios` listing the slugs: every member of a scenario must
+  belong to its owner, interchange pairs name the service's stops, and
+  silently editing the sender's scenarios is not something an accept does.
+  The sender removes it first and the same offer then goes through. The move
+  itself is `Repo.TransferUserService`, which the admin force-move (SPA-390)
+  reuses.
 
 ### Database integration tests
 
