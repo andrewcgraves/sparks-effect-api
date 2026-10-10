@@ -301,8 +301,20 @@ func TestRouteBySlugReturnsGeometryPhysicsAndMetadata(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body.String())
 	}
 
+	// The owner-only fields SPA-481 added to GET /api/me/routes/{slug} must
+	// not leak onto the curated read, which stays the bare Route.
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &fields); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	for _, k := range []string{"length_m", "dependents"} {
+		if _, leaked := fields[k]; leaked {
+			t.Errorf("curated read carries owner-only field %q: %s", k, rec.Body.String())
+		}
+	}
+
 	var got transit.Route
-	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if got.Slug != "test-alignment" || got.Name != "Test Alignment" || got.Mode != "rail" {

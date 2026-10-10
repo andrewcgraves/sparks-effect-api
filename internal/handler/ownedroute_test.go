@@ -253,25 +253,39 @@ func TestUpdateOwnedRouteRefusesGeometryEditsWhileInUse(t *testing.T) {
 		props       = `"name": "Bay Link", "mode": "rail"`
 		movedCoords = `[[-122.4, 37.79], [-122.35, 37.75], [-122.3, 37.70]]`
 	)
+	physics := []transit.RouteSegment{{CantMM: 50, CurveRadiusM: 2000, GradePct: 1}}
 	for _, tc := range []struct {
-		name string
-		body string
-		free bool
-		want int
+		name   string
+		body   string
+		stored []transit.RouteSegment
+		free   bool
+		want   int
 	}{
-		{"moving the alignment", routeBody(movedCoords, props), false, http.StatusConflict},
+		{"moving the alignment", routeBody(movedCoords, props), nil, false, http.StatusConflict},
 		{"changing the physics",
 			routeBody(bayLinkCoords, props+`, "segments": [{"cant_mm": 50, "curve_radius_m": 2000, "grade_pct": 1}]`),
-			false, http.StatusConflict},
-		{"renaming", ownedRouteBody("Bay Link Renamed", "", ""), false, http.StatusOK},
-		{"describing", ownedRouteBody("Bay Link", "now with prose", ""), false, http.StatusOK},
-		{"changing mode", routeBody(bayLinkCoords, `"name": "Bay Link", "mode": "metro"`), false, http.StatusOK},
-		{"making it one-way", routeBody(bayLinkCoords, props+`, "bidirectional": false`), false, http.StatusOK},
-		{"moving an alignment nothing depends on", routeBody(movedCoords, props), true, http.StatusOK},
+			nil, false, http.StatusConflict},
+		// Omitting segments on a route stored with them clears its physics,
+		// which is a geometry edit like any other.
+		{"clearing the physics", routeBody(bayLinkCoords, props), physics, false, http.StatusConflict},
+		{"sending the physics back unchanged",
+			routeBody(bayLinkCoords, props+`, "segments": [{"cant_mm": 50, "curve_radius_m": 2000, "grade_pct": 1}]`),
+			physics, false, http.StatusOK},
+		// Postgres reads a route stored without physics back as an empty
+		// array, and an ingest without physics builds nil; neither is a change.
+		{"sending no physics to a route stored with none",
+			routeBody(bayLinkCoords, props), []transit.RouteSegment{}, false, http.StatusOK},
+		{"renaming", ownedRouteBody("Bay Link Renamed", "", ""), nil, false, http.StatusOK},
+		{"describing", ownedRouteBody("Bay Link", "now with prose", ""), nil, false, http.StatusOK},
+		{"changing mode", routeBody(bayLinkCoords, `"name": "Bay Link", "mode": "metro"`), nil, false, http.StatusOK},
+		{"making it one-way", routeBody(bayLinkCoords, props+`, "bidirectional": false`), nil, false, http.StatusOK},
+		{"moving an alignment nothing depends on", routeBody(movedCoords, props), nil, true, http.StatusOK},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := newFakeOwnedRouteStore()
-			store.routes["bay-link"] = bayLink()
+			rt := bayLink()
+			rt.Segments = tc.stored
+			store.routes["bay-link"] = rt
 			if !tc.free {
 				store.deps[bayLinkID] = transit.RouteDependents{UserServices: 2}
 			}
@@ -298,7 +312,7 @@ func TestUpdateOwnedRouteRefusesGeometryEditsWhileInUse(t *testing.T) {
 			if refusal.Detail.UserServices != 2 {
 				t.Errorf("detail: want the dependents DELETE reports, got %+v", refusal.Detail)
 			}
-			if len(store.routes["bay-link"].Geometry.Coordinates) != 2 || store.routes["bay-link"].Segments != nil {
+			if kept := store.routes["bay-link"]; len(kept.Geometry.Coordinates) != 2 || len(kept.Segments) != len(tc.stored) {
 				t.Error("the route was changed despite the refusal")
 			}
 		})
