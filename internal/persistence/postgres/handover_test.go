@@ -11,6 +11,7 @@ import (
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
 	"github.com/andrewcgraves/sparks-effect-api/internal/persistence/postgres"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
+	"github.com/jackc/pgx/v5"
 )
 
 const (
@@ -372,14 +373,14 @@ func TestAcceptServiceHandoverCopiesASenderOwnedRouteAndLeavesTheOriginal(t *tes
 }
 
 func TestAcceptServiceHandoverRefusesWhenTheSenderNoLongerOwnsTheService(t *testing.T) {
-	repo, ctx, _ := handoverFixture(t)
+	repo, ctx, url := handoverFixture(t)
 	if err := repo.CreateUser(ctx, account.User{ID: hoThirdUserID, Email: "third@example.com", Name: "Third"}, ""); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
 	offer(t, repo, ctx, hoID1, time.Hour)
-	if err := repo.TransferUserService(ctx, usServiceID, hoThirdUserID); err != nil {
-		t.Fatalf("TransferUserService: %v", err)
-	}
+	// Moved underneath the offer by hand, so the admin path's own cancel of
+	// pending offers is not what the accept trips over.
+	exec(t, url, fmt.Sprintf(`UPDATE user_services SET owner_id = '%s' WHERE id = '%s'`, hoThirdUserID, usServiceID))
 
 	if _, err := repo.AcceptServiceHandover(ctx, hoID1, usStrangerID); !errors.Is(err, handler.ErrHandoverSenderNotOwner) {
 		t.Fatalf("accept: err = %v, want ErrHandoverSenderNotOwner", err)
@@ -413,9 +414,132 @@ func TestTransferUserServiceRefusesAServiceInAScenario(t *testing.T) {
 		t.Fatalf("CreateUserScenario: %v", err)
 	}
 
-	err := repo.TransferUserService(ctx, usServiceID, usStrangerID)
+	_, err := repo.TransferUserService(ctx, usServiceID, usStrangerID, fixtureAdmin(t, repo, ctx))
 	var inScenarios *handler.ServiceInScenariosError
 	if !errors.As(err, &inScenarios) || len(inScenarios.Slugs) != 1 || inScenarios.Slugs[0] != "commute" {
 		t.Fatalf("TransferUserService: err = %v, want *ServiceInScenariosError{commute}", err)
+	}
+	if got := fixtureService(t, repo, ctx); got.OwnerID != usOwnerID {
+		t.Fatalf("owner_id = %s, want unchanged", got.OwnerID)
+	}
+}
+
+const hoAdminID = "00000000-0000-4007-8003-000000000004"
+
+func fixtureAdmin(t *testing.T, repo *postgres.Repo, ctx context.Context) string {
+	t.Helper()
+	if err := repo.CreateUser(ctx, account.User{ID: hoAdminID, Email: "admin@example.com", Name: "Admin", IsAdmin: true}, ""); err != nil {
+		t.Fatalf("CreateUser admin: %v", err)
+	}
+	return hoAdminID
+}
+
+func queryRow(t *testing.T, url, sql string, dest ...any) {
+	t.Helper()
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, url)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer func() { _ = conn.Close(ctx) }()
+	if err := conn.QueryRow(ctx, sql).Scan(dest...); err != nil {
+		t.Fatalf("query %q: %v", sql, err)
+	}
+}
+
+func TestTransferUserServiceMovesTheServiceCancelsThePendingOfferAndRecordsTheAdmin(t *testing.T) {
+	repo, ctx, url := handoverFixture(t)
+	admin := fixtureAdmin(t, repo, ctx)
+	before := fixtureService(t, repo, ctx)
+	owner := usOwnerID
+	if err := repo.CreateJob(ctx, transit.Job{
+		ID: hoJobID, Kind: transit.JobKindCompileUserService, Status: transit.JobStatusSucceeded,
+		UserServiceID: &before.ID, OwnerID: &owner,
+	}); err != nil {
+		t.Fatalf("CreateJob: %v", err)
+	}
+	if err := repo.CreateUser(ctx, account.User{ID: hoThirdUserID, Email: "third@example.com", Name: "Third"}, ""); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	offer(t, repo, ctx, hoID1, time.Hour)
+
+	got, err := repo.TransferUserService(ctx, usServiceID, hoThirdUserID, admin)
+	if err != nil {
+		t.Fatalf("TransferUserService: %v", err)
+	}
+	if got.Status != transit.HandoverAccepted || got.DecidedAt == nil || got.ID == "" || got.ID == hoID1 {
+		t.Fatalf("recorded = %+v, want a new accepted row", got)
+	}
+	if got.FromUserID != usOwnerID || got.FromName != "Owner" || got.ToUserID != hoThirdUserID || got.ToName != "Third" {
+		t.Fatalf("recorded = %+v, want from the old owner to the named user", got)
+	}
+	if got.ForcedBy == nil || *got.ForcedBy != admin {
+		t.Fatalf("forced_by = %v, want the admin %s", got.ForcedBy, admin)
+	}
+	if got.ServiceSlug != before.Slug || got.ServiceName != before.Name {
+		t.Fatalf("recorded = %+v, want the service named", got)
+	}
+
+	after := fixtureService(t, repo, ctx)
+	if after.OwnerID != hoThirdUserID || after.Slug != before.Slug || after.RouteID != before.RouteID {
+		t.Fatalf("service after = %+v, want owned by the third user with slug and route untouched", after)
+	}
+	if !after.UpdatedAt.After(before.UpdatedAt) {
+		t.Fatalf("updated_at = %v, want later than %v", after.UpdatedAt, before.UpdatedAt)
+	}
+	job, found, err := repo.GetJobByID(ctx, hoJobID)
+	if err != nil || !found || job.OwnerID == nil || *job.OwnerID != hoThirdUserID {
+		t.Fatalf("job = %+v found=%v err=%v, want owned by the third user", job, found, err)
+	}
+
+	// The offer to the stranger is closed, so they cannot accept a service
+	// that has already moved, and it no longer lists for either party.
+	if _, err := repo.AcceptServiceHandover(ctx, hoID1, usStrangerID); !errors.Is(err, handler.ErrHandoverNotPending) {
+		t.Fatalf("accept after the move: err = %v, want ErrHandoverNotPending", err)
+	}
+	for _, user := range []string{usOwnerID, usStrangerID, hoThirdUserID} {
+		if list, _ := repo.ListPendingServiceHandovers(ctx, user); len(list) != 0 {
+			t.Fatalf("list for %s after the move = %+v, want empty", user, list)
+		}
+	}
+	// Cancelled, not expired or accepted: the sender's offer was withdrawn
+	// on their behalf, and the one accepted row is the admin's.
+	var status string
+	var forcedBy *string
+	queryRow(t, url, `SELECT status, forced_by FROM service_handovers WHERE id = '`+hoID1+`'`, &status, &forcedBy)
+	if status != transit.HandoverCancelled || forcedBy != nil {
+		t.Fatalf("offer status = %s forced_by = %v, want cancelled by nobody", status, forcedBy)
+	}
+}
+
+func TestTransferUserServiceRefusesTheOwnerAndADisabledRecipient(t *testing.T) {
+	repo, ctx, url := handoverFixture(t)
+	admin := fixtureAdmin(t, repo, ctx)
+
+	if _, err := repo.TransferUserService(ctx, usServiceID, usOwnerID, admin); !errors.Is(err, handler.ErrHandoverToOwner) {
+		t.Fatalf("to the owner: err = %v, want ErrHandoverToOwner", err)
+	}
+	if err := repo.SetUserDisabled(ctx, usStrangerID, true); err != nil {
+		t.Fatalf("SetUserDisabled: %v", err)
+	}
+	if _, err := repo.TransferUserService(ctx, usServiceID, usStrangerID, admin); !errors.Is(err, handler.ErrHandoverRecipientDisabled) {
+		t.Fatalf("to a disabled account: err = %v, want ErrHandoverRecipientDisabled", err)
+	}
+	if got := fixtureService(t, repo, ctx); got.OwnerID != usOwnerID {
+		t.Fatalf("owner_id = %s, want unchanged", got.OwnerID)
+	}
+	var rows int
+	queryRow(t, url, `SELECT count(*) FROM service_handovers`, &rows)
+	if rows != 0 {
+		t.Fatalf("%d handover rows after two refusals, want none", rows)
+	}
+}
+
+func TestForcedByMigrationIsSafeToReRun(t *testing.T) {
+	_, ctx, url := handoverFixture(t)
+
+	rewindTo(t, url, 37)
+	if err := postgres.Migrate(ctx, url); err != nil {
+		t.Fatalf("re-running 00037 over the column it already added: %v", err)
 	}
 }

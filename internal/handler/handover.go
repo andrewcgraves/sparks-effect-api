@@ -24,6 +24,7 @@ var (
 	ErrHandoverNotPending        = errors.New("handover is no longer pending")
 	ErrHandoverSenderNotOwner    = errors.New("the sender no longer owns this service")
 	ErrHandoverRecipientDisabled = errors.New("the recipient's account is disabled")
+	ErrHandoverToOwner           = errors.New("a service cannot be handed over to its owner")
 )
 
 const ServiceInScenariosErrorCode = "service_in_scenarios"

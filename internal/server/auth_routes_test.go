@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -213,6 +214,9 @@ func (s *stubAuthDeps) DeclineServiceHandover(context.Context, string, string) (
 func (s *stubAuthDeps) AcceptServiceHandover(context.Context, string, string) (transit.ServiceHandover, error) {
 	return transit.ServiceHandover{}, handler.ErrHandoverNotFound
 }
+func (s *stubAuthDeps) TransferUserService(context.Context, string, string, string) (transit.ServiceHandover, error) {
+	return transit.ServiceHandover{}, errors.New("stub: no services")
+}
 func (s *stubAuthDeps) ListPublishedServiceSummaries(context.Context, *transit.PublishedIndexKey, int) (transit.PublishedIndexPage, error) {
 	return transit.PublishedIndexPage{Items: s.published}, nil
 }
@@ -335,6 +339,7 @@ func TestProtectedRoutesRejectAnonymousCallers(t *testing.T) {
 		{http.MethodPost, "/api/admin/users/some-id/reset-link"},
 		{http.MethodPost, "/api/admin/routes"},
 		{http.MethodPost, "/api/admin/retention"},
+		{http.MethodPut, "/api/admin/services/some-slug/owner"},
 		{http.MethodPost, "/api/scenarios/ca-hsr/compile"},
 		{http.MethodGet, "/api/jobs/some-id"},
 		// The authored draft surface. GET .../publication and POST
@@ -389,6 +394,7 @@ func TestAdminRoutesRejectNonAdmins(t *testing.T) {
 		{http.MethodPost, "/api/admin/users/some-id/reset-link"},
 		{http.MethodPost, "/api/admin/routes"},
 		{http.MethodPost, "/api/admin/retention"},
+		{http.MethodPut, "/api/admin/services/some-slug/owner"},
 		// Not under /api/admin/, so nothing about its path says it is gated —
 		// which is exactly why it is asserted here.
 		{http.MethodPost, "/api/scenarios/ca-hsr/prerendered-isochrones"},
@@ -406,6 +412,15 @@ func TestAdminRoutesRejectNonAdmins(t *testing.T) {
 				rec = request(t, h, route.method, route.path, adminToken, `{"is_admin":true}`)
 				if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "user not found") {
 					t.Errorf("admin PATCH: status %d body %s, want the handler's 404", rec.Code, rec.Body.String())
+				}
+				return
+			}
+			// Likewise the stub knows no services, so the owner move answers
+			// the handler's 404 for the slug.
+			if route.method == http.MethodPut {
+				rec = request(t, h, route.method, route.path, adminToken, `{"user_id":"`+mustUUID(t)+`"}`)
+				if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "service not found") {
+					t.Errorf("admin PUT: status %d body %s, want the handler's 404", rec.Code, rec.Body.String())
 				}
 				return
 			}
