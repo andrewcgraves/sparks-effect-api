@@ -117,20 +117,42 @@ func (r *Repo) AcceptServiceHandover(ctx context.Context, id, toUserID string) (
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // rollback after commit is a no-op
 
-	// The offer row is locked first, so two accepts of the same offer
-	// serialise on it: the second waits here, then reads 'accepted' and
-	// answers not-pending. The lock also keeps a cancel or decline from
-	// closing the offer underneath the transfer.
+	// An unlocked read only to learn which service this is: the locks below
+	// are taken service first, then offer. Deleting a service locks its row
+	// and then cascades into its offers, so taking them in the other order
+	// here could deadlock a sender's delete against a recipient's accept.
+	var serviceID string
+	err = tx.QueryRow(ctx,
+		`SELECT h.user_service_id FROM service_handovers h WHERE h.id = $1 AND h.to_user_id = $2`,
+		id, toUserID).Scan(&serviceID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return transit.ServiceHandover{}, handler.ErrHandoverNotFound
+	}
+	if err != nil {
+		return transit.ServiceHandover{}, wrap(op+" lookup", err)
+	}
+	ownerID, routeID, found, err := lockUserService(ctx, tx, op, serviceID)
+	if err != nil {
+		return transit.ServiceHandover{}, err
+	}
+	if !found {
+		// Deleted since the read above; the cascade took the offer with it.
+		return transit.ServiceHandover{}, handler.ErrHandoverNotFound
+	}
+
+	// Two accepts of one offer serialise on this lock: the second waits
+	// here, then reads 'accepted' and answers not-pending. It also keeps a
+	// cancel or decline from closing the offer underneath the move.
 	var (
-		serviceID, fromUserID string
-		live                  bool
+		fromUserID string
+		live       bool
 	)
 	err = tx.QueryRow(ctx,
-		`SELECT h.user_service_id, h.from_user_id, (`+livePending+`)
+		`SELECT h.from_user_id, (`+livePending+`)
 		   FROM service_handovers h
 		  WHERE h.id = $1 AND h.to_user_id = $2
 		    FOR UPDATE`,
-		id, toUserID).Scan(&serviceID, &fromUserID, &live)
+		id, toUserID).Scan(&fromUserID, &live)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return transit.ServiceHandover{}, handler.ErrHandoverNotFound
 	}
@@ -139,6 +161,11 @@ func (r *Repo) AcceptServiceHandover(ctx context.Context, id, toUserID string) (
 	}
 	if !live {
 		return transit.ServiceHandover{}, handler.ErrHandoverNotPending
+	}
+	// The offer was made by whoever owned the service then; if it has changed
+	// hands since (an admin move), the offer no longer describes anything.
+	if ownerID != fromUserID {
+		return transit.ServiceHandover{}, handler.ErrHandoverSenderNotOwner
 	}
 
 	// The session middleware already turns a disabled account away, so this
@@ -152,19 +179,7 @@ func (r *Repo) AcceptServiceHandover(ctx context.Context, id, toUserID string) (
 		return transit.ServiceHandover{}, handler.ErrHandoverRecipientDisabled
 	}
 
-	// The service row is locked for the rest of the transaction. The offer
-	// was made by whoever owned the service then; if it has changed hands
-	// since (an admin move), the offer no longer describes anything.
-	var ownerID string
-	if err := tx.QueryRow(ctx,
-		`SELECT owner_id FROM user_services WHERE id = $1 FOR UPDATE`, serviceID).Scan(&ownerID); err != nil {
-		return transit.ServiceHandover{}, wrap(op+" service", err)
-	}
-	if ownerID != fromUserID {
-		return transit.ServiceHandover{}, handler.ErrHandoverSenderNotOwner
-	}
-
-	if err := transferUserService(ctx, tx, op, serviceID, toUserID); err != nil {
+	if err := moveLockedUserService(ctx, tx, op, serviceID, routeID, toUserID); err != nil {
 		return transit.ServiceHandover{}, err
 	}
 
@@ -180,10 +195,11 @@ func (r *Repo) AcceptServiceHandover(ctx context.Context, id, toUserID string) (
 	return h, wrap(op+" commit", tx.Commit(ctx))
 }
 
-// TransferUserService moves a service to another owner outside an offer: the
-// admin force-move. It is the same transfer an accept performs, with the same
-// refusal for a service still in a scenario.
 func (r *Repo) TransferUserService(ctx context.Context, serviceID, toUserID string) error {
+	// The owner move without an offer, for the admin force-move (SPA-390).
+	// It is the ticket's name for the method; the domain word is handover.
+	// The same refusal for a service still in a scenario applies, so the
+	// scenario-membership invariant does not depend on which path moved it.
 	const op = "TransferUserService"
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -191,41 +207,57 @@ func (r *Repo) TransferUserService(ctx context.Context, serviceID, toUserID stri
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // rollback after commit is a no-op
 
-	if err := transferUserService(ctx, tx, op, serviceID, toUserID); err != nil {
+	_, routeID, found, err := lockUserService(ctx, tx, op, serviceID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("postgres: %s: no service with id %q", op, serviceID)
+	}
+	if err := moveLockedUserService(ctx, tx, op, serviceID, routeID, toUserID); err != nil {
 		return err
 	}
 	return wrap(op+" commit", tx.Commit(ctx))
 }
 
+// Row-locks the service for the rest of the transaction and returns what the
+// move needs from it.
+func lockUserService(ctx context.Context, tx pgx.Tx, op, serviceID string) (ownerID, routeID string, found bool, err error) {
+	err = tx.QueryRow(ctx,
+		`SELECT owner_id, route_id FROM user_services WHERE id = $1 FOR UPDATE`, serviceID).Scan(&ownerID, &routeID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", false, nil
+	}
+	if err != nil {
+		return "", "", false, wrap(op+" service", err)
+	}
+	return ownerID, routeID, true, nil
+}
+
 const maxRouteCopyAttempts = 100
 
-// What moves with a service and what cannot:
+// What moves with a service and what cannot. The caller holds the service's
+// row lock (lockUserService).
 //
 //   - service_publications is keyed by the service and has no owner column,
 //     so the publication and its public URL come along untouched.
 //   - jobs carry owner_id, and GET /api/jobs/{id} authorises on it, so the
 //     service's compile jobs are re-owned or the recipient could not poll them.
 //   - routing_jobs (draft isochrones) are short-lived and are left alone.
-//   - A route the recipient cannot reference (owned, and not by them) is
-//     copied, never moved: the sender may use it elsewhere. The copy keeps the
+//   - A route the recipient cannot reference is copied, never moved: the
+//     sender may use it elsewhere. "Cannot reference" is read as owned by
+//     anyone but the recipient, which is wider than the ticket's "owned by
+//     the sender": it also covers a service an admin once moved onto a third
+//     party's route, and copies for an admin recipient who could have
+//     referenced it anyway, which costs one spare route. The copy keeps the
 //     geometry byte for byte, so snapped stops keep their chainage. It takes
 //     no scenario: a route's scenario is one its owner owns, which the
 //     recipient does not.
 //   - A service in a scenario is refused. Every member of a scenario must
-//     belong to the scenario's owner, and interchange pairs name the
-//     service's stops; silently editing the sender's scenario is not an
-//     option this code takes.
-func transferUserService(ctx context.Context, tx pgx.Tx, op, serviceID, toUserID string) error {
-	var routeID string
-	err := tx.QueryRow(ctx,
-		`SELECT route_id FROM user_services WHERE id = $1 FOR UPDATE`, serviceID).Scan(&routeID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return fmt.Errorf("postgres: %s: no service with id %q", op, serviceID)
-	}
-	if err != nil {
-		return wrap(op+" service", err)
-	}
-
+//     belong to the scenario's owner, so the scenarios found are the
+//     sender's, and interchange pairs name the service's stops; silently
+//     editing the sender's scenario is not an option this code takes.
+func moveLockedUserService(ctx context.Context, tx pgx.Tx, op, serviceID, routeID, toUserID string) error {
 	slugs, err := scenarioSlugsContaining(ctx, tx, op, serviceID)
 	if err != nil {
 		return err

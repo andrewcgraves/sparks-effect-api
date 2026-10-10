@@ -184,7 +184,7 @@ const (
 	hoJobID       = "00000000-0000-400a-8003-000000000001"
 )
 
-func handedOverService(t *testing.T, repo *postgres.Repo, ctx context.Context) transit.UserService {
+func fixtureService(t *testing.T, repo *postgres.Repo, ctx context.Context) transit.UserService {
 	t.Helper()
 	svc, found, err := repo.GetUserServiceByID(ctx, usServiceID)
 	if err != nil || !found {
@@ -195,7 +195,7 @@ func handedOverService(t *testing.T, repo *postgres.Repo, ctx context.Context) t
 
 func TestAcceptServiceHandoverMovesTheServiceAndItsJobsAndClosesTheOffer(t *testing.T) {
 	repo, ctx, _ := handoverFixture(t)
-	before := handedOverService(t, repo, ctx)
+	before := fixtureService(t, repo, ctx)
 	owner := usOwnerID
 	if err := repo.CreateJob(ctx, transit.Job{
 		ID: hoJobID, Kind: transit.JobKindCompileUserService, Status: transit.JobStatusSucceeded,
@@ -213,7 +213,7 @@ func TestAcceptServiceHandoverMovesTheServiceAndItsJobsAndClosesTheOffer(t *test
 		t.Fatalf("accepted = %+v", got)
 	}
 
-	after := handedOverService(t, repo, ctx)
+	after := fixtureService(t, repo, ctx)
 	if after.OwnerID != usStrangerID {
 		t.Fatalf("owner_id = %s, want the recipient %s", after.OwnerID, usStrangerID)
 	}
@@ -259,7 +259,7 @@ func TestAcceptServiceHandoverBelongsToTheRecipient(t *testing.T) {
 	if _, err := repo.AcceptServiceHandover(ctx, hoID3, usStrangerID); !errors.Is(err, handler.ErrHandoverNotFound) {
 		t.Fatalf("unknown id: err = %v, want ErrHandoverNotFound", err)
 	}
-	if got := handedOverService(t, repo, ctx); got.OwnerID != usOwnerID {
+	if got := fixtureService(t, repo, ctx); got.OwnerID != usOwnerID {
 		t.Fatalf("owner_id = %s after refused accepts, want unchanged", got.OwnerID)
 	}
 }
@@ -271,7 +271,7 @@ func TestAcceptServiceHandoverRefusesAnExpiredOffer(t *testing.T) {
 	if _, err := repo.AcceptServiceHandover(ctx, hoID1, usStrangerID); !errors.Is(err, handler.ErrHandoverNotPending) {
 		t.Fatalf("accept expired: err = %v, want ErrHandoverNotPending", err)
 	}
-	if got := handedOverService(t, repo, ctx); got.OwnerID != usOwnerID {
+	if got := fixtureService(t, repo, ctx); got.OwnerID != usOwnerID {
 		t.Fatalf("owner_id = %s, want unchanged", got.OwnerID)
 	}
 }
@@ -298,7 +298,7 @@ func TestAcceptServiceHandoverRefusesAServiceStillInASenderScenario(t *testing.T
 	}
 
 	// Nothing moved and the offer is still open for the sender to act on.
-	if got := handedOverService(t, repo, ctx); got.OwnerID != usOwnerID {
+	if got := fixtureService(t, repo, ctx); got.OwnerID != usOwnerID {
 		t.Fatalf("owner_id = %s, want unchanged", got.OwnerID)
 	}
 	pending, err := repo.HasPendingServiceHandover(ctx, usServiceID)
@@ -319,7 +319,7 @@ func TestAcceptServiceHandoverCopiesASenderOwnedRouteAndLeavesTheOriginal(t *tes
 	if err := repo.CreateRoute(ctx, original); err != nil {
 		t.Fatalf("CreateRoute: %v", err)
 	}
-	svc := handedOverService(t, repo, ctx)
+	svc := fixtureService(t, repo, ctx)
 	svc.RouteID = hoOwnedRoute
 	if err := repo.UpdateUserService(ctx, svc); err != nil {
 		t.Fatalf("UpdateUserService: %v", err)
@@ -330,7 +330,7 @@ func TestAcceptServiceHandoverCopiesASenderOwnedRouteAndLeavesTheOriginal(t *tes
 		t.Fatalf("AcceptServiceHandover: %v", err)
 	}
 
-	after := handedOverService(t, repo, ctx)
+	after := fixtureService(t, repo, ctx)
 	if after.RouteID == hoOwnedRoute {
 		t.Fatalf("route_id still %s, want a copy the recipient owns", hoOwnedRoute)
 	}
@@ -384,7 +384,7 @@ func TestAcceptServiceHandoverRefusesWhenTheSenderNoLongerOwnsTheService(t *test
 	if _, err := repo.AcceptServiceHandover(ctx, hoID1, usStrangerID); !errors.Is(err, handler.ErrHandoverSenderNotOwner) {
 		t.Fatalf("accept: err = %v, want ErrHandoverSenderNotOwner", err)
 	}
-	if got := handedOverService(t, repo, ctx); got.OwnerID != hoThirdUserID {
+	if got := fixtureService(t, repo, ctx); got.OwnerID != hoThirdUserID {
 		t.Fatalf("owner_id = %s, want the third user", got.OwnerID)
 	}
 }
@@ -399,7 +399,7 @@ func TestAcceptServiceHandoverRefusesADisabledRecipient(t *testing.T) {
 	if _, err := repo.AcceptServiceHandover(ctx, hoID1, usStrangerID); !errors.Is(err, handler.ErrHandoverRecipientDisabled) {
 		t.Fatalf("accept: err = %v, want ErrHandoverRecipientDisabled", err)
 	}
-	if got := handedOverService(t, repo, ctx); got.OwnerID != usOwnerID {
+	if got := fixtureService(t, repo, ctx); got.OwnerID != usOwnerID {
 		t.Fatalf("owner_id = %s, want unchanged", got.OwnerID)
 	}
 }
