@@ -601,8 +601,8 @@ scenario/route reads or `/api/internal/*`.
 | `POST /api/auth/sessions/revoke-all` | authenticated | Revoke every session the caller has, the presenting one included. `204` |
 | `GET /api/me/scenarios` | authenticated | Seeded Scenarios the caller owns |
 | `GET /api/me/services` | authenticated | Seeded Services the caller owns, not UserServices |
-| `POST /api/me/routes` | authenticated | Author an alignment of your own |
-| `GET`/`PUT`/`DELETE /api/me/routes/{slug}` | authenticated | Read, edit, or remove one |
+| `GET`/`POST /api/me/routes` | authenticated | Your alignments, each with `id`, `length_m` and `dependents`; author one of your own |
+| `GET`/`PUT`/`DELETE /api/me/routes/{slug}` | authenticated | Read, edit, or remove one. `409` `route_in_use` on removing, or changing the geometry of, a route anything is built on |
 | `POST /api/routes/{slug}/snap-stops` | optional | Project stop coordinates onto a route's alignment; public for curated routes, owner-scoped for owned drafts |
 | `POST /api/me/scenarios` | authenticated | Author a seeded scenario of your own |
 | `GET`/`PUT`/`DELETE /api/me/scenarios/{slug}` | authenticated | Read, edit, or remove one |
@@ -637,6 +637,19 @@ through the same path the baseline does, via
 `POST /api/scenarios/{slug}/compile`. It just never appears on a public
 surface. The authored `UserScenario` / `UserService` surface is a different
 model; see [Two scenario models](#two-scenario-models).
+
+An owner's reads of their own routes, `GET /api/me/routes` and
+`GET /api/me/routes/{slug}`, carry what the curated reads do not: the route's
+`id`, its `length_m` (metres along the LineString, by the same planar chainage
+stops are placed with) and `dependents`, the `{services, user_services,
+segments}` counts built on it. The single-route read is the curated `Route`
+shape with those two fields added, so `GET /api/routes/{slug}` is unchanged.
+While any count is above zero the route is **in use**: `DELETE` refuses with
+`409` `route_in_use`, and so does a `PUT` that changes `coordinates` or
+`segments`, with the same body (the counts as `detail`), because services place
+their stops by chainage along that geometry and segments carry run times
+measured over it. Name, description, mode and `bidirectional` stay editable
+while in use.
 
 One invariant holds that together: **a scenario and all of its children share
 one owner** ([CONTEXT.md](CONTEXT.md#seeded--curated--authored--owned)). The

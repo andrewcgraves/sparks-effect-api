@@ -91,6 +91,17 @@ func CompileServicePhysics(svc CompilableService, boardingWait BoardingWaitPolic
 	return sg, nil
 }
 
+func (g GeoLineString) LengthM() float64 {
+	line, err := ToPhysicsLine(g)
+	if err != nil {
+		// A stored route always has the two points ingest requires; a
+		// summary of one that somehow does not is still worth serving,
+		// with the zero length physics would report for it.
+		return 0
+	}
+	return physics.LineLengthM(line)
+}
+
 func ToPhysicsLine(g GeoLineString) ([]physics.Point, error) {
 	if len(g.Coordinates) < 2 {
 		return nil, fmt.Errorf("route geometry must have at least 2 points, got %d", len(g.Coordinates))

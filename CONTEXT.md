@@ -322,6 +322,7 @@ Returned as the `code` field of an error body.
 | `rate_limited` | 429 | The per-caller limiter refused the request. Carries `Retry-After` |
 | `stop_placement` | 422 | A stop is off-route or out of chainage order. Detail carries the fault kind, route slug, threshold and the offending stops |
 | `stale_graph` | 409 | The compiled graph no longer matches its inputs; recompile and retry. Also the answer to publishing a service with no succeeded, non-stale compile |
+| `route_in_use` | 409 | The route still has services, user services or segments built on it, so it cannot be deleted, and a `PUT` may not change its `coordinates` or `segments`. Detail carries the `{services, user_services, segments}` counts, the same `dependents` the owner reads report. Name, description, mode and `bidirectional` stay editable while in use |
 | `publish_failed` | 502 | The routing job row exists but could not be published to the queue, so it was marked failed immediately rather than being stranded in `queued`. The queue sense only — publishing a service never answers it |
 
 ### Job status

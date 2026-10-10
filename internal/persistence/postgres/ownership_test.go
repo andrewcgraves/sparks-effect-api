@@ -20,7 +20,7 @@ const (
 func ownershipFixture(t *testing.T) (repo interface {
 	ListCuratedScenarios(context.Context) ([]transit.Scenario, error)
 	ListCuratedRouteSummaries(context.Context) ([]transit.RouteSummary, error)
-	ListRouteSummariesByOwner(context.Context, string) ([]transit.RouteSummary, error)
+	ListRoutesByOwner(context.Context, string) ([]transit.Route, error)
 	ListScenariosByOwner(context.Context, string) ([]transit.Scenario, error)
 }, url string) {
 	t.Helper()
@@ -96,20 +96,23 @@ func TestListCuratedRouteSummariesExcludesOwnedRoutes(t *testing.T) {
 	}
 }
 
-func TestListRouteSummariesByOwnerReturnsOnlyTheCallersRoutes(t *testing.T) {
+func TestListRoutesByOwnerReturnsOnlyTheCallersRoutes(t *testing.T) {
 	repo, _ := ownershipFixture(t)
 
-	got, err := repo.ListRouteSummariesByOwner(context.Background(), ownershipOwnerID)
+	got, err := repo.ListRoutesByOwner(context.Background(), ownershipOwnerID)
 	if err != nil {
-		t.Fatalf("ListRouteSummariesByOwner: %v", err)
+		t.Fatalf("ListRoutesByOwner: %v", err)
 	}
 	if len(got) != 1 || got[0].Slug != "owned-alignment" {
 		t.Fatalf("want only the owned route, got %+v", got)
 	}
-	// The summary carries description so an owner's own list reads as more
-	// than a slug; curated summaries leave it empty.
+	// The owner's list is built from whole rows: its description so the
+	// list reads as more than a slug, and its geometry for the length.
 	if got[0].Description != "a draft" {
 		t.Errorf("description: want %q, got %q", "a draft", got[0].Description)
+	}
+	if got[0].ID != ownershipOwnedRtID || len(got[0].Geometry.Coordinates) != 2 {
+		t.Errorf("want the whole row with its geometry, got %+v", got[0])
 	}
 }
 

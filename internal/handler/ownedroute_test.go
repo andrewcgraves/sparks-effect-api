@@ -97,16 +97,14 @@ func (f *fakeOwnedRouteStore) CountRouteDependents(_ context.Context, routeID st
 	return f.deps[routeID], nil
 }
 
-func (f *fakeOwnedRouteStore) ListRouteSummariesByOwner(_ context.Context, ownerID string) ([]transit.RouteSummary, error) {
+func (f *fakeOwnedRouteStore) ListRoutesByOwner(_ context.Context, ownerID string) ([]transit.Route, error) {
 	if f.failWith != nil {
 		return nil, f.failWith
 	}
-	var out []transit.RouteSummary
+	var out []transit.Route
 	for _, rt := range f.routes {
 		if rt.OwnerID != nil && *rt.OwnerID == ownerID {
-			out = append(out, transit.RouteSummary{
-				Slug: rt.Slug, Name: rt.Name, Description: rt.Description, Mode: rt.Mode,
-			})
+			out = append(out, rt)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Slug < out[j].Slug })
@@ -139,21 +137,172 @@ func asUser(t *testing.T, h http.HandlerFunc, user account.User, method, target,
 	return runWithSlug(t, h, user, method, target, slug, body)
 }
 
+const (
+	bayLinkID     = "00000000-0000-4002-8000-000000000001"
+	bayLinkCoords = `[[-122.4, 37.79], [-122.3, 37.70]]`
+)
+
+// The same alignment ownedRouteBody sends, so a body built from it with
+// only the properties changed is a non-geometry edit of this route.
+func bayLink() transit.Route {
+	return transit.Route{
+		ID: bayLinkID, Slug: "bay-link", Name: "Bay Link", Mode: "rail",
+		OwnerID: ptrTo(ownerAID), Bidirectional: true,
+		Geometry: transit.GeoLineString{
+			Type: "LineString", Coordinates: [][]float64{{-122.4, 37.79}, {-122.3, 37.70}},
+		},
+	}
+}
+
+func routeBody(coordinates, properties string) string {
+	return `{"type": "LineString", "coordinates": ` + coordinates + `, "properties": {` + properties + `}}`
+}
+
 func ownedRouteBody(name, description, scenarioSlug string) string {
 	scenario := ""
 	if scenarioSlug != "" {
 		scenario = `"scenario_slug": "` + scenarioSlug + `",`
 	}
-	return `{
-	  "type": "LineString",
-	  "coordinates": [[-122.4, 37.79], [-122.3, 37.70]],
-	  "properties": {
-	    "name": "` + name + `",
-	    "description": "` + description + `",
-	    ` + scenario + `
-	    "mode": "rail"
-	  }
-	}`
+	return routeBody(bayLinkCoords,
+		`"name": "`+name+`", "description": "`+description+`", `+scenario+` "mode": "rail"`)
+}
+
+// Bay Link's two points are 0.1° of longitude and 0.09° of latitude apart
+// at 37.7°N: about 8.8 km east-west and 10.0 km north-south, so roughly
+// 13.3 km along the line.
+func assertBayLinkLength(t *testing.T, lengthM float64) {
+	t.Helper()
+	if lengthM < 13_000 || lengthM > 13_700 {
+		t.Errorf("length_m: want about 13.3 km, got %v", lengthM)
+	}
+}
+
+func assertHasKeys(t *testing.T, raw json.RawMessage, keys ...string) {
+	t.Helper()
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		t.Fatalf("decoding object: %v", err)
+	}
+	for _, k := range keys {
+		if _, ok := fields[k]; !ok {
+			t.Errorf("response is missing %q: %s", k, raw)
+		}
+	}
+}
+
+func TestGetOwnedRouteReportsLengthAndDependents(t *testing.T) {
+	store := newFakeOwnedRouteStore()
+	store.routes["bay-link"] = bayLink()
+	store.deps[bayLinkID] = transit.RouteDependents{Services: 1, Segments: 3}
+
+	rec := asUser(t, handler.GetOwnedRoute(store), memberA,
+		http.MethodGet, "/api/me/routes/bay-link", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: want 200, got %d (%s)", rec.Code, rec.Body)
+	}
+	assertHasKeys(t, rec.Body.Bytes(), "id", "slug", "geometry", "length_m", "dependents")
+
+	var got struct {
+		transit.Route
+		LengthM    float64                 `json:"length_m"`
+		Dependents transit.RouteDependents `json:"dependents"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if got.ID != bayLinkID || got.Slug != "bay-link" || len(got.Geometry.Coordinates) != 2 {
+		t.Errorf("route: want Bay Link with its geometry, got %+v", got.Route)
+	}
+	assertBayLinkLength(t, got.LengthM)
+	if want := (transit.RouteDependents{Services: 1, Segments: 3}); got.Dependents != want {
+		t.Errorf("dependents: want %+v, got %+v", want, got.Dependents)
+	}
+}
+
+func TestMyRoutesItemsCarryIDLengthAndDependents(t *testing.T) {
+	store := newFakeOwnedRouteStore()
+	store.routes["bay-link"] = bayLink()
+	store.deps[bayLinkID] = transit.RouteDependents{UserServices: 2}
+
+	rec := asUser(t, handler.MyRoutes(store), memberA, http.MethodGet, "/api/me/routes", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: want 200, got %d (%s)", rec.Code, rec.Body)
+	}
+
+	var raw []json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil || len(raw) != 1 {
+		t.Fatalf("want one item, got %s (%v)", rec.Body, err)
+	}
+	assertHasKeys(t, raw[0], "id", "slug", "name", "mode", "length_m", "dependents")
+
+	var got transit.OwnedRouteSummary
+	if err := json.Unmarshal(raw[0], &got); err != nil {
+		t.Fatalf("decoding item: %v", err)
+	}
+	if got.ID != bayLinkID || got.Slug != "bay-link" || got.Name != "Bay Link" || got.Mode != "rail" {
+		t.Errorf("item: want Bay Link's identity, got %+v", got)
+	}
+	assertBayLinkLength(t, got.LengthM)
+	if want := (transit.RouteDependents{UserServices: 2}); got.Dependents != want {
+		t.Errorf("dependents: want %+v, got %+v", want, got.Dependents)
+	}
+}
+
+func TestUpdateOwnedRouteRefusesGeometryEditsWhileInUse(t *testing.T) {
+	const (
+		props       = `"name": "Bay Link", "mode": "rail"`
+		movedCoords = `[[-122.4, 37.79], [-122.35, 37.75], [-122.3, 37.70]]`
+	)
+	for _, tc := range []struct {
+		name string
+		body string
+		free bool
+		want int
+	}{
+		{"moving the alignment", routeBody(movedCoords, props), false, http.StatusConflict},
+		{"changing the physics",
+			routeBody(bayLinkCoords, props+`, "segments": [{"cant_mm": 50, "curve_radius_m": 2000, "grade_pct": 1}]`),
+			false, http.StatusConflict},
+		{"renaming", ownedRouteBody("Bay Link Renamed", "", ""), false, http.StatusOK},
+		{"describing", ownedRouteBody("Bay Link", "now with prose", ""), false, http.StatusOK},
+		{"changing mode", routeBody(bayLinkCoords, `"name": "Bay Link", "mode": "metro"`), false, http.StatusOK},
+		{"making it one-way", routeBody(bayLinkCoords, props+`, "bidirectional": false`), false, http.StatusOK},
+		{"moving an alignment nothing depends on", routeBody(movedCoords, props), true, http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newFakeOwnedRouteStore()
+			store.routes["bay-link"] = bayLink()
+			if !tc.free {
+				store.deps[bayLinkID] = transit.RouteDependents{UserServices: 2}
+			}
+
+			rec := asUser(t, handler.UpdateOwnedRoute(store), memberA,
+				http.MethodPut, "/api/me/routes/bay-link", tc.body)
+			if rec.Code != tc.want {
+				t.Fatalf("status: want %d, got %d (%s)", tc.want, rec.Code, rec.Body)
+			}
+			if tc.want != http.StatusConflict {
+				return
+			}
+
+			var refusal struct {
+				Code   string                  `json:"code"`
+				Detail transit.RouteDependents `json:"detail"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &refusal); err != nil {
+				t.Fatalf("decoding error body: %v", err)
+			}
+			if refusal.Code != "route_in_use" {
+				t.Errorf("code: want route_in_use, got %q", refusal.Code)
+			}
+			if refusal.Detail.UserServices != 2 {
+				t.Errorf("detail: want the dependents DELETE reports, got %+v", refusal.Detail)
+			}
+			if len(store.routes["bay-link"].Geometry.Coordinates) != 2 || store.routes["bay-link"].Segments != nil {
+				t.Error("the route was changed despite the refusal")
+			}
+		})
+	}
 }
 
 func TestCreateOwnedRouteStampsTheCallerAsOwner(t *testing.T) {
@@ -367,7 +516,7 @@ func TestMyRoutesReturnsOnlyTheCallersOwnRoutes(t *testing.T) {
 		t.Fatalf("status: want 200, got %d", rec.Code)
 	}
 
-	var got []transit.RouteSummary
+	var got []transit.OwnedRouteSummary
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decoding response: %v", err)
 	}
@@ -384,7 +533,7 @@ func TestMyRoutesDoesNotWidenForAdmins(t *testing.T) {
 
 	rec := asUser(t, handler.MyRoutes(store), adminU, http.MethodGet, "/api/me/routes", "")
 
-	var got []transit.RouteSummary
+	var got []transit.OwnedRouteSummary
 	_ = json.Unmarshal(rec.Body.Bytes(), &got)
 	if len(got) != 0 {
 		t.Errorf("want an admin's own (empty) list, got %+v", got)

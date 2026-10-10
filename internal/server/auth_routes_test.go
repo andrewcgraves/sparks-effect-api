@@ -149,7 +149,7 @@ func (s *stubAuthDeps) DeleteRoute(context.Context, string) error        { retur
 func (s *stubAuthDeps) CountRouteDependents(context.Context, string) (transit.RouteDependents, error) {
 	return transit.RouteDependents{}, nil
 }
-func (s *stubAuthDeps) ListRouteSummariesByOwner(context.Context, string) ([]transit.RouteSummary, error) {
+func (s *stubAuthDeps) ListRoutesByOwner(context.Context, string) ([]transit.Route, error) {
 	return nil, nil
 }
 func (s *stubAuthDeps) ListCuratedRouteSummaries(context.Context) ([]transit.RouteSummary, error) {

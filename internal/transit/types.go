@@ -50,6 +50,16 @@ type RouteSummary struct {
 	Mode        string `json:"mode"`
 }
 
+type OwnedRouteSummary struct {
+	ID          string          `json:"id"`
+	Slug        string          `json:"slug"`
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Mode        string          `json:"mode"`
+	LengthM     float64         `json:"length_m"`
+	Dependents  RouteDependents `json:"dependents"`
+}
+
 type RouteDependents struct {
 	Services     int `json:"services"`
 	UserServices int `json:"user_services"`

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
@@ -20,11 +21,17 @@ type OwnedRouteStore interface {
 	UpdateRoute(ctx context.Context, rt transit.Route) error
 	DeleteRoute(ctx context.Context, id string) error
 	CountRouteDependents(ctx context.Context, routeID string) (transit.RouteDependents, error)
-	ListRouteSummariesByOwner(ctx context.Context, ownerID string) ([]transit.RouteSummary, error)
+	ListRoutesByOwner(ctx context.Context, ownerID string) ([]transit.Route, error)
 	GetScenarioBySlug(ctx context.Context, slug string) (transit.Scenario, bool, error)
 }
 
 const maxRouteBodyBytes = 8 << 20
+
+type ownedRouteResponse struct {
+	transit.Route
+	LengthM    float64                 `json:"length_m"`
+	Dependents transit.RouteDependents `json:"dependents"`
+}
 
 func CreateOwnedRoute(store OwnedRouteStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -86,15 +93,27 @@ func MyRoutes(store OwnedRouteStore) http.HandlerFunc {
 			writeError(w, http.StatusUnauthorized, "authentication required")
 			return
 		}
-		routes, err := store.ListRouteSummariesByOwner(r.Context(), user.ID)
+		routes, err := store.ListRoutesByOwner(r.Context(), user.ID)
 		if err != nil {
 			writeInternalError(r.Context(), w, "listing owned routes", err)
 			return
 		}
-		if routes == nil {
-			routes = []transit.RouteSummary{}
+		// One dependents query per route. A person's drafts number in the
+		// handfuls, and the counts are three indexed lookups each, so a
+		// joined query would buy nothing a reader could notice.
+		items := make([]transit.OwnedRouteSummary, 0, len(routes))
+		for _, rt := range routes {
+			deps, err := store.CountRouteDependents(r.Context(), rt.ID)
+			if err != nil {
+				writeInternalError(r.Context(), w, "counting route dependents", err)
+				return
+			}
+			items = append(items, transit.OwnedRouteSummary{
+				ID: rt.ID, Slug: rt.Slug, Name: rt.Name, Description: rt.Description, Mode: rt.Mode,
+				LengthM: rt.Geometry.LengthM(), Dependents: deps,
+			})
 		}
-		writeJSON(w, http.StatusOK, routes)
+		writeJSON(w, http.StatusOK, items)
 	}
 }
 
@@ -104,7 +123,19 @@ func GetOwnedRoute(store OwnedRouteStore) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		writeJSON(w, http.StatusOK, rt)
+		deps, err := store.CountRouteDependents(r.Context(), rt.ID)
+		if err != nil {
+			writeInternalError(r.Context(), w, "counting route dependents", err)
+			return
+		}
+		// The curated wire shape plus what only an owner needs: how long the
+		// alignment is and what is built on it. Embedding transit.Route
+		// rather than adding omitempty fields to it keeps GET /api/routes/{slug}
+		// byte-for-byte unchanged, and keeps the two reads from drifting apart
+		// field by field.
+		writeJSON(w, http.StatusOK, ownedRouteResponse{
+			Route: rt, LengthM: rt.Geometry.LengthM(), Dependents: deps,
+		})
 	}
 }
 
@@ -130,6 +161,26 @@ func UpdateOwnedRoute(store OwnedRouteStore) http.HandlerFunc {
 		// handed the existing id, slug, and owner rather than anything the
 		// client sent, so neither can be reassigned through an update.
 		updated := buildRouteFromIngest(in, rt.ID, rt.Slug, scenarioID, rt.OwnerID)
+
+		// Services place their stops by chainage along this geometry and
+		// segments carry run times measured over it, so moving the line or
+		// changing its physics under them would silently invalidate every
+		// one. Those edits get the refusal DELETE gives, with the same
+		// detail; name, description, mode and direction touch nothing
+		// downstream and stay editable. The count is only taken when it
+		// matters, so a rename costs no extra query.
+		if geometryChanged(rt, updated) {
+			deps, err := store.CountRouteDependents(r.Context(), rt.ID)
+			if err != nil {
+				writeInternalError(r.Context(), w, "counting route dependents", err)
+				return
+			}
+			if deps.Any() {
+				writeRouteInUse(w, deps)
+				return
+			}
+		}
+
 		if err := store.UpdateRoute(r.Context(), updated); err != nil {
 			writeInternalError(r.Context(), w, "updating route", err)
 			return
@@ -151,8 +202,7 @@ func DeleteOwnedRoute(store OwnedRouteStore) http.HandlerFunc {
 			return
 		}
 		if deps.Any() {
-			writeErrorDetail(w, http.StatusConflict, "route_in_use",
-				"this route still has services or segments built on it", deps)
+			writeRouteInUse(w, deps)
 			return
 		}
 
@@ -162,6 +212,21 @@ func DeleteOwnedRoute(store OwnedRouteStore) http.HandlerFunc {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}
+}
+
+func writeRouteInUse(w http.ResponseWriter, deps transit.RouteDependents) {
+	writeErrorDetail(w, http.StatusConflict, "route_in_use",
+		"this route still has services or segments built on it", deps)
+}
+
+func geometryChanged(stored, updated transit.Route) bool {
+	// Exact float comparison on purpose: a client that sends the stored
+	// coordinates back unchanged has not moved anything, and one that nudges
+	// a point by any amount has. slices.Equal treats the nil segments an
+	// ingest without physics builds and the empty array Postgres reads back
+	// as the same no-physics state.
+	return !slices.EqualFunc(stored.Geometry.Coordinates, updated.Geometry.Coordinates, slices.Equal) ||
+		!slices.Equal(stored.Segments, updated.Segments)
 }
 
 func loadOwnedRoute(w http.ResponseWriter, r *http.Request, store OwnedRouteStore) (transit.Route, bool) {

@@ -93,6 +93,19 @@ func ProjectStops(line []Point, physicsSegs []Segment, stops []Stop) ([]InterSto
 	return spans, nil
 }
 
+func LineLengthM(line []Point) float64 {
+	// Fewer than two points is a stored-geometry bug (ingest validation
+	// requires two), not something a reader should fail on; zero is the
+	// honest length of a line with no run.
+	if len(line) < 2 {
+		return 0
+	}
+	// The same planar chainage the stop projection walks, so a route's
+	// reported length agrees with the chainage its stops are placed by.
+	pl := projectLinePlanar(line)
+	return pl.chainageM[len(pl.chainageM)-1]
+}
+
 func DistanceM(a, b Point) float64 {
 	refLatRad := degToRad((a.Lat + b.Lat) / 2)
 	return planarDist(projectPoint(a, refLatRad), projectPoint(b, refLatRad))

@@ -191,13 +191,11 @@ func (r *Repo) ListCuratedRouteSummaries(ctx context.Context) ([]transit.RouteSu
 	return scanRouteSummaries(rows, "ListCuratedRouteSummaries")
 }
 
-func (r *Repo) ListRouteSummariesByOwner(ctx context.Context, ownerID string) ([]transit.RouteSummary, error) {
-	rows, err := r.pool.Query(ctx,
-		`SELECT `+routeSummaryColumns+` FROM routes WHERE owner_id = $1 ORDER BY slug`, ownerID)
-	if err != nil {
-		return nil, wrap("ListRouteSummariesByOwner", err)
-	}
-	return scanRouteSummaries(rows, "ListRouteSummariesByOwner")
+func (r *Repo) ListRoutesByOwner(ctx context.Context, ownerID string) ([]transit.Route, error) {
+	// Whole rows, not summaries: the owner's list reports each route's length,
+	// which is computed from its geometry in Go rather than in SQL.
+	return r.listRoutes(ctx, "ListRoutesByOwner",
+		`SELECT `+routeColumns+` FROM routes WHERE owner_id = $1 ORDER BY slug`, ownerID)
 }
 
 const routeSummaryColumns = `slug, name, description, mode`
@@ -217,22 +215,8 @@ func scanRouteSummaries(rows pgx.Rows, op string) ([]transit.RouteSummary, error
 }
 
 func (r *Repo) ListRoutesByScenario(ctx context.Context, scenarioID string) ([]transit.Route, error) {
-	rows, err := r.pool.Query(ctx,
+	return r.listRoutes(ctx, "ListRoutesByScenario",
 		`SELECT `+routeColumns+` FROM routes WHERE scenario_id = $1 ORDER BY id`, scenarioID)
-	if err != nil {
-		return nil, wrap("ListRoutesByScenario", err)
-	}
-	defer rows.Close()
-
-	var out []transit.Route
-	for rows.Next() {
-		rt, err := scanRoute(rows)
-		if err != nil {
-			return nil, wrap("ListRoutesByScenario scan", err)
-		}
-		out = append(out, rt)
-	}
-	return out, wrap("ListRoutesByScenario rows", rows.Err())
 }
 
 func (r *Repo) ListRoutesByIDs(ctx context.Context, ids []string) ([]transit.Route, error) {
@@ -242,10 +226,14 @@ func (r *Repo) ListRoutesByIDs(ctx context.Context, ids []string) ([]transit.Rou
 	// id::text = ANY($1): route ids come from a uuid FK so are well-formed, but
 	// matching on text keeps this consistent with the other id-set readers and
 	// costs nothing here.
-	rows, err := r.pool.Query(ctx,
+	return r.listRoutes(ctx, "ListRoutesByIDs",
 		`SELECT `+routeColumns+` FROM routes WHERE id::text = ANY($1) ORDER BY id`, ids)
+}
+
+func (r *Repo) listRoutes(ctx context.Context, op, sql string, args ...any) ([]transit.Route, error) {
+	rows, err := r.pool.Query(ctx, sql, args...)
 	if err != nil {
-		return nil, wrap("ListRoutesByIDs", err)
+		return nil, wrap(op, err)
 	}
 	defer rows.Close()
 
@@ -253,11 +241,11 @@ func (r *Repo) ListRoutesByIDs(ctx context.Context, ids []string) ([]transit.Rou
 	for rows.Next() {
 		rt, err := scanRoute(rows)
 		if err != nil {
-			return nil, wrap("ListRoutesByIDs scan", err)
+			return nil, wrap(op+" scan", err)
 		}
 		out = append(out, rt)
 	}
-	return out, wrap("ListRoutesByIDs rows", rows.Err())
+	return out, wrap(op+" rows", rows.Err())
 }
 
 func scanRoute(row pgx.Row) (transit.Route, error) {

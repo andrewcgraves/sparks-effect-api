@@ -360,6 +360,29 @@ func TestProjectStops_coincidentStopsProduceZeroDistanceSpan(t *testing.T) {
 	}
 }
 
+func TestLineLengthM_sumsTheChainageAlongEveryVertex(t *testing.T) {
+	// A degree north and then half a degree back south. Meridional legs are
+	// exactly R * deltaRadians whatever the reference latitude, and the
+	// doubling back shows the length is walked along the line (1.5°), not
+	// measured from first point to last (0.5°).
+	line := []Point{
+		{Lng: 0.0, Lat: 0.0},
+		{Lng: 0.0, Lat: 1.0},
+		{Lng: 0.0, Lat: 0.5},
+	}
+	wantM := 1.5 * 6371000.0 * (math.Pi / 180.0)
+	if got := LineLengthM(line); math.Abs(got-wantM) > distTol {
+		t.Errorf("LineLengthM() = %v, want ~%v (±%v)", got, wantM, distTol)
+	}
+
+	if got := LineLengthM(line[:1]); got != 0 {
+		t.Errorf("LineLengthM(one point) = %v, want 0", got)
+	}
+	if got := LineLengthM(nil); got != 0 {
+		t.Errorf("LineLengthM(nil) = %v, want 0", got)
+	}
+}
+
 func TestSnapStops_returnsChainagePreservingInputOrder(t *testing.T) {
 	line := []Point{{Lng: 0, Lat: 0}, {Lng: 0, Lat: 1}}
 	// Supplied in reverse chainage order on purpose.
