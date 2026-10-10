@@ -432,13 +432,16 @@ func registerAuthRoutes(mux *routeTable, cfg config.Config, deps AuthDeps, publi
 	// Handing a service over to another account (SPA-388). The offer answers
 	// 202 with one body whether or not the address is an account, so it
 	// cannot be used to probe for them. Only the sender may cancel and only
-	// the recipient may decline; anyone else, an admin included, gets 404.
-	// Accepting is SPA-389. The database-less 503 for the offer comes from
-	// the "/api/services/" entry.
+	// the recipient may accept or decline; anyone else, an admin included,
+	// gets 404. Accepting (SPA-389) moves the service, its compile jobs and
+	// its publication in one transaction, and is refused with 409
+	// service_in_scenarios while the sender's scenarios still list it. The
+	// database-less 503 for the offer comes from the "/api/services/" entry.
 	mux.Handle("POST /api/services/{slug}/handovers", authenticated(handler.OfferHandover(deps)))
 	mux.Handle("GET /api/me/handovers", authenticated(handler.MyHandovers(deps)))
 	mux.Handle("POST /api/handovers/{id}/cancel", authenticated(handler.CancelHandover(deps)))
 	mux.Handle("POST /api/handovers/{id}/decline", authenticated(handler.DeclineHandover(deps)))
+	mux.Handle("POST /api/handovers/{id}/accept", authenticated(handler.AcceptHandover(deps)))
 
 	// User-owned scenarios: owner-scoped CRUD over a curated set of UserService
 	// ids. Named /api/user-scenarios, distinct from the public /api/scenarios

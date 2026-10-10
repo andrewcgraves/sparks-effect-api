@@ -3,9 +3,11 @@ package postgres
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
+	"github.com/andrewcgraves/sparks-effect-api/internal/ids"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -105,6 +107,211 @@ func (r *Repo) CancelServiceHandover(ctx context.Context, id, fromUserID string)
 
 func (r *Repo) DeclineServiceHandover(ctx context.Context, id, toUserID string) (transit.ServiceHandover, error) {
 	return r.decideHandover(ctx, "DeclineServiceHandover", recipient, id, toUserID, transit.HandoverDeclined)
+}
+
+func (r *Repo) AcceptServiceHandover(ctx context.Context, id, toUserID string) (transit.ServiceHandover, error) {
+	const op = "AcceptServiceHandover"
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return transit.ServiceHandover{}, wrap(op+" begin", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // rollback after commit is a no-op
+
+	// The offer row is locked first, so two accepts of the same offer
+	// serialise on it: the second waits here, then reads 'accepted' and
+	// answers not-pending. The lock also keeps a cancel or decline from
+	// closing the offer underneath the transfer.
+	var (
+		serviceID, fromUserID string
+		live                  bool
+	)
+	err = tx.QueryRow(ctx,
+		`SELECT h.user_service_id, h.from_user_id, (`+livePending+`)
+		   FROM service_handovers h
+		  WHERE h.id = $1 AND h.to_user_id = $2
+		    FOR UPDATE`,
+		id, toUserID).Scan(&serviceID, &fromUserID, &live)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return transit.ServiceHandover{}, handler.ErrHandoverNotFound
+	}
+	if err != nil {
+		return transit.ServiceHandover{}, wrap(op+" lock", err)
+	}
+	if !live {
+		return transit.ServiceHandover{}, handler.ErrHandoverNotPending
+	}
+
+	// The session middleware already turns a disabled account away, so this
+	// only matters for an account disabled since the request was authorised.
+	var disabled bool
+	if err := tx.QueryRow(ctx,
+		`SELECT disabled_at IS NOT NULL FROM users WHERE id = $1`, toUserID).Scan(&disabled); err != nil {
+		return transit.ServiceHandover{}, wrap(op+" recipient", err)
+	}
+	if disabled {
+		return transit.ServiceHandover{}, handler.ErrHandoverRecipientDisabled
+	}
+
+	// The service row is locked for the rest of the transaction. The offer
+	// was made by whoever owned the service then; if it has changed hands
+	// since (an admin move), the offer no longer describes anything.
+	var ownerID string
+	if err := tx.QueryRow(ctx,
+		`SELECT owner_id FROM user_services WHERE id = $1 FOR UPDATE`, serviceID).Scan(&ownerID); err != nil {
+		return transit.ServiceHandover{}, wrap(op+" service", err)
+	}
+	if ownerID != fromUserID {
+		return transit.ServiceHandover{}, handler.ErrHandoverSenderNotOwner
+	}
+
+	if err := transferUserService(ctx, tx, op, serviceID, toUserID); err != nil {
+		return transit.ServiceHandover{}, err
+	}
+
+	if _, err := tx.Exec(ctx,
+		`UPDATE service_handovers SET status = $2, decided_at = now() WHERE id = $1`,
+		id, transit.HandoverAccepted); err != nil {
+		return transit.ServiceHandover{}, wrap(op+" close", err)
+	}
+	h, err := scanHandover(tx.QueryRow(ctx, handoverSelect+` WHERE h.id = $1`, id))
+	if err != nil {
+		return transit.ServiceHandover{}, wrap(op+" read", err)
+	}
+	return h, wrap(op+" commit", tx.Commit(ctx))
+}
+
+// TransferUserService moves a service to another owner outside an offer: the
+// admin force-move. It is the same transfer an accept performs, with the same
+// refusal for a service still in a scenario.
+func (r *Repo) TransferUserService(ctx context.Context, serviceID, toUserID string) error {
+	const op = "TransferUserService"
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return wrap(op+" begin", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // rollback after commit is a no-op
+
+	if err := transferUserService(ctx, tx, op, serviceID, toUserID); err != nil {
+		return err
+	}
+	return wrap(op+" commit", tx.Commit(ctx))
+}
+
+const maxRouteCopyAttempts = 100
+
+// What moves with a service and what cannot:
+//
+//   - service_publications is keyed by the service and has no owner column,
+//     so the publication and its public URL come along untouched.
+//   - jobs carry owner_id, and GET /api/jobs/{id} authorises on it, so the
+//     service's compile jobs are re-owned or the recipient could not poll them.
+//   - routing_jobs (draft isochrones) are short-lived and are left alone.
+//   - A route the recipient cannot reference (owned, and not by them) is
+//     copied, never moved: the sender may use it elsewhere. The copy keeps the
+//     geometry byte for byte, so snapped stops keep their chainage. It takes
+//     no scenario: a route's scenario is one its owner owns, which the
+//     recipient does not.
+//   - A service in a scenario is refused. Every member of a scenario must
+//     belong to the scenario's owner, and interchange pairs name the
+//     service's stops; silently editing the sender's scenario is not an
+//     option this code takes.
+func transferUserService(ctx context.Context, tx pgx.Tx, op, serviceID, toUserID string) error {
+	var routeID string
+	err := tx.QueryRow(ctx,
+		`SELECT route_id FROM user_services WHERE id = $1 FOR UPDATE`, serviceID).Scan(&routeID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("postgres: %s: no service with id %q", op, serviceID)
+	}
+	if err != nil {
+		return wrap(op+" service", err)
+	}
+
+	slugs, err := scenarioSlugsContaining(ctx, tx, op, serviceID)
+	if err != nil {
+		return err
+	}
+	if len(slugs) > 0 {
+		return &handler.ServiceInScenariosError{Slugs: slugs}
+	}
+
+	var routeOwner *string
+	if err := tx.QueryRow(ctx, `SELECT owner_id FROM routes WHERE id = $1`, routeID).Scan(&routeOwner); err != nil {
+		return wrap(op+" route", err)
+	}
+	if routeOwner != nil && *routeOwner != toUserID {
+		copyID, err := copyRouteTo(ctx, tx, op, routeID, toUserID)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx,
+			`UPDATE user_services SET route_id = $2 WHERE id = $1`, serviceID, copyID); err != nil {
+			return wrap(op+" repoint route", err)
+		}
+	}
+
+	if _, err := tx.Exec(ctx,
+		`UPDATE user_services SET owner_id = $2, updated_at = now() WHERE id = $1`,
+		serviceID, toUserID); err != nil {
+		return wrap(op+" owner", err)
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE jobs SET owner_id = $2 WHERE user_service_id = $1`, serviceID, toUserID); err != nil {
+		return wrap(op+" jobs", err)
+	}
+	return nil
+}
+
+func scenarioSlugsContaining(ctx context.Context, tx pgx.Tx, op, serviceID string) ([]string, error) {
+	rows, err := tx.Query(ctx,
+		`SELECT sc.slug
+		   FROM user_scenario_services m
+		   JOIN user_scenarios sc ON sc.id = m.user_scenario_id
+		  WHERE m.user_service_id = $1
+		  ORDER BY sc.slug`, serviceID)
+	if err != nil {
+		return nil, wrap(op+" scenarios", err)
+	}
+	defer rows.Close()
+
+	var slugs []string
+	for rows.Next() {
+		var slug string
+		if err := rows.Scan(&slug); err != nil {
+			return nil, wrap(op+" scenarios scan", err)
+		}
+		slugs = append(slugs, slug)
+	}
+	return slugs, wrap(op+" scenarios rows", rows.Err())
+}
+
+// The copy's slug is the original's with a numeric suffix, found by letting
+// the unique index arbitrate rather than by a read-then-insert that two
+// transactions could both pass.
+func copyRouteTo(ctx context.Context, tx pgx.Tx, op, routeID, ownerID string) (string, error) {
+	var slug string
+	if err := tx.QueryRow(ctx, `SELECT slug FROM routes WHERE id = $1`, routeID).Scan(&slug); err != nil {
+		return "", wrap(op+" route slug", err)
+	}
+	copyID, err := ids.NewUUID()
+	if err != nil {
+		return "", wrap(op+" route id", err)
+	}
+	for attempt := 2; attempt <= maxRouteCopyAttempts; attempt++ {
+		tag, err := tx.Exec(ctx,
+			`INSERT INTO routes (id, scenario_id, owner_id, slug, name, description, mode,
+			                     geometry, bidirectional, segments)
+			 SELECT $2, NULL, $3, $4, name, description, mode, geometry, bidirectional, segments
+			   FROM routes WHERE id = $1
+			 ON CONFLICT (slug) DO NOTHING`,
+			routeID, copyID, ownerID, fmt.Sprintf("%s-%d", slug, attempt))
+		if err != nil {
+			return "", wrap(op+" copy route", err)
+		}
+		if tag.RowsAffected() == 1 {
+			return copyID, nil
+		}
+	}
+	return "", fmt.Errorf("postgres: %s: no free slug for a copy of route %q after %d attempts", op, slug, maxRouteCopyAttempts)
 }
 
 // The column a decision belongs to. It is spliced into SQL, so it is only

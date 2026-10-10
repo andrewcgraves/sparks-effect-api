@@ -4,22 +4,44 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/account"
 	"github.com/andrewcgraves/sparks-effect-api/internal/auth"
 	"github.com/andrewcgraves/sparks-effect-api/internal/ids"
+	"github.com/andrewcgraves/sparks-effect-api/internal/traceid"
 	"github.com/andrewcgraves/sparks-effect-api/internal/transit"
 )
 
 const HandoverTTL = 14 * 24 * time.Hour
 
 var (
-	ErrHandoverPending    = errors.New("service already has a pending handover")
-	ErrHandoverNotFound   = errors.New("handover not found")
-	ErrHandoverNotPending = errors.New("handover is no longer pending")
+	ErrHandoverPending           = errors.New("service already has a pending handover")
+	ErrHandoverNotFound          = errors.New("handover not found")
+	ErrHandoverNotPending        = errors.New("handover is no longer pending")
+	ErrHandoverSenderNotOwner    = errors.New("the sender no longer owns this service")
+	ErrHandoverRecipientDisabled = errors.New("the recipient's account is disabled")
 )
+
+const ServiceInScenariosErrorCode = "service_in_scenarios"
+
+// A service cannot change owner while it is a member of a scenario, because
+// every member of a scenario must belong to the scenario's owner. The sender
+// removes it from these first; nothing here edits their scenarios for them.
+type ServiceInScenariosError struct {
+	Slugs []string
+}
+
+func (e *ServiceInScenariosError) Error() string {
+	return "the service is still in the sender's scenarios: " + strings.Join(e.Slugs, ", ")
+}
+
+type serviceInScenariosDetail struct {
+	Scenarios []string `json:"scenarios"`
+}
 
 type HandoverStore interface {
 	GetUserServiceBySlug(ctx context.Context, slug string) (transit.UserService, bool, error)
@@ -29,6 +51,7 @@ type HandoverStore interface {
 	ListPendingServiceHandovers(ctx context.Context, userID string) ([]transit.ServiceHandover, error)
 	CancelServiceHandover(ctx context.Context, id, fromUserID string) (transit.ServiceHandover, error)
 	DeclineServiceHandover(ctx context.Context, id, toUserID string) (transit.ServiceHandover, error)
+	AcceptServiceHandover(ctx context.Context, id, toUserID string) (transit.ServiceHandover, error)
 }
 
 const maxHandoverBodyBytes = 4 << 10
@@ -193,20 +216,34 @@ func MyHandovers(store HandoverStore) http.HandlerFunc {
 }
 
 func CancelHandover(store HandoverStore) http.HandlerFunc {
-	return decideHandover(store.CancelServiceHandover, func(w http.ResponseWriter, h transit.ServiceHandover) {
+	return decideHandover(store.CancelServiceHandover, func(w http.ResponseWriter, _ *http.Request, h transit.ServiceHandover) {
 		writeJSON(w, http.StatusOK, outgoingView(h))
 	})
 }
 
 func DeclineHandover(store HandoverStore) http.HandlerFunc {
-	return decideHandover(store.DeclineServiceHandover, func(w http.ResponseWriter, h transit.ServiceHandover) {
+	return decideHandover(store.DeclineServiceHandover, func(w http.ResponseWriter, _ *http.Request, h transit.ServiceHandover) {
+		writeJSON(w, http.StatusOK, incomingView(h))
+	})
+}
+
+// Accepting moves the service, its compile jobs and (by staying keyed to the
+// service) its publication to the recipient in one transaction, and copies a
+// route the recipient could not otherwise reference. The store does all of
+// that; this only names the refusals.
+func AcceptHandover(store HandoverStore) http.HandlerFunc {
+	return decideHandover(store.AcceptServiceHandover, func(w http.ResponseWriter, r *http.Request, h transit.ServiceHandover) {
+		trace, _ := traceid.FromContext(r.Context())
+		slog.InfoContext(r.Context(), "handover: service accepted",
+			"handover_id", h.ID, "service_id", h.UserServiceID, "service_slug", h.ServiceSlug,
+			"from_user_id", h.FromUserID, "to_user_id", h.ToUserID, "trace_id", trace)
 		writeJSON(w, http.StatusOK, incomingView(h))
 	})
 }
 
 func decideHandover(
 	decide func(ctx context.Context, id, callerID string) (transit.ServiceHandover, error),
-	respond func(http.ResponseWriter, transit.ServiceHandover),
+	respond func(http.ResponseWriter, *http.Request, transit.ServiceHandover),
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := auth.UserFrom(r.Context())
@@ -224,15 +261,21 @@ func decideHandover(
 		// Admins get no override: only the one party a decision belongs to
 		// may make it, and everyone else is told the offer does not exist.
 		h, err := decide(r.Context(), id, user.ID)
+		var inScenarios *ServiceInScenariosError
 		switch {
 		case errors.Is(err, ErrHandoverNotFound):
 			writeError(w, http.StatusNotFound, ErrHandoverNotFound.Error())
-		case errors.Is(err, ErrHandoverNotPending):
-			writeError(w, http.StatusConflict, ErrHandoverNotPending.Error())
+		case errors.Is(err, ErrHandoverNotPending),
+			errors.Is(err, ErrHandoverSenderNotOwner),
+			errors.Is(err, ErrHandoverRecipientDisabled):
+			writeError(w, http.StatusConflict, err.Error())
+		case errors.As(err, &inScenarios):
+			writeErrorDetail(w, http.StatusConflict, ServiceInScenariosErrorCode, inScenarios.Error(),
+				serviceInScenariosDetail{Scenarios: inScenarios.Slugs})
 		case err != nil:
 			writeInternalError(r.Context(), w, "deciding handover", err)
 		default:
-			respond(w, h)
+			respond(w, r, h)
 		}
 	}
 }

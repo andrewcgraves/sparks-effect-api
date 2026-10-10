@@ -15,10 +15,11 @@ import (
 )
 
 type fakeHandoverStore struct {
-	services  map[string]transit.UserService
-	users     map[string]account.User
-	handovers []transit.ServiceHandover
-	offerTTL  time.Duration
+	services      map[string]transit.UserService
+	users         map[string]account.User
+	handovers     []transit.ServiceHandover
+	offerTTL      time.Duration
+	scenarioSlugs []string
 }
 
 func newFakeHandoverStore() *fakeHandoverStore {
@@ -136,6 +137,33 @@ func (s *fakeHandoverStore) DeclineServiceHandover(_ context.Context, id, toUser
 	return s.close(id, toUserID, false, transit.HandoverDeclined)
 }
 
+// The fake refuses like the store does (scenario membership, a sender who no
+// longer owns the service) and otherwise moves the service's owner, which is
+// the one visible effect of an accept the handler can observe.
+func (s *fakeHandoverStore) AcceptServiceHandover(_ context.Context, id, toUserID string) (transit.ServiceHandover, error) {
+	for _, h := range s.handovers {
+		if h.ID != id || h.ToUserID != toUserID {
+			continue
+		}
+		if effectiveStatus(h) != transit.HandoverPending {
+			return transit.ServiceHandover{}, handler.ErrHandoverNotPending
+		}
+		if len(s.scenarioSlugs) > 0 {
+			return transit.ServiceHandover{}, &handler.ServiceInScenariosError{Slugs: s.scenarioSlugs}
+		}
+		for slug, svc := range s.services {
+			if svc.ID == h.UserServiceID {
+				if svc.OwnerID != h.FromUserID {
+					return transit.ServiceHandover{}, handler.ErrHandoverSenderNotOwner
+				}
+				svc.OwnerID = toUserID
+				s.services[slug] = svc
+			}
+		}
+	}
+	return s.close(id, toUserID, false, transit.HandoverAccepted)
+}
+
 func (s *fakeHandoverStore) seedPending(id, from, to string, expiresAt time.Time) {
 	s.handovers = append(s.handovers, transit.ServiceHandover{
 		ID: id, UserServiceID: "svc-1", FromUserID: from, ToUserID: to,
@@ -149,6 +177,7 @@ func handoverMux(store handler.HandoverStore) *http.ServeMux {
 	mux.Handle("GET /api/me/handovers", handler.MyHandovers(store))
 	mux.Handle("POST /api/handovers/{id}/cancel", handler.CancelHandover(store))
 	mux.Handle("POST /api/handovers/{id}/decline", handler.DeclineHandover(store))
+	mux.Handle("POST /api/handovers/{id}/accept", handler.AcceptHandover(store))
 	return mux
 }
 
@@ -397,11 +426,95 @@ func TestDecideHandover_anExpiredOfferCannotBeCancelledOrDeclined(t *testing.T) 
 
 func TestDecideHandover_unknownOrMalformedIdIs404(t *testing.T) {
 	for _, id := range []string{"00000000-0000-4000-8000-000000000999", "not-a-uuid"} {
-		for _, action := range []string{"cancel", "decline"} {
+		for _, action := range []string{"cancel", "decline", "accept"} {
 			rec := handoverAs(t, newFakeHandoverStore(), svcOwner, http.MethodPost, "/api/handovers/"+id+"/"+action, "")
 			if rec.Code != http.StatusNotFound {
 				t.Fatalf("%s %s: status = %d, want 404", action, id, rec.Code)
 			}
 		}
+	}
+}
+
+func TestAcceptHandover_onlyTheRecipient(t *testing.T) {
+	for _, caller := range []account.User{svcOwner, svcAdmin} {
+		store := newFakeHandoverStore()
+		store.seedPending(handoverID, svcOwner.ID, svcStranger.ID, time.Now().Add(time.Hour))
+		rec := handoverAs(t, store, caller, http.MethodPost, "/api/handovers/"+handoverID+"/accept", "")
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("%s: status = %d, want 404", caller.Email, rec.Code)
+		}
+		if store.services["line-a"].OwnerID != svcOwner.ID {
+			t.Fatalf("%s: the service moved to %s", caller.Email, store.services["line-a"].OwnerID)
+		}
+	}
+
+	store := newFakeHandoverStore()
+	store.seedPending(handoverID, svcOwner.ID, svcStranger.ID, time.Now().Add(time.Hour))
+	rec := handoverAs(t, store, svcStranger, http.MethodPost, "/api/handovers/"+handoverID+"/accept", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("recipient: status = %d, want 200; body %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"status":"accepted"`) || !strings.Contains(body, `"decided_at"`) ||
+		!strings.Contains(body, `"service_slug":"line-a"`) || !strings.Contains(body, `"from_name":"Owner"`) {
+		t.Fatalf("body = %s, want the accepted offer as the recipient sees it", body)
+	}
+	if store.services["line-a"].OwnerID != svcStranger.ID {
+		t.Fatalf("owner = %s, want the recipient", store.services["line-a"].OwnerID)
+	}
+
+	rec = handoverAs(t, store, svcStranger, http.MethodPost, "/api/handovers/"+handoverID+"/accept", "")
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("second accept: status = %d, want 409", rec.Code)
+	}
+}
+
+func TestAcceptHandover_aServiceInTheSendersScenariosIs409WithTheSlugs(t *testing.T) {
+	store := newFakeHandoverStore()
+	store.scenarioSlugs = []string{"commute", "weekend-trips"}
+	store.seedPending(handoverID, svcOwner.ID, svcStranger.ID, time.Now().Add(time.Hour))
+
+	rec := handoverAs(t, store, svcStranger, http.MethodPost, "/api/handovers/"+handoverID+"/accept", "")
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body %s", rec.Code, rec.Body.String())
+	}
+	want := `{"error":"the service is still in the sender's scenarios: commute, weekend-trips",` +
+		`"code":"service_in_scenarios","detail":{"scenarios":["commute","weekend-trips"]}}`
+	if got := strings.TrimSpace(rec.Body.String()); got != want {
+		t.Fatalf("body:\n got  %s\n want %s", got, want)
+	}
+	if store.services["line-a"].OwnerID != svcOwner.ID {
+		t.Fatalf("the service moved despite the refusal")
+	}
+	if store.handovers[0].Status != transit.HandoverPending {
+		t.Fatalf("status = %s, want the offer left pending for the sender to fix", store.handovers[0].Status)
+	}
+}
+
+func TestAcceptHandover_aSenderWhoNoLongerOwnsTheServiceIs409(t *testing.T) {
+	store := newFakeHandoverStore()
+	store.seedPending(handoverID, svcOwner.ID, svcStranger.ID, time.Now().Add(time.Hour))
+	moved := store.services["line-a"]
+	moved.OwnerID = "user-someone-else"
+	store.services["line-a"] = moved
+
+	rec := handoverAs(t, store, svcStranger, http.MethodPost, "/api/handovers/"+handoverID+"/accept", "")
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "no longer owns") {
+		t.Fatalf("status = %d, body %s; want 409 naming the sender", rec.Code, rec.Body.String())
+	}
+	if store.handovers[0].Status != transit.HandoverPending {
+		t.Fatalf("status = %s, want pending", store.handovers[0].Status)
+	}
+}
+
+func TestAcceptHandover_anExpiredOfferIs409(t *testing.T) {
+	store := newFakeHandoverStore()
+	store.seedPending(handoverID, svcOwner.ID, svcStranger.ID, time.Now().Add(-time.Minute))
+	rec := handoverAs(t, store, svcStranger, http.MethodPost, "/api/handovers/"+handoverID+"/accept", "")
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", rec.Code)
+	}
+	if store.services["line-a"].OwnerID != svcOwner.ID {
+		t.Fatalf("the service moved on an expired offer")
 	}
 }
