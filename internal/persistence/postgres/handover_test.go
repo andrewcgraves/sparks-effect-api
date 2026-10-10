@@ -535,6 +535,48 @@ func TestTransferUserServiceRefusesTheOwnerAndADisabledRecipient(t *testing.T) {
 	}
 }
 
+func TestTransferUserServiceCopiesAnOwnedRouteLikeAnAccept(t *testing.T) {
+	repo, ctx, _ := handoverFixture(t)
+	admin := fixtureAdmin(t, repo, ctx)
+	owner := usOwnerID
+	if err := repo.CreateRoute(ctx, transit.Route{
+		ID: hoOwnedRoute, OwnerID: &owner, Slug: "my-alignment", Name: "My Alignment", Mode: "rail",
+		Geometry: transit.GeoLineString{Type: "LineString", Coordinates: [][]float64{{-122.4, 37.7}, {-121.9, 37.3}}},
+	}); err != nil {
+		t.Fatalf("CreateRoute: %v", err)
+	}
+	svc := fixtureService(t, repo, ctx)
+	svc.RouteID = hoOwnedRoute
+	if err := repo.UpdateUserService(ctx, svc); err != nil {
+		t.Fatalf("UpdateUserService: %v", err)
+	}
+
+	if _, err := repo.TransferUserService(ctx, usServiceID, usStrangerID, admin); err != nil {
+		t.Fatalf("TransferUserService: %v", err)
+	}
+
+	after := fixtureService(t, repo, ctx)
+	if after.RouteID == hoOwnedRoute {
+		t.Fatalf("route_id still %s, want a copy the new owner owns", hoOwnedRoute)
+	}
+	routes, err := repo.ListRoutesByIDs(ctx, []string{hoOwnedRoute, after.RouteID})
+	if err != nil || len(routes) != 2 {
+		t.Fatalf("ListRoutesByIDs: %d routes, err %v", len(routes), err)
+	}
+	for _, rt := range routes {
+		switch rt.ID {
+		case hoOwnedRoute:
+			if rt.OwnerID == nil || *rt.OwnerID != usOwnerID {
+				t.Fatalf("old owner's route changed hands: %+v", rt)
+			}
+		default:
+			if rt.OwnerID == nil || *rt.OwnerID != usStrangerID || fmt.Sprint(rt.Geometry) != fmt.Sprint(routes[0].Geometry) {
+				t.Fatalf("copy = %+v, want the new owner's, with the same geometry", rt)
+			}
+		}
+	}
+}
+
 func TestForcedByMigrationIsSafeToReRun(t *testing.T) {
 	_, ctx, url := handoverFixture(t)
 

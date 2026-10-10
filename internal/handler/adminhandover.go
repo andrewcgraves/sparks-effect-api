@@ -36,16 +36,11 @@ type forcedHandover struct {
 	ToUserID    string     `json:"to_user_id"`
 	ToName      string     `json:"to_name"`
 	Status      string     `json:"status"`
-	DecidedAt   *time.Time `json:"decided_at,omitempty"`
-	ForcedBy    *string    `json:"forced_by,omitempty"`
+	DecidedAt   *time.Time `json:"decided_at"`
+	ForcedBy    *string    `json:"forced_by"`
 }
 
-// Moves a service to a named account with no offer and no acceptance, for an
-// owner who has left, been disabled, or was the wrong person (SPA-390). The
-// store does what an accept does, cancels any pending offer so the recipient
-// cannot later accept a service that has already moved, and records the move
-// as an accepted handover carrying the admin's id. The route is behind
-// RequireAdmin; nothing here re-checks the caller.
+// The route is behind RequireAdmin; nothing here re-checks the caller.
 func ForceHandover(store AdminHandoverStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		admin, ok := auth.UserFrom(r.Context())

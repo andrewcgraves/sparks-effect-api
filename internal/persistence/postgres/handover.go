@@ -55,11 +55,8 @@ func (r *Repo) OfferServiceHandover(ctx context.Context, h transit.ServiceHandov
 
 	// An expired offer is still 'pending' on disk and would hold the
 	// one-pending index against this insert, so it is closed first.
-	if _, err := tx.Exec(ctx,
-		`UPDATE service_handovers h SET status = 'expired', decided_at = h.expires_at
-		  WHERE h.user_service_id = $1 AND `+expiredPending,
-		h.UserServiceID); err != nil {
-		return transit.ServiceHandover{}, wrap("OfferServiceHandover expire", err)
+	if err := expireStalePending(ctx, tx, "OfferServiceHandover", h.UserServiceID); err != nil {
+		return transit.ServiceHandover{}, err
 	}
 
 	_, err = tx.Exec(ctx,
@@ -170,13 +167,8 @@ func (r *Repo) AcceptServiceHandover(ctx context.Context, id, toUserID string) (
 
 	// The session middleware already turns a disabled account away, so this
 	// only matters for an account disabled since the request was authorised.
-	var disabled bool
-	if err := tx.QueryRow(ctx,
-		`SELECT disabled_at IS NOT NULL FROM users WHERE id = $1`, toUserID).Scan(&disabled); err != nil {
-		return transit.ServiceHandover{}, wrap(op+" recipient", err)
-	}
-	if disabled {
-		return transit.ServiceHandover{}, handler.ErrHandoverRecipientDisabled
+	if err := refuseDisabledRecipient(ctx, tx, op, toUserID); err != nil {
+		return transit.ServiceHandover{}, err
 	}
 
 	if err := moveLockedUserService(ctx, tx, op, serviceID, routeID, toUserID); err != nil {
@@ -221,13 +213,8 @@ func (r *Repo) TransferUserService(ctx context.Context, serviceID, toUserID, for
 	if ownerID == toUserID {
 		return transit.ServiceHandover{}, handler.ErrHandoverToOwner
 	}
-	var disabled bool
-	if err := tx.QueryRow(ctx,
-		`SELECT disabled_at IS NOT NULL FROM users WHERE id = $1`, toUserID).Scan(&disabled); err != nil {
-		return transit.ServiceHandover{}, wrap(op+" recipient", err)
-	}
-	if disabled {
-		return transit.ServiceHandover{}, handler.ErrHandoverRecipientDisabled
+	if err := refuseDisabledRecipient(ctx, tx, op, toUserID); err != nil {
+		return transit.ServiceHandover{}, err
 	}
 
 	if err := moveLockedUserService(ctx, tx, op, serviceID, routeID, toUserID); err != nil {
@@ -239,11 +226,8 @@ func (r *Repo) TransferUserService(ctx context.Context, serviceID, toUserID, for
 	// sender no longer owns it, but the offer would still list for both
 	// parties). An offer already past its expires_at reads as expired and
 	// is closed as such, not as cancelled, so its history says what happened.
-	if _, err := tx.Exec(ctx,
-		`UPDATE service_handovers h SET status = 'expired', decided_at = h.expires_at
-		  WHERE h.user_service_id = $1 AND `+expiredPending,
-		serviceID); err != nil {
-		return transit.ServiceHandover{}, wrap(op+" expire", err)
+	if err := expireStalePending(ctx, tx, op, serviceID); err != nil {
+		return transit.ServiceHandover{}, err
 	}
 	if _, err := tx.Exec(ctx,
 		`UPDATE service_handovers h SET status = $2, decided_at = now()
@@ -269,6 +253,28 @@ func (r *Repo) TransferUserService(ctx context.Context, serviceID, toUserID, for
 		return transit.ServiceHandover{}, wrap(op+" read", err)
 	}
 	return h, wrap(op+" commit", tx.Commit(ctx))
+}
+
+func refuseDisabledRecipient(ctx context.Context, tx pgx.Tx, op, userID string) error {
+	var disabled bool
+	if err := tx.QueryRow(ctx,
+		`SELECT disabled_at IS NOT NULL FROM users WHERE id = $1`, userID).Scan(&disabled); err != nil {
+		return wrap(op+" recipient", err)
+	}
+	if disabled {
+		return handler.ErrHandoverRecipientDisabled
+	}
+	return nil
+}
+
+// Writes the lazy expiry down (00032) for the service's offers that are past
+// it, so a later write in the same transaction sees them as closed rows.
+func expireStalePending(ctx context.Context, tx pgx.Tx, op, serviceID string) error {
+	_, err := tx.Exec(ctx,
+		`UPDATE service_handovers h SET status = 'expired', decided_at = h.expires_at
+		  WHERE h.user_service_id = $1 AND `+expiredPending,
+		serviceID)
+	return wrap(op+" expire", err)
 }
 
 // Row-locks the service for the rest of the transaction and returns what the

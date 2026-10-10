@@ -8,7 +8,10 @@
 --
 -- A forced row is written already closed: status 'accepted', decided_at and
 -- expires_at both now(). Nothing was ever pending, so there was nothing to
--- expire, and 00032's one-pending index never sees it.
+-- expire, and 00032's one-pending index never sees it. The
+-- service_handovers_forced_is_accepted check holds that shape: an admin's id
+-- can only sit on an accepted row, never on an offer that is pending or was
+-- declined, cancelled or expired.
 --
 -- ## Foreign key
 --

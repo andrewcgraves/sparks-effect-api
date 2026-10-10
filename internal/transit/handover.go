@@ -23,7 +23,5 @@ type ServiceHandover struct {
 	CreatedAt     time.Time
 	DecidedAt     *time.Time
 	ExpiresAt     time.Time
-	// The admin who moved the service without an offer (SPA-390); nil for a
-	// handover the recipient accepted.
-	ForcedBy *string
+	ForcedBy      *string
 }

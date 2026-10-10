@@ -157,7 +157,7 @@ func OfferHandover(store HandoverStore) http.HandlerFunc {
 		// Only the owner's own address can land here, and only the owner or an
 		// admin can ask, so this 422 confirms nothing they did not know.
 		if found && to.ID == svc.OwnerID {
-			writeError(w, http.StatusUnprocessableEntity, "a service cannot be handed over to its owner")
+			writeError(w, http.StatusUnprocessableEntity, ErrHandoverToOwner.Error())
 			return
 		}
 		accepted := offerHandoverResponse{ToEmail: email}
