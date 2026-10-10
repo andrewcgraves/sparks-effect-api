@@ -47,6 +47,7 @@ type AuthDeps interface {
 	handler.ServicePublicationStore
 	handler.PublishedServiceStore
 	handler.HandoverStore
+	handler.AdminHandoverStore
 	handler.AccountTokenStore
 	handler.RetentionStore
 	handler.RoutingQueueStore
@@ -474,6 +475,12 @@ func registerAuthRoutes(mux *routeTable, cfg config.Config, deps AuthDeps, publi
 	// not run at boot: DeleteExpiredSessions can, because a missed session
 	// prune is harmless, and a missed dry-run here is not.
 	mux.Handle("POST /api/admin/retention", adminOnly(handler.Retention(deps)))
+	// Moves a service to a named account with no offer (SPA-390), for an
+	// owner who has left or is disabled. The same move as an accept, plus the
+	// cancel of any pending offer, recorded as an accepted handover with the
+	// admin's id on it. The database-less 503 comes from the "/api/admin/"
+	// entry above.
+	mux.Handle("PUT /api/admin/services/{slug}/owner", adminOnly(handler.ForceHandover(deps)))
 	// Curating a prerendered isochrone is editorial content on a public page,
 	// so it sits behind the same admin gate — even though it hangs off the
 	// public /api/scenarios path rather than /api/admin. Its two sibling reads

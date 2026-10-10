@@ -23,4 +23,5 @@ type ServiceHandover struct {
 	CreatedAt     time.Time
 	DecidedAt     *time.Time
 	ExpiresAt     time.Time
+	ForcedBy      *string
 }

@@ -623,6 +623,7 @@ scenario/route reads or `/api/internal/*`.
 | `PATCH /api/admin/users/{id}` | admin | Set `is_admin` and/or `disabled`; disabling revokes the account's sessions. An admin demoting or disabling themselves gets 409 |
 | `POST /api/admin/routes` | admin | Ingest a curated alignment |
 | `POST /api/admin/retention` | admin | Dry-run (empty body or `{"apply":false}`) or apply (`{"apply":true}`) isochrone-cache and routing-job-result retention. See [`docs/retention.md`](docs/retention.md) |
+| `PUT /api/admin/services/{slug}/owner` | admin | Move a service to the account named by `user_id` with no offer, for an owner who has left or is disabled. The same move as an accept, with any pending offer cancelled, recorded as an accepted handover carrying the admin's id in `forced_by`. 422 for an unknown or disabled account or the current owner; 409 `service_in_scenarios` like an accept |
 | `POST /api/scenarios/{slug}/prerendered-isochrones` | admin | Curate a ready-to-display isochrone for a scenario |
 
 ### Owning the seeded models
@@ -778,9 +779,19 @@ Five rules, all enforced server-side:
   `service_in_scenarios` listing the slugs: every member of a scenario must
   belong to its owner, interchange pairs name the service's stops, and
   silently editing the sender's scenarios is not something an accept does.
-  The sender removes it first and the same offer then goes through. The move
-  itself is `Repo.TransferUserService`, which the admin force-move (SPA-390)
-  reuses.
+  The sender removes it first and the same offer then goes through.
+- **An admin can move a service without an offer** (SPA-390), through
+  `PUT /api/admin/services/{slug}/owner` with `{user_id}`, for an owner who
+  has left, whose account is disabled, or who was the wrong person. It is the
+  same move as an accept, in `Repo.TransferUserService`, with the same
+  refusals (`service_in_scenarios`; a disabled account or the current owner
+  as the new owner), so no path around the handover rules exists. Any
+  pending offer on the service is cancelled in the same transaction, so its
+  recipient cannot later accept a service that has already moved, and the
+  move is recorded as an `accepted` row in `service_handovers` from the old
+  owner to the new with the admin's id in `forced_by`. The row answers the
+  call; it never lists under `/api/me/handovers`, which shows pending offers
+  only.
 
 ### Database integration tests
 
