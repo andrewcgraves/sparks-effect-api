@@ -194,8 +194,8 @@ func TestRoutingJobStatus_staleQueuedJobIsFailed(t *testing.T) {
 	if job.Error == "" {
 		t.Error("a stale routing job came back with no error to show the user")
 	}
-	// The process that stopped answering is the routing service; "isochrone
-	// service" named a thing nothing else in the system is called (SPA-470).
+	// The process that stopped answering is the routing service. "Isochrone
+	// service" is Valhalla's own endpoint, one layer below it (SPA-470).
 	if !strings.Contains(job.Error, "routing service") || strings.Contains(job.Error, "isochrone") {
 		t.Errorf("error = %q, want it to name the routing service", job.Error)
 	}

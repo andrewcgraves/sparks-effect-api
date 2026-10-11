@@ -28,13 +28,6 @@ Visitors see neither word: the website's copy says *line* for a service,
 [product vocabulary](https://github.com/andrewcgraves/sparks-effect-website/blob/trunk/CONTEXT.md#product-vocabulary).
 That is deliberate, so do not "correct" the copy back to the words here.
 
-*Network* also has an unrelated sense here: the OSM street and path network
-Valhalla routes the access and egress legs over — a station's "pedestrian
-network" or "street network" in migrations 00016 and 00023. Qualify it when that
-is meant, and say *scenario* for a set of services; a bare *network* in older
-prose (ADR-0004's "hypothetical network") means the transit one, the website's
-sense.
-
 | Term | Model | Lives at | Is |
 | --- | --- | --- | --- |
 | **Scenario** | `transit.Scenario` | `/api/scenarios` (public), `/api/me/scenarios` (owner-scoped) | The seeded world model: metadata plus routes, stations, services and segment times hanging off it |
@@ -42,7 +35,7 @@ sense.
 | **Service** | `transit.Service` | `/api/scenarios/{slug}/services` (public), `/api/me/services` (owner-scoped) | A stopping pattern over a `Route`, calling at `Station` rows, driven by a `VehicleType` row |
 | **UserService** | `transit.UserService` | `/api/services` — *not* `/api/me/services`. Its publication, once published, is public at `/api/services/{slug}/publication` | The authored counterpart: carries its own stops (name + coordinate, snapped to a route) and inline `VehicleParams` instead of pointing at rows |
 
-Two traps worth stating out loud:
+Three traps worth stating out loud:
 
 - `/api/services` returns **UserServices**. `/api/me/services` returns
   **Services**. The `/api/me` prefix is not what distinguishes authored from
@@ -53,9 +46,10 @@ Two traps worth stating out loud:
 - *Owned* in a handler's name does not say which model either.
   `internal/handler/ownedservice.go` (`CreateOwnedService` and friends) serves
   the seeded **Service** at `/api/me/services`, while `ownedService` in
-  `authoredtarget.go` wraps a **UserService** for the compile, isochrone and
-  publication paths under `/api/services/{slug}`. Read the type it holds, not
-  the file it is in.
+  `authoredtarget.go` wraps a **UserService** for the compile, compiled-graph
+  and isochrone paths under `/api/services/{slug}`. The publication handlers
+  load the same **UserService** with `loadService` and no wrapper. Read the
+  type it holds, not the file it is in.
 
 ### Seeded / curated / authored / owned
 
@@ -291,6 +285,12 @@ through a node both of them touch.
   isochrone would otherwise collapse to a fraction of its real size.
   **It is never a map pin.** `location` remains the accurate place the station
   is, and is what the map, the route geometry and the record show.
+- **Network** (street) — the OSM street and path network Valhalla routes the
+  access and egress legs over: a station's "pedestrian network" or "street
+  network" in migrations 00016 and 00023. An unrelated sense from the website's
+  *network* for a scenario. Qualify it when that is meant, and say *scenario*
+  for a set of services; a bare *network* in older prose (ADR-0004's
+  "hypothetical network") means the transit one.
 - **Slug** — the URL-safe identity a model is addressed by. Slugs are **globally
   unique across curated and owned rows**, which is why by-slug reads cannot
   filter on ownership and check it themselves instead. A slug is minted once, at
