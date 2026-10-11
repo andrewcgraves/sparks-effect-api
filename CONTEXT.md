@@ -35,7 +35,7 @@ That is deliberate, so do not "correct" the copy back to the words here.
 | **Service** | `transit.Service` | `/api/scenarios/{slug}/services` (public), `/api/me/services` (owner-scoped) | A stopping pattern over a `Route`, calling at `Station` rows, driven by a `VehicleType` row |
 | **UserService** | `transit.UserService` | `/api/services` — *not* `/api/me/services`. Its publication, once published, is public at `/api/services/{slug}/publication` | The authored counterpart: carries its own stops (name + coordinate, snapped to a route) and inline `VehicleParams` instead of pointing at rows |
 
-Two traps worth stating out loud:
+Three traps worth stating out loud:
 
 - `/api/services` returns **UserServices**. `/api/me/services` returns
   **Services**. The `/api/me` prefix is not what distinguishes authored from
@@ -43,6 +43,13 @@ Two traps worth stating out loud:
 - Both scenario models compile to the same `TransitGraph` and both produce a
   compile job, so downstream of a compile the distinction disappears. It only
   matters on the way in.
+- *Owned* in a handler's name does not say which model either.
+  `internal/handler/ownedservice.go` (`CreateOwnedService` and friends) serves
+  the seeded **Service** at `/api/me/services`, while `ownedService` in
+  `authoredtarget.go` wraps a **UserService** for the compile, compiled-graph
+  and isochrone paths under `/api/services/{slug}`. The publication handlers
+  load the same **UserService** with `loadService` and no wrapper. Read the
+  type it holds, not the file it is in.
 
 ### Seeded / curated / authored / owned
 
@@ -93,7 +100,7 @@ type. `User` and `Session` live in `internal/account`.
 
 | Term | Definition |
 | --- | --- |
-| **Route** / **alignment** | The geometry, as a GeoJSON LineString, plus a mode and optional per-segment engineering parameters. Several services can run over one alignment. "Route" is the type name (`transit.Route`); "alignment" is the word used in prose, and is preferred when the geometry rather than the row is meant. A curated alignment is a public building block anyone may point a service at, but admin-only to mutate |
+| **Route** / **alignment** | The geometry, as a GeoJSON LineString, plus a mode and optional per-segment engineering parameters. Several services can run over one alignment. "Route" is the type name (`transit.Route`); "alignment" is the word used in prose, and is preferred when the geometry rather than the row is meant. **Corridor** is a third name for the same thing, met where something runs *along* it: an edge's `RouteID` ("the corridor it runs over"), a segment's `route_id` (migration 00011), the corridor decoration under [staleness](#state-and-freshness). It is not a separate model and not a planning-sense corridor of several alignments; prefer *alignment* in new prose. A publication's copied geometry is its `routes` field. A curated alignment is a public building block anyone may point a service at, but admin-only to mutate |
 | **Station** | A seeded-model place a service can call at: slug, name, `location`, platform height, optional [routing anchor](#routing-anchor). Belongs to a scenario |
 | **Stop** | A *service calling at a place*, not a place. `ServiceStop` on the seeded model (a station id, a sequence number, an optional dwell override); `ServiceStopPoint` on the authored model (its own name, slug, coordinate, seq, chainage and offset). A station is a noun; a stop is a relationship |
 | **Node** / **GraphNode** | A vertex of the compiled graph. Stops **merge into** nodes at compile time — see [interchange](#interchange). `GraphNode` is the compiled form (slug, coordinate, optional routing anchor, and every merged-in `Names` entry). The reduced slug-plus-coordinate `Node` is a test-only projection for comparing the embedded store against a compiled graph; it is not a production type |
@@ -102,8 +109,8 @@ type. `User` and `Session` live in `internal/account`.
 | **Edge** | A directed hop between two node slugs on one service. `Seconds` is **run time plus dwell**; `DwellS` reports the dwell part separately rather than adding to it. Since SPA-264 an edge also records the corridor it runs over (`RouteID`) and its endpoints' chainages. Every hop is emitted in both directions — the reverse edge is the same hop backwards, carrying the same two chainages swapped, so one of the two directions always has descending chainages. Nothing that reads them treats that as a special case |
 | **Subtext** | The one-line descriptor an authored `UserService` or a curated `Scenario` shows under its name — ca-hsr's is `CAHSR + Brightline West · Electrified high-speed rail`. With the name and the **description** (free prose, a few paragraphs) it is the service's prose, and what a [publication](#seeded--curated--authored--owned) copies. Both are optional and empty by default; `Validate()` bounds them at 140 and 4,000 characters as `max_length` faults. A curated scenario's comes from `subtext:` in its `scenario.yaml`, held to the same 140 at seed load and reconciled on boot; authored scenarios have none yet. `subtext` everywhere — column, JSON, TypeScript — not *subtitle* or *tagline*. See [ADR-0005](docs/adr/0005-publishing-an-authored-service.md) |
 | **VehicleType** | Rolling stock on the seeded model: top speed, acceleration, deceleration, floor height, and the two dwell figures. The authored model inlines the same numbers as `VehicleParams` instead |
-| **Compile job** | A row in `jobs`. Kinds: `compile_scenario`, `compile_user_scenario`, `compile_user_service`. Its `result` is a `TransitGraph`. Compilation runs **in-process in this API**, in `internal/compile`. That package is not the routing worker — the routing worker is a separate repository |
-| **Routing job** | A row in `routing_jobs`. Its `result` is the worker's isochrone GeoJSON. Created by the isochrone endpoints, executed **in the routing worker**, written back over `/api/internal/...`. Different table, different owning process — a "job" with no qualifier is ambiguous, so always say which |
+| **Compile job** | A row in `jobs`, polled at `GET /api/jobs/{id}`. Kinds: `compile_scenario`, `compile_user_scenario`, `compile_user_service`. Its `result` is a `TransitGraph`. Compilation runs **in-process in this API**, in `internal/compile`. That package is not the routing worker — the routing worker is a separate repository |
+| **Routing job** | A row in `routing_jobs`, polled at `GET /api/routing-jobs/{id}`. Its `result` is the worker's isochrone GeoJSON. Created by the isochrone endpoints, executed **in the routing worker**, written back over `/api/internal/...`. Different table, different owning process — a "job" with no qualifier is ambiguous, so always say which |
 | **Prerendered isochrone** | An admin-curated, ready-to-display isochrone stored against a scenario, so a public page can show a result without enqueueing one. Also called a *curated* isochrone |
 | **User** | `account.User` — an authenticated person. Authored rows point at them through `owner_id`. `name` is the display name attribution shows; the user sets it through `PATCH /api/auth/me`, trimmed and bounded at 1–80 characters (`required` / `max_length` faults). `is_admin` is the only privilege bit: it gates curated writes and `/api/admin/users`. `disabled_at` (nullable timestamptz) removes sign-in without deleting the person or their authored rows; NULL means the account can sign in. Publications stay published; attribution still shows the display name |
 | **Session** | `account.Session` — a hashed bearer token bound to a User, with an expiry. The raw token is returned once at login and never stored |
@@ -160,6 +167,14 @@ everyday one.
 - **Run time** — time in motion, dwell excluded. The intended semantics of a
   `segment_run_times.yaml` segment (`run_seconds`, and `reverse_run_seconds`
   when present), and what `SegmentTime.RunSeconds` holds.
+- **Travel time** — overloaded, so always say which. On the model side it is
+  the per-segment *run times* above: `TravelTimes`, the `travel_time_sets`
+  table, and `GET /api/scenarios/{slug}/travel-times` (and its `/api/me` twin)
+  all hold `run_seconds`, not a rider's elapsed time. On the request side it is
+  the visitor's **budget** (`budget_mins`), which is what the
+  `origin_out_of_range` message's "within this travel time" means and what the
+  website's copy calls *travel time*. Prefer *run time* and *budget* in code and
+  prose; *travel time* survives in those names and in copy.
 
 ### Interchange
 
@@ -197,6 +212,12 @@ through a node both of them touch.
   different word. An outdated entry is still served; `outdated` is a boolean on
   the read, not a refusal. Say *stale* about graphs and *outdated* about
   prerendered isochrones, and neither about the other.
+  Three names break that rule and keep their spelling. `RoutingJobStaleAfter`
+  and `staleRoutingJobMessage` are about a routing job past its deadline,
+  which the poll fails (an abandoned job, not a graph). The retention report's
+  `isochrone_cache_stale_transit` counts transit cache rows whose service date
+  has left the window — a calendar, not a compile. None of them is staleness
+  of a graph, and none answers `stale_graph`.
 - **Cache generation rotated** — the log line `CompileSeededIfNeeded` writes
   when a seeded scenario already had a succeeded compile and a new one is
   stored. The previous job is the superseded compile. The new compile job id
@@ -264,6 +285,12 @@ through a node both of them touch.
   isochrone would otherwise collapse to a fraction of its real size.
   **It is never a map pin.** `location` remains the accurate place the station
   is, and is what the map, the route geometry and the record show.
+- **Network** (street) — the OSM street and path network Valhalla routes the
+  access and egress legs over: a station's "pedestrian network" or "street
+  network" in migrations 00016 and 00023. An unrelated sense from the website's
+  *network* for a scenario. Qualify it when that is meant, and say *scenario*
+  for a set of services; a bare *network* in older prose (ADR-0004's
+  "hypothetical network") means the transit one.
 - **Slug** — the URL-safe identity a model is addressed by. Slugs are **globally
   unique across curated and owned rows**, which is why by-slug reads cannot
   filter on ownership and check it themselves instead. A slug is minted once, at
@@ -291,14 +318,22 @@ the wire, in the queue message, or in a Postgres CHECK (migration 00021).
 worker's Valhalla client boundary — nothing else in either repository should say
 "costing".
 
+A route's `mode` is a different field: the **vehicle mode** of an alignment —
+`rail`, `metro`, `tram`, `bus`, `ferry`, `funicular` (`internal/route`'s
+`validModes`) — which says what runs on the track, never how a rider gets to a
+station. Say *travel mode* when the two could meet; *mode* on a request, job or
+cache row is always the travel mode.
+
 `transit` maps to Valhalla's **`multimodal`** costing, **never** to Valhalla's
 own `transit` costing. Valhalla's `transit` is stop-to-stop and useless for an
 origin that is a house.
 
 `transit` here means *walking plus scheduled local transit*, and like the other
 three it covers only the access and egress legs — how a rider reaches and leaves
-an authored station. The ride along the authored line is physics-compiled in this
-repository and never routed, so no mode applies to it.
+a node of the compiled graph: a seeded station, or the node an authored
+service's stops merged into (the authored model has stops, not stations). The
+ride along the service itself is physics-compiled in this repository and never
+routed, so no mode applies to it.
 
 What the resulting surface *claims*, and what the time reported against it
 means, is settled in
@@ -313,7 +348,14 @@ is a breaking change.
 
 ### Error codes
 
-Returned as the `code` field of an error body.
+Returned as the `code` field of an error body, beside an `error` message.
+The message is for developers and logs, written in this file's words (service,
+scenario, compiled graph); clients match the code and say it in their own — the
+website never shows the message, and maps each code it can meet to copy. Two
+messages were written for a person, and a client with no mapping may still show
+them: `backlog_full`'s, and the `error` a stale routing job is failed with. Both
+name the *routing service*, the process that does the work, never an
+"isochrone service".
 
 | Code | Status | Means |
 | --- | --- | --- |
@@ -323,6 +365,10 @@ Returned as the `code` field of an error body.
 | `stop_placement` | 422 | A stop is off-route or out of chainage order. Detail carries the fault kind, route slug, threshold and the offending stops |
 | `stale_graph` | 409 | The compiled graph no longer matches its inputs; recompile and retry. Also the answer to publishing a service with no succeeded, non-stale compile |
 | `publish_failed` | 502 | The routing job row exists but could not be published to the queue, so it was marked failed immediately rather than being stranded in `queued`. The queue sense only — publishing a service never answers it |
+| `validation` | 422 | A request body failed `Validate()`: an authored service or scenario, a route, a display name, a password. Detail carries `faults`, a list of `{field, index?, rule, message}`: `field` is a dotted JSON path (`stops.lat`, `interchange_pairs.a`, `vehicle.dwell_s`), `index` counts entries of a list from zero and is absent for a whole field, and `rule` is one of `internal/fault`'s `Rule*` values. Clients name the field from `field` and `index`, never from `message` |
+| `scenario_holds_curated_content` | 409 | `DELETE /api/me/scenarios/{slug}` on an owned scenario that still holds curated (unowned) child rows, so deleting it would delete content its owner does not own. No detail |
+| `route_in_use` | 409 | `DELETE /api/me/routes/{slug}` while something is built on the route. Detail carries the counts `services`, `user_services` and `segments` |
+| `station_in_use` | 409 | `DELETE /api/me/scenarios/{slug}/stations/{stationSlug}` while a service's stopping pattern still calls at the station. Detail carries `service_stops`, the count |
 | `service_in_scenarios` | 409 | A [handover](#core-nouns) cannot be accepted, nor forced by an admin, while the service is a member of any of the sender's scenarios. Detail carries `scenarios`, their slugs; the sender removes it from them first |
 
 ### Job status
@@ -376,8 +422,8 @@ worker counted as gone.
 
 | Repository | Owns |
 | --- | --- |
-| [`sparks-effect-routing-worker`](https://github.com/andrewcgraves/sparks-effect-routing-worker/blob/main/CONTEXT.md) | Chain vocabulary: chaining, access and egress legs, starter station and starter walk, reached vs reachable, journey, leg, publication (of a queue message — a service's publication is defined here), the departure clock |
-| [`sparks-effect-website`](https://github.com/andrewcgraves/sparks-effect-website/blob/trunk/CONTEXT.md) | Product vocabulary (line, network, route, splash zone); the time-remaining graph: view, lane, through, fork |
+| [`sparks-effect-routing-worker`](https://github.com/andrewcgraves/sparks-effect-routing-worker/blob/main/CONTEXT.md) | Chain vocabulary: chaining, access and egress legs, starter station and starter walk, reached vs reachable, journey (*trip* on the wire, as in `trip_progress`), leg, publication (of a queue message — a service's publication is defined here), the departure clock |
+| [`sparks-effect-website`](https://github.com/andrewcgraves/sparks-effect-website/blob/trunk/CONTEXT.md) | Product vocabulary (line, network, route, splash zone, stop vs station, travel time, starting point); the time-remaining graph: view, lane, through, fork |
 | [`kustomize-config`](https://github.com/andrewcgraves/kustomize-config/blob/main/CONTEXT.md) | Deployment vocabulary: overlay, pin, generation, cycling the map, tileset |
 
 Decisions — as opposed to definitions — belong in ADRs, not here. A term

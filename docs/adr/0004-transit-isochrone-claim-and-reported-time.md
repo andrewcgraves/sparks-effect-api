@@ -154,7 +154,7 @@ Decision 1 is unaffected either way.
   ambiguity this ADR exists to remove. The in-motion time survives as a named
   component, not an alternative headline.
 - **Treat the isochrone as a trip planner for a chosen departure.** Rejected: the
-  ride along the authored line is physics-compiled from track geometry and has no
+  ride along the service is physics-compiled from track geometry and has no
   timetable at all, so a specific-departure claim would be fiction on the main leg
   however precisely the access leg were modelled.
 
