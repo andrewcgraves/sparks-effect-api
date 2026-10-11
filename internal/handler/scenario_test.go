@@ -477,7 +477,7 @@ func TestScenarioTravelTimes_notFound(t *testing.T) {
 	}
 }
 
-const caHSRSubtext = "Electrified · High-speed rail · Greenfield"
+const caHSRSubtext = "CAHSR + Brightline West · Electrified high-speed rail"
 
 func TestScenarioBySlug_carriesItsSubtext(t *testing.T) {
 	store := mustNewStore(t)
