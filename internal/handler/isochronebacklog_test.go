@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -102,7 +103,10 @@ func TestCapIsochroneBacklogRefusalCarriesCodeAndRetryAfter(t *testing.T) {
 		t.Errorf("code = %q, want %q", body.Code, handler.BacklogFullErrorCode)
 	}
 	if body.Error == "" {
-		t.Error("the 429 carries no message; this text reaches the user's error banner")
+		t.Error("the 429 carries no message; a client without a mapping for the code has nothing to say")
+	}
+	if !strings.Contains(body.Error, "routing service") || strings.Contains(body.Error, "isochrone") {
+		t.Errorf("error = %q, want it to name the routing service (SPA-470)", body.Error)
 	}
 	if got := rec.Header().Get("Retry-After"); got == "" {
 		t.Error("no Retry-After on the 429; a client has nothing to wait on")

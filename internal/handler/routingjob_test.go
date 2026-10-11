@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -192,6 +193,11 @@ func TestRoutingJobStatus_staleQueuedJobIsFailed(t *testing.T) {
 	}
 	if job.Error == "" {
 		t.Error("a stale routing job came back with no error to show the user")
+	}
+	// The process that stopped answering is the routing service; "isochrone
+	// service" named a thing nothing else in the system is called (SPA-470).
+	if !strings.Contains(job.Error, "routing service") || strings.Contains(job.Error, "isochrone") {
+		t.Errorf("error = %q, want it to name the routing service", job.Error)
 	}
 
 	// The write must have actually landed, not just been reflected in this
