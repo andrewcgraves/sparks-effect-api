@@ -226,6 +226,10 @@ could not be read. It is counted on each poll, not stored.
 
 `GET /api/routing/status` says whether live plotting is working, so the
 website can warn a visitor before they wait out the 120 s deadline (SPA-442).
+It answers `offline` once the worker has been silent for 2 minutes, whether or
+not anyone has asked for a splash zone (SPA-503): the worker heartbeats every
+30 s as a single replica that never scales to zero, so a live one is never that
+quiet.
 It is public and cached for ten seconds:
 
 ```json
@@ -237,8 +241,9 @@ It is public and cached for ten seconds:
 three [routing statuses](CONTEXT.md#routing-status). Worker contact is any
 authenticated `/api/internal/*` request, which the worker's 30 s heartbeat to
 `GET /api/internal/worker` guarantees while it is up. Contact is held in this
-process's memory, so a restart starts the clock again and a second replica
-would not see the first one's contact.
+process's memory, so a restart starts the clock again (a fresh process reads
+`ok` for its first 2 minutes) and a second replica would not see the first
+one's contact.
 
 ## Seed data
 

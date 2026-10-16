@@ -110,13 +110,7 @@ func routes(cfg config.Config, store *transit.Store, deps AuthDeps, publisher ro
 	// rate-limit bucket.
 	mux.HandleFunc("GET /readyz", handler.Ready(pinger(deps), pinger(publisher), lg))
 
-	// Every enqueue below goes through the watch, so the routing status can
-	// tell a job the worker never answered (SPA-442). Wrapped only after
-	// readiness has taken the publisher's Pinger, which the wrapper hides.
 	watch := handler.NewWorkerWatch(time.Now)
-	if publisher != nil {
-		publisher = watch.Publisher(publisher)
-	}
 
 	// Public reads: the curated scenario data, unauthenticated by design.
 	//
