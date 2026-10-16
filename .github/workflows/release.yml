@@ -106,8 +106,20 @@ jobs:
           # lint and build jobs pass — so this tag existing is the proof that
           # the commit went through the trunk green. Missing means it did not,
           # which is exactly what promotion must refuse.
+          #
+          # A tag pushed right after the merge lands before main's CI has
+          # published, and v0.5.1 failed here on exactly that (SPA-503). CI
+          # takes about four minutes, so wait up to twenty before refusing.
           echo "Promoting $src as $TAG"
-          docker buildx imagetools inspect "$src" > /dev/null
+          deadline=$(( SECONDS + 20 * 60 ))
+          until docker buildx imagetools inspect "$src" > /dev/null 2>&1; do
+            if (( SECONDS >= deadline )); then
+              echo "::error::$src was not published within 20 minutes — did main's CI pass for $SHORT?"
+              exit 1
+            fi
+            echo "$src is not published yet; waiting for main's CI"
+            sleep 20
+          done
 
           # `:prd` is what Railway deploys; `:$TAG` is an immutable record of
           # what each release was, and what a rollback re-promotes.
