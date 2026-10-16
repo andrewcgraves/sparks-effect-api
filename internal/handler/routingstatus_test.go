@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/andrewcgraves/sparks-effect-api/internal/handler"
-	"github.com/andrewcgraves/sparks-effect-api/internal/routing"
 )
 
 type fakeClock struct{ t time.Time }
@@ -85,7 +84,6 @@ func TestRoutingStatusIsDegradedWhenAJobWaitsWhileTheWorkerIsInContact(t *testin
 func TestRoutingStatusIsOKWhileTheOldestJobHasWaitedAMinuteOrLess(t *testing.T) {
 	clock := &fakeClock{t: time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)}
 	watch := handler.NewWorkerWatch(clock.now)
-	clock.advance(5 * time.Minute)
 	store := &fakeQueueStore{queue: handler.RoutingQueue{
 		InFlight: 1, OldestQueuedAt: clock.t.Add(-60 * time.Second),
 	}}
@@ -93,7 +91,7 @@ func TestRoutingStatusIsOKWhileTheOldestJobHasWaitedAMinuteOrLess(t *testing.T) 
 	_, body := getRoutingStatus(t, store, watch)
 
 	if body.Status != "ok" || body.OldestQueuedSecs != 60 {
-		t.Errorf("body = %+v, want ok at exactly 60 s, however long the worker has been silent", body)
+		t.Errorf("body = %+v, want ok at exactly 60 s", body)
 	}
 }
 
@@ -130,58 +128,42 @@ func TestRoutingStatusIsOfflineWhenTheWorkerIsSilentAndAJobWaits(t *testing.T) {
 	}
 }
 
-func TestRoutingStatusIsOKWhenTheWorkerIsSilentButNothingWaits(t *testing.T) {
+// The worker heartbeats every 30 s and never scales to zero, so silence alone
+// means it is down, before any visitor's job has to wait it out (SPA-503).
+func TestRoutingStatusIsOfflineWhenTheWorkerIsSilentAndNothingWaits(t *testing.T) {
 	clock := &fakeClock{t: time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)}
 	watch := handler.NewWorkerWatch(clock.now)
-	clock.advance(time.Hour)
-
-	if _, body := getRoutingStatus(t, &fakeQueueStore{}, watch); body.Status != "ok" {
-		t.Errorf("status = %q, want ok: silence alone is an idle worker, not a dead one", body.Status)
-	}
-}
-
-// A browser polling its job has it marked failed at RoutingJobStaleAfter, so
-// the queue alone stops showing the wait long before two minutes of silence.
-// What the API published and the worker never answered still does.
-func TestRoutingStatusIsOfflineWhenAnEnqueuedJobWasNeverAnswered(t *testing.T) {
-	clock := &fakeClock{t: time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)}
-	watch := handler.NewWorkerWatch(clock.now)
-	pub := watch.Publisher(&routing.FakePublisher{})
-	empty := &fakeQueueStore{}
-
-	clock.advance(30 * time.Second)
-	if err := pub.Publish(context.Background(), routing.Message{RoutingJobID: "job-1"}); err != nil {
-		t.Fatalf("Publish: %v", err)
-	}
-	clock.advance(30 * time.Second)
-	if err := pub.Publish(context.Background(), routing.Message{RoutingJobID: "job-2"}); err != nil {
-		t.Fatalf("Publish: %v", err)
-	}
-
-	clock.advance(time.Minute)
-	if _, body := getRoutingStatus(t, empty, watch); body.Status != "offline" {
-		t.Fatalf("status = %q, want offline: the first job has gone 90 s unanswered and the worker 2 min silent", body.Status)
-	}
-
 	contactFromWorker(t, watch)
-	clock.advance(time.Hour)
-	if _, body := getRoutingStatus(t, empty, watch); body.Status != "ok" {
-		t.Errorf("status = %q, want ok: contact after the enqueue answers it", body.Status)
+	clock.advance(2*time.Minute + time.Second)
+
+	if _, body := getRoutingStatus(t, &fakeQueueStore{}, watch); body.Status != "offline" {
+		t.Errorf("status = %q, want offline after 2 min of silence with nothing queued", body.Status)
 	}
 }
 
-func TestRoutingStatusIgnoresAFailedEnqueue(t *testing.T) {
+func TestRoutingStatusIsOKWhenTheWorkerIsInContactAndNothingWaits(t *testing.T) {
 	clock := &fakeClock{t: time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)}
 	watch := handler.NewWorkerWatch(clock.now)
-	pub := watch.Publisher(&routing.FakePublisher{Err: errors.New("broker down")})
-
-	if err := pub.Publish(context.Background(), routing.Message{}); err == nil {
-		t.Fatal("Publish swallowed the broker's error")
-	}
 	clock.advance(time.Hour)
+	contactFromWorker(t, watch)
+	clock.advance(2*time.Minute - time.Second)
 
 	if _, body := getRoutingStatus(t, &fakeQueueStore{}, watch); body.Status != "ok" {
-		t.Errorf("status = %q, want ok: an unpublished job never reached the worker", body.Status)
+		t.Errorf("status = %q, want ok with contact under 2 min ago", body.Status)
+	}
+}
+
+func TestRoutingStatusGivesAFreshProcessTwoMinutesBeforeOffline(t *testing.T) {
+	clock := &fakeClock{t: time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)}
+	watch := handler.NewWorkerWatch(clock.now)
+
+	clock.advance(2*time.Minute - time.Second)
+	if _, body := getRoutingStatus(t, &fakeQueueStore{}, watch); body.Status != "ok" {
+		t.Fatalf("status = %q just under 2 min after boot, want ok", body.Status)
+	}
+	clock.advance(time.Second)
+	if _, body := getRoutingStatus(t, &fakeQueueStore{}, watch); body.Status != "offline" {
+		t.Errorf("status = %q 2 min after boot with no contact, want offline", body.Status)
 	}
 }
 
@@ -210,31 +192,5 @@ func TestRoutingStatusAnswersNothingButTheThreeFields(t *testing.T) {
 		if raw[k] != v {
 			t.Errorf("%s = %v, want %v", k, raw[k], v)
 		}
-	}
-}
-
-type publisherFunc func(context.Context, routing.Message) error
-
-func (f publisherFunc) Publish(ctx context.Context, msg routing.Message) error { return f(ctx, msg) }
-
-// A fast worker can mark the job running before Publish has returned. That
-// contact answers the job, so it must not be left counted as waiting.
-func TestRoutingStatusCountsAnEnqueueTheWorkerAnsweredMidPublishAsAnswered(t *testing.T) {
-	clock := &fakeClock{t: time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)}
-	watch := handler.NewWorkerWatch(clock.now)
-	pub := watch.Publisher(publisherFunc(func(context.Context, routing.Message) error {
-		clock.advance(time.Second)
-		contactFromWorker(t, watch)
-		return nil
-	}))
-
-	clock.advance(30 * time.Second)
-	if err := pub.Publish(context.Background(), routing.Message{}); err != nil {
-		t.Fatalf("Publish: %v", err)
-	}
-	clock.advance(time.Hour)
-
-	if _, body := getRoutingStatus(t, &fakeQueueStore{}, watch); body.Status != "ok" {
-		t.Errorf("status = %q, want ok: the worker answered the job while it was being published", body.Status)
 	}
 }

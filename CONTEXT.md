@@ -404,19 +404,18 @@ is left wherever it was.
 The three values `GET /api/routing/status` answers in `status`
 (`handler.RoutingStatus*`). *Contact* is the last authenticated
 `/api/internal/*` request from the worker. A job is *waiting* when it has been
-queued and in flight for over 60 s, or was enqueued over 60 s ago with no
-contact since.
+queued and in flight for over 60 s.
 
 | Status | Means |
 | --- | --- |
-| `offline` | A job is waiting and there has been no contact for 2 minutes. Live plotting is down |
-| `degraded` | A queued job is waiting but the worker is in contact. It is up and behind |
-| `ok` | Neither. A silent worker with nothing waiting is idle, not down |
+| `offline` | There has been no contact for 2 minutes, whether or not a job is waiting. Live plotting is down |
+| `degraded` | A job is waiting but the worker is in contact. It is up and behind |
+| `ok` | Neither |
 
-The enqueue half of *waiting* exists because polling fails a job still
-`queued` after `handler.RoutingJobStaleAfter` (90 s), before two minutes of
-silence can pass. Without it, a visitor's job would leave the queue before the
-worker counted as gone.
+Silence alone counts as down because the worker heartbeats every 30 s and runs
+as a single replica that never scales to zero, so a live worker is never quiet
+for 2 minutes (SPA-503). An API process counts its boot as contact, so it reads
+`ok` for its first 2 minutes.
 
 ## Where the rest of the vocabulary lives
 
