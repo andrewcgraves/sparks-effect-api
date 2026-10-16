@@ -412,10 +412,8 @@ queued and in flight for over 60 s.
 | `degraded` | A job is waiting but the worker is in contact. It is up and behind |
 | `ok` | Neither |
 
-Silence alone counts as down because the worker heartbeats every 30 s and runs
-as a single replica that never scales to zero, so a live worker is never quiet
-for 2 minutes (SPA-503). An API process counts its boot as contact, so it reads
-`ok` for its first 2 minutes.
+An API process counts its boot as contact, so it reads `ok` for its first 2
+minutes.
 
 ## Where the rest of the vocabulary lives
 

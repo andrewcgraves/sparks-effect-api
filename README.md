@@ -227,7 +227,9 @@ could not be read. It is counted on each poll, not stored.
 `GET /api/routing/status` says whether live plotting is working, so the
 website can warn a visitor before they wait out the 120 s deadline (SPA-442).
 It answers `offline` once the worker has been silent for 2 minutes, whether or
-not anyone has asked for a splash zone (SPA-503).
+not anyone has asked for a splash zone (SPA-503): the worker heartbeats every
+30 s as a single replica that never scales to zero, so a live one is never that
+quiet.
 It is public and cached for ten seconds:
 
 ```json
