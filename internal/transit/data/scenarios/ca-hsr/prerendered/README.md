@@ -51,10 +51,10 @@ is its payload byte for byte.
 
 | filename | label | origin | budget | mode |
 | --- | --- | --- | --- | --- |
-| `isochrone-sf-transbay-90-transit.json` | San Francisco (Transbay) - 90 min by transit | `sf` | 90 | `transit` |
+| `isochrone-sf-transbay-135-transit.json` | San Francisco (Transbay) - 135 min by transit | `sf` | 135 | `transit` |
 | `isochrone-sj-diridon-60-bike.json` | San Jose (Diridon) - 60 min by bike | `san-jose` | 60 | `bike` |
 | `isochrone-fresno-120-transit.json` | Fresno - 120 min by transit | `fresno` | 120 | `transit` |
-| `isochrone-la-union-station-90-transit.json` | Los Angeles (Union Station) - 90 min by transit | `los-angeles` | 90 | `transit` |
+| `isochrone-la-union-station-135-transit.json` | Los Angeles (Union Station) - 135 min by transit | `los-angeles` | 135 | `transit` |
 | `isochrone-anaheim-60-walk.json` | Anaheim (ARTIC) - 60 min on foot | `anaheim` | 60 | `walk` |
 | `isochrone-burbank-airport-120-walk.json` | Burbank Airport - 120 min on foot | `burbank-airport` | 120 | `walk` |
 
@@ -62,8 +62,12 @@ Their ids follow this scenario's hand-written UUID convention, where the third
 group names the kind: `4006` for a prerendered isochrone, as `4005` is a
 station and `4004` a service. Ids `…0001` (San Jose, 240 min by bike) and
 `…0002` (Burbank Airport, 240 min on foot) are retired. They were captured
-before the Express ran, and migration 00035 deletes their rows. Do not reuse
-those ids.
+before the Express ran, and migration 00035 deletes their rows. Ids `…0003`
+(San Francisco, 90 min by transit) and `…0006` (Los Angeles, 90 min by
+transit) are retired too. SF's plot only reached Gilroy, which a train
+already serves, so SPA-532 replaced both with the 135-minute entries `…0009`
+and `…000a`, which reach Fresno and Bakersfield. Migration 00038 deletes
+their rows. Do not reuse any retired id.
 
 Every mode chains through the HSR graph, walk and bike included. So any
 change to `ca-hsr`'s services leaves these payloads describing the old

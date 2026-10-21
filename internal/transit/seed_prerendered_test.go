@@ -283,6 +283,9 @@ func TestSeedPrerenderedIsochrones_caHSRShipsAtLeastFour(t *testing.T) {
 // Both 240-minute entries were captured against a graph without the HSR
 // Express, so SPA-464 left them outdated. Migration 00035 deletes their rows;
 // shipping either file again would only re-seed a payload of that old graph.
+// The SF and LA 90-minute transit entries gave way to 135-minute ones
+// (SPA-532), and 00038 deletes their rows, so shipping them again would put
+// both plots from one origin back on the home page.
 func TestSeedPrerenderedIsochrones_doesNotShipRetiredEntries(t *testing.T) {
 	store := newFakePrerenderedSeedStore()
 	if err := transit.SeedPrerenderedIsochronesFromEmbedded(context.Background(), store); err != nil {
@@ -291,6 +294,8 @@ func TestSeedPrerenderedIsochrones_doesNotShipRetiredEntries(t *testing.T) {
 	for _, id := range []string{
 		"00000000-0000-4006-8001-000000000001",
 		"00000000-0000-4006-8001-000000000002",
+		"00000000-0000-4006-8001-000000000003",
+		"00000000-0000-4006-8001-000000000006",
 	} {
 		if _, ok := store.entries[id]; ok {
 			t.Errorf("retired prerendered isochrone %s is still embedded", id)
