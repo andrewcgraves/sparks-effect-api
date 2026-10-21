@@ -1,6 +1,6 @@
 module github.com/andrewcgraves/sparks-effect-api
 
-go 1.26.9
+go 1.26.10
 
 require (
 	github.com/andrewcgraves/sparks-effect-contract v0.0.0

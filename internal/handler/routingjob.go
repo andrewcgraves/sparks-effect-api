@@ -164,7 +164,7 @@ func queuePosition(ctx context.Context, store RoutingJobPollStore, job transit.R
 
 const RoutingJobStaleAfter = 90 * time.Second
 
-const staleRoutingJobMessage = "The isochrone service isn't responding right now. Please try again in a few minutes."
+const staleRoutingJobMessage = "The routing service isn't responding right now. Please try again in a few minutes."
 
 func failIfStale(ctx context.Context, store RoutingStore, job transit.RoutingJob) transit.RoutingJob {
 	if job.Status != transit.JobStatusQueued && job.Status != transit.JobStatusRunning {

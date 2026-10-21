@@ -1,9 +1,16 @@
 id: "00000000-0000-4001-8001-000000000001"
 slug: "ca-hsr"
-name: "California High-Speed Rail"
-subtext: "Electrified · High-speed rail · Greenfield"
+name: "California High-Speed Rail & Brightline West"
+subtext: "CAHSR + Brightline West · Electrified high-speed rail"
 description: >
   The California High-Speed Rail system connecting San Francisco to Anaheim via the
   Central Valley. Phase 1 opens the SF–LA/Anaheim corridor, and the Brightline West
   spur (Palmdale–Victor Valley–Las Vegas) branches off it at Palmdale. Merced is a
   spur off Madera, not a Phase 1 call.
+
+  Sources: the Phase 1 line is based on the California High-Speed Rail Authority's
+  statewide HSR dataset (CAHSR PDS Engineering), preliminary planning data that is
+  for informational and planning purposes only and subject to change. Brightline
+  West is traced from OpenStreetMap (© OpenStreetMap contributors, ODbL), and its
+  Palmdale–Victor Valley leg approximates the High Desert Corridor JPA's corridor
+  maps. Station locations come from public CAHSR, CEQA and Wikipedia sources.

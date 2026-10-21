@@ -63,6 +63,10 @@
   scenario_id: "00000000-0000-4001-8001-000000000001"
   slug: "ca-hsr-phase-1-san-francisco-to-anaheim"
   name: "CA HSR Phase 1 — San Francisco to Anaheim"
+  description: >
+    Based on the California High-Speed Rail Authority's statewide HSR dataset (CAHSR
+    PDS Engineering): preliminary planning data, for informational and planning
+    purposes only, and subject to change.
   mode: "rail"
   bidirectional: true
   geometry:
@@ -21709,6 +21713,10 @@
   scenario_id: "00000000-0000-4001-8001-000000000001"
   slug: "brightline-west-palmdale-to-las-vegas"
   name: "Brightline West — Palmdale to Las Vegas"
+  description: >
+    Victor Valley to Las Vegas is traced from OpenStreetMap (© OpenStreetMap
+    contributors, ODbL). Palmdale to Victor Valley approximates the High Desert
+    Corridor JPA's corridor maps.
   mode: "rail"
   bidirectional: true
   geometry:

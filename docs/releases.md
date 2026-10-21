@@ -35,7 +35,11 @@ The workflow refuses to promote:
 - a tag that is not `vMAJOR.MINOR.PATCH`
 - a tag pointing at a commit that is not an ancestor of `main` — this is what
   stops a feature branch reaching production
-- a commit with no published image — i.e. one that never went through `main`
+- a commit with no published image — i.e. one that never went through `main`.
+  A tag pushed straight after the merge is fine: the workflow waits up to 20
+  minutes for `main`'s CI to publish the image before it refuses. If a
+  release does fail on a missing image, re-run it for the same tag once
+  `main`'s CI is green (Actions → **Release** → *Run workflow*)
 
 ### Rolling back
 

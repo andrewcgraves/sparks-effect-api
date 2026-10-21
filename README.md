@@ -226,6 +226,10 @@ could not be read. It is counted on each poll, not stored.
 
 `GET /api/routing/status` says whether live plotting is working, so the
 website can warn a visitor before they wait out the 120 s deadline (SPA-442).
+It answers `offline` once the worker has been silent for 2 minutes, whether or
+not anyone has asked for a splash zone (SPA-503): the worker heartbeats every
+30 s as a single replica that never scales to zero, so a live one is never that
+quiet.
 It is public and cached for ten seconds:
 
 ```json
@@ -237,8 +241,9 @@ It is public and cached for ten seconds:
 three [routing statuses](CONTEXT.md#routing-status). Worker contact is any
 authenticated `/api/internal/*` request, which the worker's 30 s heartbeat to
 `GET /api/internal/worker` guarantees while it is up. Contact is held in this
-process's memory, so a restart starts the clock again and a second replica
-would not see the first one's contact.
+process's memory, so a restart starts the clock again (a fresh process reads
+`ok` for its first 2 minutes) and a second replica would not see the first
+one's contact.
 
 ## Seed data
 
@@ -280,7 +285,7 @@ and tags.
 
 ## Requirements
 
-- [Go](https://go.dev/dl/) 1.26.9+
+- [Go](https://go.dev/dl/) 1.26.10+
 - [Docker](https://www.docker.com/) (optional; for containerized runs and the
   database integration tests — podman also works)
 - `golangci-lint` (installed automatically by `make lint` if missing)
@@ -615,6 +620,7 @@ scenario/route reads or `/api/internal/*`.
 | `GET /api/me/handovers` | authenticated | Your pending handovers, `{incoming, outgoing}`, with the service and the other party's display name |
 | `POST /api/handovers/{id}/cancel` | authenticated | Withdraw a pending offer you sent |
 | `POST /api/handovers/{id}/decline` | authenticated | Refuse a pending offer sent to you |
+| `POST /api/handovers/{id}/accept` | authenticated | Take ownership of a service offered to you, with its compile jobs and publication, in one transaction. 409 `service_in_scenarios` (detail lists the slugs) while the sender's scenarios still include it; 409 if the offer has closed or expired, or the sender no longer owns the service |
 | `POST /api/admin/users` | admin | Provision an account with a password (for scripts) |
 | `POST /api/admin/invites` | admin | Create an account and return its one-time invite link |
 | `POST /api/admin/users/{id}/reset-link` | admin | Return a one-time password-reset link |
@@ -622,6 +628,7 @@ scenario/route reads or `/api/internal/*`.
 | `PATCH /api/admin/users/{id}` | admin | Set `is_admin` and/or `disabled`; disabling revokes the account's sessions. An admin demoting or disabling themselves gets 409 |
 | `POST /api/admin/routes` | admin | Ingest a curated alignment |
 | `POST /api/admin/retention` | admin | Dry-run (empty body or `{"apply":false}`) or apply (`{"apply":true}`) isochrone-cache and routing-job-result retention. See [`docs/retention.md`](docs/retention.md) |
+| `PUT /api/admin/services/{slug}/owner` | admin | Move a service to the account named by `user_id` with no offer, for an owner who has left or is disabled. The same move as an accept, with any pending offer cancelled, recorded as an accepted handover carrying the admin's id in `forced_by`. 422 for an unknown or disabled account or the current owner; 409 `service_in_scenarios` like an accept |
 | `POST /api/scenarios/{slug}/prerendered-isochrones` | admin | Curate a ready-to-display isochrone for a scenario |
 
 ### Owning the seeded models
@@ -771,11 +778,38 @@ Five rules, all enforced server-side:
 - **Handover** — offering a service goes through `CanAccess` like any other
   write, so an admin may offer one on the owner's behalf (the owner stays the
   sender). Deciding does not: only the sender may cancel and only the
-  recipient may decline, and everyone else, an admin included, gets 404. The
-  offer answers 202 with one body whether or not `to_email` belongs to an
-  active account, so it cannot be used to discover who has one. A pending
-  offer past `expires_at` (14 days) reads as expired and can no longer be
-  cancelled or declined. Accepting is not built yet (SPA-389).
+  recipient may accept or decline, and everyone else, an admin included, gets
+  404. The offer answers 202 with one body whether or not `to_email` belongs
+  to an active account, so it cannot be used to discover who has one. A
+  pending offer past `expires_at` (14 days) reads as expired and can no
+  longer be cancelled, declined or accepted.
+- **Accepting a handover** moves the service in one transaction, with the
+  offer and the service rows locked, so two accepts of one offer succeed
+  exactly once. What moves: `user_services.owner_id`, and `owner_id` on the
+  service's compile `jobs` (the recipient polls `GET /api/jobs/{id}` on it).
+  What stays put: `service_publications` is keyed by the service and has no
+  owner, so the public page keeps answering identically; `routing_jobs` are
+  short-lived and left alone. A route the recipient cannot reference (owned,
+  and not by them) is **copied** to the recipient — new id and slug, same
+  geometry and segments, no scenario — and the service repointed; the
+  sender's route is never moved because they may use it elsewhere. A service
+  still in any of the sender's scenarios is **refused** with 409
+  `service_in_scenarios` listing the slugs: every member of a scenario must
+  belong to its owner, interchange pairs name the service's stops, and
+  silently editing the sender's scenarios is not something an accept does.
+  The sender removes it first and the same offer then goes through.
+- **An admin can move a service without an offer** (SPA-390), through
+  `PUT /api/admin/services/{slug}/owner` with `{user_id}`, for an owner who
+  has left, whose account is disabled, or who was the wrong person. It is the
+  same move as an accept, in `Repo.TransferUserService`, with the same
+  refusals (`service_in_scenarios`; a disabled account or the current owner
+  as the new owner), so no path around the handover rules exists. Any
+  pending offer on the service is cancelled in the same transaction, so its
+  recipient cannot later accept a service that has already moved, and the
+  move is recorded as an `accepted` row in `service_handovers` from the old
+  owner to the new with the admin's id in `forced_by`. The row answers the
+  call; it never lists under `/api/me/handovers`, which shows pending offers
+  only.
 
 ### Database integration tests
 

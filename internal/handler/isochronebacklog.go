@@ -12,7 +12,7 @@ import (
 
 const BacklogFullErrorCode = "backlog_full"
 
-const backlogFullMessage = "The isochrone service is busy right now. Please try again in a few moments."
+const backlogFullMessage = "The routing service is busy right now. Please try again in a few moments."
 
 const backlogRetryAfter = 15 * time.Second
 

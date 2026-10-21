@@ -15,13 +15,18 @@ var retiredPrerenderedIDs = []string{
 	"00000000-0000-4006-8001-000000000002", // Burbank Airport - 240 min on foot
 }
 
-const keptPrerenderedID = "00000000-0000-4006-8001-000000000003"
+var retiredShortTransitPrerenderedIDs = []string{
+	"00000000-0000-4006-8001-000000000003", // San Francisco (Transbay) - 90 min by transit
+	"00000000-0000-4006-8001-000000000006", // Los Angeles (Union Station) - 90 min by transit
+}
+
+const keptPrerenderedID = "00000000-0000-4006-8001-000000000004"
 
 func insertCaHSRPrerendered(t *testing.T, repo *postgres.Repo, url string) {
 	t.Helper()
 	exec(t, url,
 		`INSERT INTO scenarios (id, slug, name) VALUES ('`+phase1ScenarioID+`', 'ca-hsr', 'CA HSR')`)
-	for _, id := range slices.Concat(retiredPrerenderedIDs, []string{keptPrerenderedID}) {
+	for _, id := range slices.Concat(retiredPrerenderedIDs, retiredShortTransitPrerenderedIDs, []string{keptPrerenderedID}) {
 		entry := transit.PrerenderedIsochrone{
 			ID: id, ScenarioSlug: "ca-hsr", Label: id,
 			Lat: 37.3, Lng: -121.9, BudgetMins: 60, Mode: transit.TravelModeBike,
@@ -33,9 +38,9 @@ func insertCaHSRPrerendered(t *testing.T, repo *postgres.Repo, url string) {
 	}
 }
 
-func assertOnlyKeptPrerendered(t *testing.T, url string) {
+func assertOnlyKeptPrerendered(t *testing.T, url string, retired []string) {
 	t.Helper()
-	for _, id := range retiredPrerenderedIDs {
+	for _, id := range retired {
 		if got := scalarCount(t, url,
 			`SELECT count(*) FROM prerendered_isochrones WHERE id = '`+id+`'`); got != 0 {
 			t.Errorf("retired prerendered isochrone %s survived the migration", id)
@@ -55,7 +60,7 @@ func TestRetirePrerenderedMigrationDeletesTheTwoOutdatedEntries(t *testing.T) {
 	if err := postgres.Migrate(context.Background(), url); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
-	assertOnlyKeptPrerendered(t, url)
+	assertOnlyKeptPrerendered(t, url, retiredPrerenderedIDs)
 }
 
 func TestRetirePrerenderedMigrationIsSafeToReRun(t *testing.T) {
@@ -68,5 +73,29 @@ func TestRetirePrerenderedMigrationIsSafeToReRun(t *testing.T) {
 			t.Fatalf("Migrate pass %d: %v", pass, err)
 		}
 	}
-	assertOnlyKeptPrerendered(t, url)
+	assertOnlyKeptPrerendered(t, url, retiredPrerenderedIDs)
+}
+
+func TestRetireShortTransitPrerenderedMigrationDeletesTheSFAndLA90MinuteEntries(t *testing.T) {
+	repo, url := freshRepo(t)
+	insertCaHSRPrerendered(t, repo, url)
+
+	rewindTo(t, url, 38)
+	if err := postgres.Migrate(context.Background(), url); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	assertOnlyKeptPrerendered(t, url, retiredShortTransitPrerenderedIDs)
+}
+
+func TestRetireShortTransitPrerenderedMigrationIsSafeToReRun(t *testing.T) {
+	repo, url := freshRepo(t)
+	insertCaHSRPrerendered(t, repo, url)
+
+	for pass := 1; pass <= 2; pass++ {
+		rewindTo(t, url, 38)
+		if err := postgres.Migrate(context.Background(), url); err != nil {
+			t.Fatalf("Migrate pass %d: %v", pass, err)
+		}
+	}
+	assertOnlyKeptPrerendered(t, url, retiredShortTransitPrerenderedIDs)
 }

@@ -75,7 +75,7 @@ func TestReconcileSeedFillsAnExistingScenarioSubtext(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("GetScenarioBySlug: ok=%v err=%v", ok, err)
 	}
-	const want = "Electrified · High-speed rail · Greenfield"
+	const want = "CAHSR + Brightline West · Electrified high-speed rail"
 	if sc.Subtext != want {
 		t.Fatalf("seeded subtext = %q, want %q", sc.Subtext, want)
 	}
