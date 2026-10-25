@@ -881,7 +881,7 @@ internal/routing/            confirm-mode AMQP publisher (message types live in 
 GitHub Actions runs `test`, `vet`, and `lint` on every pull request and on
 pushes to `main` (the nested contract module included), diffs the golden
 fixtures against the worker as its own job (`make check-contract`), then
-builds the binary and uploads it as a workflow artifact. The contract job
+builds the binary. The contract job
 needs `GH_CONTRACT_TOKEN` — a PAT that can read
 `sparks-effect-routing-worker` — because that repo is private. A push to
 `main` also builds the Docker image and publishes it to the GitHub

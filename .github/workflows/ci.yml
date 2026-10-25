@@ -89,12 +89,6 @@ jobs:
       - name: Build
         run: make build
 
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: sparks-effect-api
-          path: bin/sparks-effect-api
-
   publish:
     name: Publish Docker image
     needs: [check, build]
