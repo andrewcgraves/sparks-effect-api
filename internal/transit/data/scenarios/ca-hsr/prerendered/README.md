@@ -42,32 +42,40 @@ and mode. That is why the list endpoint never selects the column.
 
 ## What ships here
 
-These are the prerendered isochrones the home page leads with (SPA-439), so a visitor's
+These are the prerendered isochrones the home page leads with, so a visitor's
 first plots cost no routing job. Each was captured from a real succeeded
-routing job on staging, whose worker routes on production's tileset, against
-the `ca-hsr` graph with the HSR Express running (compile `a5080656`). The
-envelope's `lat`/`lng`/`budget_mins`/`mode` are that job's own, and `result`
-is its payload byte for byte.
+routing job on staging, whose worker routes on Railway's real Valhalla,
+against the `ca-hsr` graph with the HSR Express running (compile
+`a5080656`). The envelope's `lat`/`lng`/`budget_mins`/`mode` are that job's
+own, and `result` is its payload byte for byte.
 
 | filename | label | origin | budget | mode |
 | --- | --- | --- | --- | --- |
-| `isochrone-sf-transbay-135-transit.json` | San Francisco (Transbay) - 135 min by transit | `sf` | 135 | `transit` |
-| `isochrone-sj-diridon-60-bike.json` | San Jose (Diridon) - 60 min by bike | `san-jose` | 60 | `bike` |
-| `isochrone-fresno-120-transit.json` | Fresno - 120 min by transit | `fresno` | 120 | `transit` |
-| `isochrone-la-union-station-135-transit.json` | Los Angeles (Union Station) - 135 min by transit | `los-angeles` | 135 | `transit` |
-| `isochrone-anaheim-60-walk.json` | Anaheim (ARTIC) - 60 min on foot | `anaheim` | 60 | `walk` |
-| `isochrone-burbank-airport-120-walk.json` | Burbank Airport - 120 min on foot | `burbank-airport` | 120 | `walk` |
+| `isochrone-sf-ferry-building-180-transit.json` | San Francisco (Ferry Building) - 180 min by transit | the Ferry Building | 180 | `transit` |
+| `isochrone-fresno-chukchansi-park-120-walk.json` | Fresno (Chukchansi Park) - 120 min on foot | the Fresno Grizzlies' ballpark | 120 | `walk` |
+| `isochrone-sj-diridon-90-bike.json` | San Jose (Diridon) - 90 min by bike | `san-jose` | 90 | `bike` |
+| `isochrone-bakersfield-45-walk.json` | Bakersfield - 45 min on foot | `bakersfield`'s `routing_location` | 45 | `walk` |
+| `isochrone-la-union-station-120-transit.json` | Los Angeles (Union Station) - 120 min by transit | `los-angeles` | 120 | `transit` |
+
+Bakersfield starts from the station's `routing_location`, not its `location`:
+the latter snaps onto a `railway=proposed` node, which would leave a walk with
+almost no street to cover (see `stations.yaml`).
 
 Their ids follow this scenario's hand-written UUID convention, where the third
 group names the kind: `4006` for a prerendered isochrone, as `4005` is a
-station and `4004` a service. Ids `…0001` (San Jose, 240 min by bike) and
-`…0002` (Burbank Airport, 240 min on foot) are retired. They were captured
-before the Express ran, and migration 00035 deletes their rows. Ids `…0003`
-(San Francisco, 90 min by transit) and `…0006` (Los Angeles, 90 min by
-transit) are retired too. SF's plot only reached Gilroy, which a train
-already serves, so SPA-532 replaced both with the 135-minute entries `…0009`
-and `…000a`, which reach Fresno and Bakersfield. Migration 00038 deletes
-their rows. Do not reuse any retired id.
+station and `4004` a service. The five above are `…000b` to `…000f`. Every
+earlier id is retired, and none may be reused:
+
+- `…0001` (San Jose, 240 min by bike) and `…0002` (Burbank Airport, 240 min
+  on foot) were captured before the Express ran. Migration 00035 deletes them.
+- `…0003` (San Francisco, 90 min by transit) and `…0006` (Los Angeles, 90 min
+  by transit) gave way to 135-minute entries in SPA-532, because SF's plot
+  only reached Gilroy. Migration 00038 deletes them.
+- `…0004`, `…0005`, `…0007`, `…0008`, `…0009` and `…000a` (San Jose 60 min by
+  bike, Fresno 120 min by transit, Anaheim 60 min on foot, Burbank Airport
+  120 min on foot, and the SF and LA 135-minute transit plots) gave way to the
+  current five when the home page's picks were redrawn. Migration 00039
+  deletes them.
 
 Every mode chains through the HSR graph, walk and bike included. So any
 change to `ca-hsr`'s services leaves these payloads describing the old
