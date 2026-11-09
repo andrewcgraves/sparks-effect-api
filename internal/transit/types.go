@@ -22,6 +22,9 @@ type Scenario struct {
 	Subtext     string  `yaml:"subtext,omitempty" json:"subtext,omitempty"`
 	Description string  `yaml:"description" json:"description"`
 	OwnerID     *string `yaml:"owner_id,omitempty" json:"owner_id,omitempty"`
+
+	CallToActionLabel string `yaml:"call_to_action_label,omitempty" json:"call_to_action_label,omitempty"`
+	CallToActionURL   string `yaml:"call_to_action_url,omitempty"   json:"call_to_action_url,omitempty"`
 }
 
 type RouteSegment struct {

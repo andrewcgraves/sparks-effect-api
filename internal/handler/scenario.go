@@ -12,6 +12,9 @@ type scenarioListItem struct {
 	Name        string `json:"name"`
 	Subtext     string `json:"subtext"`
 	Description string `json:"description"`
+
+	CallToActionLabel string `json:"call_to_action_label"`
+	CallToActionURL   string `json:"call_to_action_url"`
 }
 
 type vehicleTypeSummary struct {
@@ -33,14 +36,18 @@ type serviceSummary struct {
 }
 
 type scenarioDetail struct {
-	ID          string            `json:"id"`
-	Slug        string            `json:"slug"`
-	Name        string            `json:"name"`
-	Subtext     string            `json:"subtext"`
-	Description string            `json:"description"`
-	Routes      []transit.Route   `json:"routes"`
-	Stations    []transit.Station `json:"stations"`
-	Services    []serviceSummary  `json:"services"`
+	ID          string `json:"id"`
+	Slug        string `json:"slug"`
+	Name        string `json:"name"`
+	Subtext     string `json:"subtext"`
+	Description string `json:"description"`
+
+	CallToActionLabel string `json:"call_to_action_label"`
+	CallToActionURL   string `json:"call_to_action_url"`
+
+	Routes   []transit.Route   `json:"routes"`
+	Stations []transit.Station `json:"stations"`
+	Services []serviceSummary  `json:"services"`
 }
 
 func Scenarios(store *transit.Store) http.HandlerFunc {
@@ -54,6 +61,9 @@ func Scenarios(store *transit.Store) http.HandlerFunc {
 				Name:        sc.Name,
 				Subtext:     sc.Subtext,
 				Description: sc.Description,
+
+				CallToActionLabel: sc.CallToActionLabel,
+				CallToActionURL:   sc.CallToActionURL,
 			})
 		}
 		writeJSON(w, http.StatusOK, items)
@@ -99,9 +109,13 @@ func ScenarioBySlug(store *transit.Store) http.HandlerFunc {
 			Name:        sc.Name,
 			Subtext:     sc.Subtext,
 			Description: sc.Description,
-			Routes:      routes,
-			Stations:    stations,
-			Services:    summaries,
+
+			CallToActionLabel: sc.CallToActionLabel,
+			CallToActionURL:   sc.CallToActionURL,
+
+			Routes:   routes,
+			Stations: stations,
+			Services: summaries,
 		})
 	}
 }
