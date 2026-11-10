@@ -102,49 +102,6 @@ func TestReconcileSeedFillsAnExistingScenarioSubtext(t *testing.T) {
 	}
 }
 
-func TestReconcileSeedFillsAnExistingScenarioCallToAction(t *testing.T) {
-	repo, _ := freshRepo(t)
-	ctx := context.Background()
-
-	if _, err := transit.SeedIfEmpty(ctx, repo); err != nil {
-		t.Fatalf("SeedIfEmpty: %v", err)
-	}
-	sc, ok, err := repo.GetScenarioBySlug(ctx, "ca-hsr")
-	if err != nil || !ok {
-		t.Fatalf("GetScenarioBySlug: ok=%v err=%v", ok, err)
-	}
-	const (
-		wantLabel = "Sign here"
-		wantURL   = "https://actionnetwork.org/petitions/build-the-california-high-speed-rail-sooner-2"
-	)
-	if sc.CallToActionLabel != wantLabel || sc.CallToActionURL != wantURL {
-		t.Fatalf("seeded call to action = %q %q, want %q %q",
-			sc.CallToActionLabel, sc.CallToActionURL, wantLabel, wantURL)
-	}
-
-	// A database seeded before the columns existed holds the column defaults.
-	sc.CallToActionLabel, sc.CallToActionURL = "", ""
-	if err := repo.UpdateScenario(ctx, sc); err != nil {
-		t.Fatalf("UpdateScenario: %v", err)
-	}
-
-	written, err := transit.ReconcileSeed(ctx, repo)
-	if err != nil {
-		t.Fatalf("ReconcileSeed: %v", err)
-	}
-	if written != 1 {
-		t.Fatalf("ReconcileSeed wrote %d rows, want 1 (the scenario)", written)
-	}
-	got, ok, err := repo.GetScenarioBySlug(ctx, "ca-hsr")
-	if err != nil || !ok {
-		t.Fatalf("GetScenarioBySlug after reconcile: ok=%v err=%v", ok, err)
-	}
-	if got.CallToActionLabel != wantLabel || got.CallToActionURL != wantURL {
-		t.Errorf("call to action after reconcile = %q %q, want %q %q",
-			got.CallToActionLabel, got.CallToActionURL, wantLabel, wantURL)
-	}
-}
-
 func TestReconcileSeedDoesNotClobberAnAuthoredScenario(t *testing.T) {
 	repo, _ := freshRepo(t)
 	ctx := context.Background()

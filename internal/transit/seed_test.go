@@ -302,35 +302,6 @@ func TestValidateScenarioSeed(t *testing.T) {
 	}
 }
 
-func TestValidateScenarioSeed_callToAction(t *testing.T) {
-	const link = "https://example.org/petition"
-	tests := []struct {
-		name    string
-		label   string
-		url     string
-		wantErr bool
-	}{
-		{name: "neither set", wantErr: false},
-		{name: "label and https link", label: "Sign here", url: link, wantErr: false},
-		{name: "label at the bound", label: strings.Repeat("a", MaxCallToActionLabelChars), url: link, wantErr: false},
-		{name: "label over the bound", label: strings.Repeat("a", MaxCallToActionLabelChars+1), url: link, wantErr: true},
-		{name: "label with no link", label: "Sign here", wantErr: true},
-		{name: "link with no label", url: link, wantErr: true},
-		{name: "blank label with a link", label: "   ", url: link, wantErr: true},
-		{name: "plain http link", label: "Sign here", url: "http://example.org/petition", wantErr: true},
-		{name: "javascript link", label: "Sign here", url: "javascript:alert(1)", wantErr: true},
-		{name: "relative link", label: "Sign here", url: "/petition", wantErr: true},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			err := validateScenarioSeed(Scenario{Slug: "s", CallToActionLabel: tc.label, CallToActionURL: tc.url})
-			if (err != nil) != tc.wantErr {
-				t.Fatalf("err = %v, wantErr %v", err, tc.wantErr)
-			}
-		})
-	}
-}
-
 func TestValidateSegmentRoutes(t *testing.T) {
 	routes := []Route{{ID: "route-1"}, {ID: "route-2"}}
 

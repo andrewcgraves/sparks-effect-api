@@ -4,16 +4,10 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
-	"net/url"
 	"slices"
-	"strings"
 	"sync"
 	"unicode/utf8"
 )
-
-// A button label, so a few words: room for "Sign the petition" with plenty
-// to spare, short enough to stay on one line on a phone.
-const MaxCallToActionLabelChars = 40
 
 type SeedSink interface {
 	ListCuratedScenarios(ctx context.Context) ([]Scenario, error)
@@ -180,28 +174,6 @@ func validateScenarioSeed(sc Scenario) error {
 	// so breaking it fails the load, which fails boot and the test suite.
 	if utf8.RuneCountInString(sc.Subtext) > MaxSubtextChars {
 		return fmt.Errorf("scenario %q: subtext must be at most %d characters", sc.Slug, MaxSubtextChars)
-	}
-	return validateCallToAction(sc)
-}
-
-// A call to action is a button: a label with nowhere to go, or a link with no
-// words on it, is a half-written one, so both are set or neither is. The link
-// leaves the site, so it must be an absolute https address.
-func validateCallToAction(sc Scenario) error {
-	label := strings.TrimSpace(sc.CallToActionLabel)
-	link := strings.TrimSpace(sc.CallToActionURL)
-	if label == "" && link == "" {
-		return nil
-	}
-	if label == "" || link == "" {
-		return fmt.Errorf("scenario %q: call_to_action_label and call_to_action_url must be set together", sc.Slug)
-	}
-	if utf8.RuneCountInString(label) > MaxCallToActionLabelChars {
-		return fmt.Errorf("scenario %q: call_to_action_label must be at most %d characters", sc.Slug, MaxCallToActionLabelChars)
-	}
-	u, err := url.Parse(link)
-	if err != nil || u.Scheme != "https" || u.Host == "" {
-		return fmt.Errorf("scenario %q: call_to_action_url must be an absolute https URL", sc.Slug)
 	}
 	return nil
 }
