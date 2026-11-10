@@ -2,15 +2,15 @@ id: "00000000-0000-4001-8001-000000000001"
 slug: "ca-hsr"
 name: "California High-Speed Rail & Brightline West"
 subtext: "CAHSR + Brightline West · Electrified high-speed rail"
-description: >
-  The California High-Speed Rail system connecting San Francisco to Anaheim via the
-  Central Valley. Phase 1 opens the SF–LA/Anaheim corridor, and the Brightline West
-  spur (Palmdale–Victor Valley–Las Vegas) branches off it at Palmdale. Merced is a
-  spur off Madera, not a Phase 1 call.
+# Plain text with blank lines between paragraphs. The network page turns
+# [link text](https://...) into a link (SPA-549); nothing else is markup.
+description: |-
+  Do you have a free afternoon? Or just 45 minutes? This map shows how far you can get using California high-speed rail. Choose your starting place, and the colored-in area is everywhere you can get in the time you have. Whether you're bringing your bicycle or riding public transit to the train station, high-speed rail will connect you to a whole new California.
 
-  Sources: the Phase 1 line is based on the California High-Speed Rail Authority's
-  statewide HSR dataset (CAHSR PDS Engineering), preliminary planning data that is
-  for informational and planning purposes only and subject to change. Brightline
-  West is traced from OpenStreetMap (© OpenStreetMap contributors, ODbL), and its
-  Palmdale–Victor Valley leg approximates the High Desert Corridor JPA's corridor
-  maps. Station locations come from public CAHSR, CEQA and Wikipedia sources.
+  This map shows phase 1 of California's high-speed rail network, plus the High Desert Corridor and Brightline West. Service between Merced and Bakersfield is expected to start in 2033 and the full San Francisco to Southern California project is on track to be finished in 2040.
+
+  Want to see it built faster? Move California, with Transbay Coalition and Move LA, is petitioning the Governor and state lawmakers to remove the political barriers slowing the project down: have utilities move their equipment out of the line's way, let private investors help pay for the next phases, and have highway agencies share the cost of the roads around it. [Sign the petition](https://actionnetwork.org/petitions/build-the-california-high-speed-rail-sooner-2).
+
+  Notes:
+
+  The map for a single travel time includes both local and express trains, assuming you will take whichever is fastest for a given destination. Travel times do not include transfer times for buses and other public transit. Data for this map was drawn from the California High-Speed Rail Authority's statewide HSR dataset (CAHSR PDS Engineering), OpenStreetMap (© OpenStreetMap contributors, ODbL), High Desert Corridor Joint Powers Agency maps, California Environmental Impact Reports, and Wikipedia.
