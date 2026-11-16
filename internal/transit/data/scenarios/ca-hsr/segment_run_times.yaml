@@ -23,6 +23,8 @@
 #   Anaheim→SF compiled 18180 s = 303 min (matrix 306)
 #   San Jose→Fresno 66 min (matrix 65)
 #   Fresno→San Jose 70 min (matrix 70)
+# The HSR Nonstop's direct sf → los-angeles segment (below) is not one of these
+# hops and is not in these totals. It compiles to 9600 s = 160 min each way.
 #
 # The Merced spur is 23 min forward / 25 min reverse, not the Table 3-4 direct
 # cell of 20 and not the Table 3-1 M–B cell of 17. Footnote 7 says Merced trip
@@ -103,6 +105,18 @@ segments:
     to: anaheim
     run_seconds: 2070
     route_id: "00000000-0000-4002-8001-000000000001"
+
+  # HSR Nonstop: San Francisco → Los Angeles, no intermediate stops (SPA-534).
+  # This is a nonstop timing, the Prop 1A 2h40 target, not part of the Table 3-4
+  # all-stop fit. Only the HSR Nonstop uses it: the compiler walks the segment
+  # path with the fewest hops, so it takes this span only between consecutive
+  # stops sf and los-angeles. 9510 s plus LA's 90 s level-boarding dwell is
+  # 9600 s = 2h40, in both directions.
+  - from: sf
+    to: los-angeles
+    run_seconds: 9510
+    route_id: "00000000-0000-4002-8001-000000000001"
+
   # Merced spur: Merced → Madera
   - from: merced
     to: madera

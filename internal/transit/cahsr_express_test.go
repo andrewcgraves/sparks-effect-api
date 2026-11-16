@@ -8,6 +8,7 @@ import (
 const (
 	caHSRExpressID = "00000000-0000-4004-8001-000000000001"
 	caHSRLocalID   = "00000000-0000-4004-8001-000000000002"
+	caHSRNonstopID = "00000000-0000-4004-8001-000000000005"
 )
 
 // compileCAHSR compiles the seeded ca-hsr scenario from the active services
@@ -39,7 +40,11 @@ func compileCAHSR(t *testing.T, store *Store, keep func(Service) bool) *TransitG
 	return g
 }
 
-func withoutExpress(svc Service) bool { return svc.ID != caHSRExpressID }
+// allStopOnly drops the services that skip stops, the HSR Express and the HSR
+// Nonstop, which would otherwise win every pair they serve.
+func allStopOnly(svc Service) bool {
+	return svc.ID != caHSRExpressID && svc.ID != caHSRNonstopID
+}
 
 func caHSRServiceGraph(t *testing.T, g *TransitGraph, serviceID string) ServiceGraph {
 	t.Helper()

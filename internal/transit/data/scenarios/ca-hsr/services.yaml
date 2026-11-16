@@ -3,6 +3,8 @@
 # HSR Express: key stops only (skips Madera and Kings/Tulare). It does not
 #   call at Merced.
 # HSR Local: Phase 1 stops SF–Anaheim. Merced is not a Phase 1 call.
+# HSR Nonstop: San Francisco–Los Angeles with no intermediate calls, 2h40 each
+#   way (the Prop 1A target).
 # Merced Shuttle: hourly Merced–Madera spur. The 2026 Business Plan describes
 #   this as an hourly shuttle with a timed connection at Madera.
 # Brightline West: Palmdale–Victor Valley–Las Vegas spur, interchanging with Phase 1 at Palmdale.
@@ -102,6 +104,29 @@
     - start_time: "09:00"
       end_time: "20:00"
       headway_s: 5400
+
+- id: "00000000-0000-4004-8001-000000000005"
+  scenario_id: "00000000-0000-4001-8001-000000000001"
+  route_id: "00000000-0000-4002-8001-000000000001"
+  vehicle_type_id: "00000000-0000-4003-8001-000000000001"
+  name: "HSR Nonstop"
+  direction: "both"
+  # Added in SPA-534. Skipping stops on the Express cannot reach 2h40: a skipped
+  # stop saves only its 90 s dwell, so an SF and LA only pattern over the
+  # all-stop hops compiles to about 254 min. The Nonstop gets its time from its
+  # own direct sf → los-angeles segment in segment_run_times.yaml (9510 s run
+  # plus LA's 90 s dwell = 9600 s), which no other service rides.
+  active: true
+  provenance: calibrated
+  stops:
+    - station_id: "00000000-0000-4005-8001-000000000001"
+      sequence: 1
+    - station_id: "00000000-0000-4005-8001-00000000000d"
+      sequence: 2
+  frequency_windows:
+    - start_time: "06:00"
+      end_time: "22:00"
+      headway_s: 3600
 
 # Hourly Merced–Madera shuttle with a timed connection at Madera, as the
 # 2026 Business Plan describes it. One window, 06:00–22:00; no peak/off-peak split.

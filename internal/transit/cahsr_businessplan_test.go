@@ -89,8 +89,8 @@ func TestCompiledCAHSRMatches2026BusinessPlan(t *testing.T) {
 	}
 
 	// The matrix is all-stop, so it is held against the graph without the HSR
-	// Express, which would otherwise win every pair it serves.
-	allStop := compileCAHSR(t, store, withoutExpress)
+	// Express and the HSR Nonstop, which would otherwise win every pair they serve.
+	allStop := compileCAHSR(t, store, allStopOnly)
 	for from, row := range businessPlan2026AllStopMin {
 		for to, wantMin := range row {
 			got, _, _, ok := graphDijkstra(allStop, from, to)

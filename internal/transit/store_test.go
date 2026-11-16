@@ -521,16 +521,19 @@ func sumStopToStop(t *testing.T, adj map[string]int, name string, stops []string
 
 func TestTravelTimeBetween_caHSRCorridorDirectionsDiffer(t *testing.T) {
 	store := mustNewStore(t)
-	allStop := compileCAHSR(t, store, withoutExpress)
+	allStop := compileCAHSR(t, store, allStopOnly)
 
-	// The Local calls at 11 stations after its origin; the Express at 9.
+	// The Local calls at 11 stations after its origin. The fastest trip is the
+	// HSR Nonstop between SF and LA (9600 s) plus the LA ↔ Anaheim hop, 2070 s
+	// run and 90 s dwell either way, so it is the same in both directions.
+	const viaNonstop = 9600 + 2070 + 90
 	for _, tc := range []struct {
 		from, to string
 		local    int
 		fastest  int
 	}{
-		{"sf", "anaheim", 17310 + 11*90, 17310 + 9*90},
-		{"anaheim", "sf", 17190 + 11*90, 17190 + 9*90},
+		{"sf", "anaheim", 17310 + 11*90, viaNonstop},
+		{"anaheim", "sf", 17190 + 11*90, viaNonstop},
 	} {
 		got, _, _, ok := graphDijkstra(allStop, tc.from, tc.to)
 		if !ok || got != tc.local {
@@ -538,7 +541,7 @@ func TestTravelTimeBetween_caHSRCorridorDirectionsDiffer(t *testing.T) {
 		}
 		got, _, _, ok = store.TravelTimeBetween("ca-hsr", tc.from, tc.to)
 		if !ok || got != tc.fastest {
-			t.Errorf("%s→%s via HSR Express: want %d, got %d (found %v)", tc.from, tc.to, tc.fastest, got, ok)
+			t.Errorf("%s→%s fastest, via HSR Nonstop: want %d, got %d (found %v)", tc.from, tc.to, tc.fastest, got, ok)
 		}
 	}
 }
@@ -639,8 +642,9 @@ func TestSeededTravelTimes_brightlineWestIsADistinctRouteGroup(t *testing.T) {
 	if len(byRoute) != 3 {
 		t.Errorf("want segments grouped under 3 routes, got %d: %v", len(byRoute), byRoute)
 	}
-	if got := len(byRoute[phase1RouteID]); got != 11 {
-		t.Errorf("Phase 1 route: want 11 segments, got %d", got)
+	// 11 all-stop hops plus the HSR Nonstop's direct sf→los-angeles span.
+	if got := len(byRoute[phase1RouteID]); got != 12 {
+		t.Errorf("Phase 1 route: want 12 segments, got %d", got)
 	}
 	if got := byRoute[spurRouteID]; len(got) != 1 || got[0] != "merced→madera" {
 		t.Errorf("Merced spur route: want [merced→madera], got %v", got)
