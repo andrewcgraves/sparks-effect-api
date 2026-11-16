@@ -154,13 +154,13 @@ func TestSeedAndCompiledReadPathAcrossRestart(t *testing.T) {
 	}
 
 	// Curated membership join was populated for the scenario: HSR Express,
-	// HSR Local, Merced Shuttle and Brightline West.
+	// HSR Local, HSR Nonstop, Merced Shuttle and Brightline West.
 	ids, err := repo2.ListServiceIDsByScenario(ctx, sc.ID)
 	if err != nil {
 		t.Fatalf("ListServiceIDsByScenario: %v", err)
 	}
-	if len(ids) != 4 {
-		t.Errorf("scenario_service membership: want 4, got %d", len(ids))
+	if len(ids) != 5 {
+		t.Errorf("scenario_service membership: want 5, got %d", len(ids))
 	}
 }
 
