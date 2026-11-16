@@ -8,6 +8,9 @@ Accepted. Records the semantics [SPA-275](https://linear.app/sparks-effect-perso
 proposed and never got to write down before it was canceled, and settles the
 second question that report left open.
 
+Amended 2026-11-15 for [SPA-559](https://linear.app/sparks-effect-personal/issue/SPA-559):
+decision 3 settles which route the claim is measured on.
+
 ## Context
 
 A user reported that San Jose State → Diridon reads 30 minutes when the trip is
@@ -71,6 +74,37 @@ service window, then cached under a key that does not record the error.
 
 So the answer to the original report is *"30 minutes is right, and here is where
 it goes"* — not *"30 minutes is wrong."*
+
+**3. Both are measured on the fastest route at that departure.** Valhalla's
+transit preferences are neutralised — `use_bus`, `use_rail` and
+`use_transfers` at 0.5 — and no `transfer_penalty` applies beyond the real
+time Valhalla already adds for a transfer. The surface shows where a rider
+*can* reach, not where a modelled rider with a taste for rail would choose to
+go.
+
+### Why the fastest route rather than Valhalla's default preferences
+
+Valhalla returns the cheapest path by its own cost, not the fastest, and an
+isochrone keeps the seconds of the cheapest-cost label. Its defaults (`use_bus`
+0.3, `use_rail` 0.6, `use_transfers` 0.3, `transfer_penalty` 300) price a bus
+second at 2.89× a rail second and a transfer at about 14 minutes while it adds
+one minute of real time. At 0.5 each factor normalises to 1.0, so cost tracks
+elapsed time and the cheapest route is the fastest one. The factors change
+which route wins, never how long a given route takes.
+
+Decision 2 refuses to let the surface promise reach nobody can realise. Cost
+ranking fails the other way: every point it draws is reachable, but it leaves
+out reach that is real. On production tiles departing Mon 2026-11-16 08:00,
+25th Ave & Anza → the Financial District came back as a 62.5-minute N Judah
+with 30 minutes of walking, where the 38R does it in 39.8. Its 60-minute
+isochrone covered 44.5 km² rather than 116.6 km². A planning instrument that
+weighs a hypothetical network against existing service cannot carry a built-in
+preference for one mode over another.
+
+A transfer penalty of 0 keeps the claim strictly "fastest". A transfer is not
+free: Valhalla still adds its real transfer time and a 15 s `transfer_cost`.
+Assuming a scheduled connection is made is consistent with decision 2, which
+already takes the timetable at its word for the boarding wait.
 
 ## Consequences
 
@@ -143,6 +177,15 @@ the reported legs are ridden or merely walked. It does not gate this ADR:
 
 Decision 1 is unaffected either way.
 
+### Changing the costing takes effect on a tileset rebuild
+
+The worker sends the decision-3 costing on every multimodal request
+(`attachMultimodalOptions`, `internal/valhalla/http_client.go`), but costing
+options are not part of the egress cache key. Polygons cut under the old
+costing stay live until a tileset rebuild changes `tileset_at` and turns every
+cached transit polygon into a miss. A costing change therefore ships ahead of a
+tile cycle, and saved and prerendered surfaces are re-rendered after it.
+
 ## Considered and rejected
 
 - **Report time in motion.** Matches the user's intuition; rejected for the three
@@ -157,6 +200,14 @@ Decision 1 is unaffected either way.
   ride along the service is physics-compiled from track geometry and has no
   timetable at all, so a specific-departure claim would be fiction on the main leg
   however precisely the access leg were modelled.
+- **Keep Valhalla's default transit preferences.** They model a rider who
+  prefers rail and avoids transfers, which is a trip planner's concern. Here
+  they shrink bus-served reach by more than half, and they bias the comparison
+  between modes that a planning instrument exists to make.
+- **A small transfer penalty as a tie-breaker.** A penalty of 60–120 s would
+  favour routes with fewer, less fragile connections. Rejected: it understates
+  reach by up to the penalty for each transfer it avoids, so the reported time
+  is no longer the fastest route's.
 
 ## Vocabulary
 
