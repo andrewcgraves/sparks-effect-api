@@ -421,7 +421,7 @@ minutes.
 | Repository | Owns |
 | --- | --- |
 | [`sparks-effect-routing-worker`](https://github.com/andrewcgraves/sparks-effect-routing-worker/blob/main/CONTEXT.md) | Chain vocabulary: chaining, access and egress legs, starter station and starter walk, reached vs reachable, journey (*trip* on the wire, as in `trip_progress`), leg, publication (of a queue message — a service's publication is defined here), the departure clock |
-| [`sparks-effect-website`](https://github.com/andrewcgraves/sparks-effect-website/blob/trunk/CONTEXT.md) | Product vocabulary (line, network, route, splash zone, stop vs station, travel time, starting point); the time-remaining graph: view, lane, through, fork |
+| [`sparks-effect-website`](https://github.com/andrewcgraves/sparks-effect-website/blob/trunk/CONTEXT.md) | Product vocabulary (line, network, route, travel zone, stop vs station, travel time, starting point); the time-remaining graph: view, lane, through, fork |
 | [`kustomize-config`](https://github.com/andrewcgraves/kustomize-config/blob/main/CONTEXT.md) | Deployment vocabulary: overlay, pin, generation, cycling the map, tileset |
 
 Decisions — as opposed to definitions — belong in ADRs, not here. A term
