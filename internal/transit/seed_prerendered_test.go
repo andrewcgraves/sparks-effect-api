@@ -286,7 +286,8 @@ func TestSeedPrerenderedIsochrones_caHSRShipsAtLeastFour(t *testing.T) {
 // The SF and LA 90-minute transit entries gave way to 135-minute ones
 // (SPA-532), and 00038 deletes their rows, so shipping them again would put
 // both plots from one origin back on the home page. The remaining six gave
-// way to a redrawn home-page set, and 00039 deletes their rows.
+// way to a redrawn home-page set, and 00039 deletes their rows. The next five
+// were captured before the HSR Nonstop ran (SPA-556), and 00041 deletes them.
 func TestSeedPrerenderedIsochrones_doesNotShipRetiredEntries(t *testing.T) {
 	store := newFakePrerenderedSeedStore()
 	if err := transit.SeedPrerenderedIsochronesFromEmbedded(context.Background(), store); err != nil {
@@ -303,6 +304,11 @@ func TestSeedPrerenderedIsochrones_doesNotShipRetiredEntries(t *testing.T) {
 		"00000000-0000-4006-8001-000000000008",
 		"00000000-0000-4006-8001-000000000009",
 		"00000000-0000-4006-8001-00000000000a",
+		"00000000-0000-4006-8001-00000000000b",
+		"00000000-0000-4006-8001-00000000000c",
+		"00000000-0000-4006-8001-00000000000d",
+		"00000000-0000-4006-8001-00000000000e",
+		"00000000-0000-4006-8001-00000000000f",
 	} {
 		if _, ok := store.entries[id]; ok {
 			t.Errorf("retired prerendered isochrone %s is still embedded", id)

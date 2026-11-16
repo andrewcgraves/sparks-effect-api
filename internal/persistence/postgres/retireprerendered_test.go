@@ -29,15 +29,23 @@ var retiredFirstHomePagePrerenderedIDs = []string{
 	"00000000-0000-4006-8001-00000000000a", // Los Angeles (Union Station) - 135 min by transit
 }
 
+var retiredPreNonstopPrerenderedIDs = []string{
+	"00000000-0000-4006-8001-00000000000b", // San Francisco (Ferry Building) - 180 min by transit
+	"00000000-0000-4006-8001-00000000000c", // Fresno (Chukchansi Park) - 120 min on foot
+	"00000000-0000-4006-8001-00000000000d", // San Jose (Diridon) - 90 min by bike
+	"00000000-0000-4006-8001-00000000000e", // Bakersfield - 45 min on foot
+	"00000000-0000-4006-8001-00000000000f", // Los Angeles (Union Station) - 120 min by transit
+}
+
 // No migration names this one, so every retirement must leave it standing.
-const keptPrerenderedID = "00000000-0000-4006-8001-00000000000b"
+const keptPrerenderedID = "00000000-0000-4006-8001-000000000010"
 
 func insertCaHSRPrerendered(t *testing.T, repo *postgres.Repo, url string) {
 	t.Helper()
 	exec(t, url,
 		`INSERT INTO scenarios (id, slug, name) VALUES ('`+phase1ScenarioID+`', 'ca-hsr', 'CA HSR')`)
 	for _, id := range slices.Concat(retiredPrerenderedIDs, retiredShortTransitPrerenderedIDs,
-		retiredFirstHomePagePrerenderedIDs, []string{keptPrerenderedID}) {
+		retiredFirstHomePagePrerenderedIDs, retiredPreNonstopPrerenderedIDs, []string{keptPrerenderedID}) {
 		entry := transit.PrerenderedIsochrone{
 			ID: id, ScenarioSlug: "ca-hsr", Label: id,
 			Lat: 37.3, Lng: -121.9, BudgetMins: 60, Mode: transit.TravelModeBike,
@@ -133,4 +141,28 @@ func TestRetireFirstHomePagePrerenderedMigrationIsSafeToReRun(t *testing.T) {
 		}
 	}
 	assertOnlyKeptPrerendered(t, url, retiredFirstHomePagePrerenderedIDs)
+}
+
+func TestRetirePreNonstopPrerenderedMigrationDeletesTheFiveEntries(t *testing.T) {
+	repo, url := freshRepo(t)
+	insertCaHSRPrerendered(t, repo, url)
+
+	rewindTo(t, url, 41)
+	if err := postgres.Migrate(context.Background(), url); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	assertOnlyKeptPrerendered(t, url, retiredPreNonstopPrerenderedIDs)
+}
+
+func TestRetirePreNonstopPrerenderedMigrationIsSafeToReRun(t *testing.T) {
+	repo, url := freshRepo(t)
+	insertCaHSRPrerendered(t, repo, url)
+
+	for pass := 1; pass <= 2; pass++ {
+		rewindTo(t, url, 41)
+		if err := postgres.Migrate(context.Background(), url); err != nil {
+			t.Fatalf("Migrate pass %d: %v", pass, err)
+		}
+	}
+	assertOnlyKeptPrerendered(t, url, retiredPreNonstopPrerenderedIDs)
 }
