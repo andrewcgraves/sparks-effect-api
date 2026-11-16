@@ -302,6 +302,30 @@ func TestValidateScenarioSeed(t *testing.T) {
 	}
 }
 
+func TestValidateScenarioSeedPlotLabel(t *testing.T) {
+	tests := []struct {
+		name      string
+		plotLabel string
+		wantErr   bool
+	}{
+		{name: "no plot label", plotLabel: "", wantErr: false},
+		{name: "ca-hsr's wording", plotLabel: "Show a {minutes}-minute HSR ride and {mode}", wantErr: false},
+		{name: "no placeholders", plotLabel: "Show my splash zone", wantErr: false},
+		{name: "at the bound", plotLabel: strings.Repeat("·", MaxPlotLabelChars), wantErr: false},
+		{name: "over the bound", plotLabel: strings.Repeat("a", MaxPlotLabelChars+1), wantErr: true},
+		{name: "an unknown placeholder", plotLabel: "Show a {duration}-minute {mode}", wantErr: true},
+		{name: "empty braces", plotLabel: "Show a {} ride", wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateScenarioSeed(Scenario{Slug: "s", PlotLabel: tc.plotLabel})
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestValidateSegmentRoutes(t *testing.T) {
 	routes := []Route{{ID: "route-1"}, {ID: "route-2"}}
 

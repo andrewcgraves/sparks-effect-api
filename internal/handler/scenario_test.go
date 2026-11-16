@@ -498,6 +498,25 @@ func TestScenarioBySlug_carriesItsSubtext(t *testing.T) {
 	}
 }
 
+func TestScenarioBySlug_carriesItsPlotLabel(t *testing.T) {
+	store := mustNewStore(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/scenarios/ca-hsr", nil)
+	req.SetPathValue("slug", "ca-hsr")
+	rec := httptest.NewRecorder()
+
+	ScenarioBySlug(store)(rec, req)
+
+	var body struct {
+		PlotLabel string `json:"plot_label"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if want := "Show a {minutes}-minute HSR ride and {mode}"; body.PlotLabel != want {
+		t.Errorf("plot_label = %q, want %q", body.PlotLabel, want)
+	}
+}
+
 func TestScenarios_listCarriesSubtext(t *testing.T) {
 	store := mustNewStore(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/scenarios", nil)

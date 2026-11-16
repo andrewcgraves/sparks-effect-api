@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"regexp"
 	"slices"
 	"sync"
 	"unicode/utf8"
@@ -175,8 +176,24 @@ func validateScenarioSeed(sc Scenario) error {
 	if utf8.RuneCountInString(sc.Subtext) > MaxSubtextChars {
 		return fmt.Errorf("scenario %q: subtext must be at most %d characters", sc.Slug, MaxSubtextChars)
 	}
+	if utf8.RuneCountInString(sc.PlotLabel) > MaxPlotLabelChars {
+		return fmt.Errorf("scenario %q: plot_label must be at most %d characters", sc.Slug, MaxPlotLabelChars)
+	}
+	// The website fills only these two; any other {name} would reach the
+	// visitor as literal braces on the button.
+	for _, m := range plotLabelPlaceholder.FindAllStringSubmatch(sc.PlotLabel, -1) {
+		if !slices.Contains(plotLabelPlaceholders, m[1]) {
+			return fmt.Errorf("scenario %q: plot_label placeholder {%s} is not one of {minutes} or {mode}", sc.Slug, m[1])
+		}
+	}
 	return nil
 }
+
+const MaxPlotLabelChars = 60
+
+var plotLabelPlaceholders = []string{"minutes", "mode"}
+
+var plotLabelPlaceholder = regexp.MustCompile(`\{([^{}]*)\}`)
 
 func validateSegmentRoutes(routes []Route, tt TravelTimes) error {
 	known := make(map[string]bool, len(routes))

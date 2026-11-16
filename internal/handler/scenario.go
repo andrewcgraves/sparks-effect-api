@@ -37,6 +37,7 @@ type scenarioDetail struct {
 	Slug        string            `json:"slug"`
 	Name        string            `json:"name"`
 	Subtext     string            `json:"subtext"`
+	PlotLabel   string            `json:"plot_label,omitempty"`
 	Description string            `json:"description"`
 	Routes      []transit.Route   `json:"routes"`
 	Stations    []transit.Station `json:"stations"`
@@ -98,6 +99,7 @@ func ScenarioBySlug(store *transit.Store) http.HandlerFunc {
 			Slug:        sc.Slug,
 			Name:        sc.Name,
 			Subtext:     sc.Subtext,
+			PlotLabel:   sc.PlotLabel,
 			Description: sc.Description,
 			Routes:      routes,
 			Stations:    stations,

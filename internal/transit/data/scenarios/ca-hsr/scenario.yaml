@@ -2,6 +2,9 @@ id: "00000000-0000-4001-8001-000000000001"
 slug: "ca-hsr"
 name: "California High-Speed Rail & Brightline West"
 subtext: "CAHSR + Brightline West · Electrified high-speed rail"
+# The plot button once a start is chosen (SPA-542). The website fills
+# {minutes} and {mode} ("walk", "bike ride", "drive", "transit trip").
+plot_label: "Show a {minutes}-minute HSR ride and {mode}"
 # Plain text with blank lines between paragraphs. The network page turns
 # [link text](https://...) into a link (SPA-549); nothing else is markup.
 description: |-
