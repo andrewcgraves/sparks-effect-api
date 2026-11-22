@@ -1,0 +1,111 @@
+name: Dependabot auto-merge
+
+# The weekly Dependabot PRs (SPA-435, .github/dependabot.yml), minus the human
+# step for the low-risk ones. A patch or minor update gets GitHub's auto-merge
+# (squash) turned on, so GitHub merges it by itself once every check the
+# main ruleset requires has passed, and never if one fails. A major update, or
+# anything this job cannot classify, is left for a person exactly as before.
+# A merge to main reaches staging only: production still moves on a release
+# tag and nothing else (docs/releases.md).
+#
+# The job only leaves a notice, and turns nothing on, unless all of these hold:
+#
+#   - The PR is Dependabot's, from a branch of this repository.
+#   - The update is semver patch or minor (the group's highest change; majors
+#     get PRs of their own, see dependabot.yml).
+#   - It does not touch the golang image: that is the Go toolchain, which moves
+#     together with go.mod and CI's GO_VERSION (dependabot.yml).
+#   - DEPENDABOT_AUTOMERGE_TOKEN is set. It is a fine-grained PAT (Contents
+#     and Pull requests: read and write, on this repository) stored as a
+#     *Dependabot* secret, because a workflow Dependabot triggers reads only
+#     Dependabot secrets. It cannot be the workflow's own GITHUB_TOKEN: a merge
+#     made with that token starts no workflows, so CI's push run on main would
+#     never publish the sha-<commit> image a release tag later promotes.
+#   - main's rules require every check named in REQUIRED_CHECKS below. Auto-merge
+#     waits for required checks only, so without them GitHub would merge the
+#     PR before CI had finished, or merge it straight away.
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
+
+# Dependabot rebasing a PR starts a new run; the older one has nothing left
+# to decide.
+concurrency:
+  group: dependabot-auto-merge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  auto-merge:
+    name: Dependabot auto-merge
+    if: github.event.pull_request.user.login == 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    env:
+      # Check names exactly as ci.yml's jobs report them. Keep in step with
+      # the ruleset: this job refuses to turn auto-merge on if any is missing
+      # from it.
+      REQUIRED_CHECKS: |
+        Test, lint, vet
+        Build
+        API↔worker contract
+    steps:
+      - name: Read the update's metadata
+        id: meta
+        uses: dependabot/fetch-metadata@v3
+
+      - name: Decide whether this update may merge by itself
+        id: decide
+        env:
+          UPDATE_TYPE: ${{ steps.meta.outputs.update-type }}
+          DEPENDENCIES: ${{ steps.meta.outputs.dependency-names }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+          AUTOMERGE_TOKEN: ${{ secrets.DEPENDABOT_AUTOMERGE_TOKEN }}
+        run: |
+          set -euo pipefail
+          skip() {
+            echo "::notice::Left for review: $1"
+            echo "merge=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+
+          case "${UPDATE_TYPE}" in
+            version-update:semver-patch|version-update:semver-minor) ;;
+            *) skip "update type is '${UPDATE_TYPE:-unknown}', not patch or minor." ;;
+          esac
+
+          # The golang image is the Go toolchain; it moves with go.mod and CI's
+          # GO_VERSION, never as a lone image bump.
+          if tr ',' '\n' <<<"${DEPENDENCIES}" | sed 's/^ *//; s/ *$//' | grep -qx golang; then
+            skip "it bumps the golang image, which moves with go.mod and GO_VERSION."
+          fi
+          if [[ -z "${AUTOMERGE_TOKEN:-}" ]]; then
+            skip "DEPENDABOT_AUTOMERGE_TOKEN is not set as a Dependabot secret."
+          fi
+
+          # The checks the base branch's rules actually require, across every
+          # active ruleset that applies to it.
+          required="$(gh api "repos/${REPO}/rules/branches/${BASE}" \
+            --jq '.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context')"
+          while IFS= read -r check; do
+            [[ -z "${check}" ]] && continue
+            if ! grep -qxF -- "${check}" <<<"${required}"; then
+              skip "${BASE}'s rules do not require the '${check}' check, so auto-merge would not wait for it."
+            fi
+          done <<<"${REQUIRED_CHECKS}"
+
+          echo "Allowed: ${UPDATE_TYPE} (${DEPENDENCIES})."
+          echo "merge=true" >> "$GITHUB_OUTPUT"
+
+      - name: Turn on auto-merge
+        if: steps.decide.outputs.merge == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.DEPENDABOT_AUTOMERGE_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --auto --squash "${PR_URL}"

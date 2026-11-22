@@ -1,6 +1,7 @@
 # Weekly update PRs (SPA-435). Minor and patch updates are grouped into one PR
 # per ecosystem; a major update gets a PR of its own, because that is where
-# breaking changes live. Nothing auto-merges: every PR goes through CI and a
+# breaking changes live. Patch and minor PRs merge by themselves once CI
+# passes (.github/workflows/dependabot-auto-merge.yml); a major waits for a
 # human, the same as any other change to main.
 version: 2
 updates:
