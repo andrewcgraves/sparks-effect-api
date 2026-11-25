@@ -15,11 +15,15 @@ var ErrJobNotFound = errors.New("routing job not found")
 // A chain's result and its cache put carry the same Valhalla polygons: the put
 // holds the egress ones that missed, the result all of them plus the origin. So
 // one limit serves both, and a put is never refused for a job whose result was
-// accepted. The largest real chain, testdata/cache-put-sj-240-bike.json (12
-// egress polygons, 438,897 bytes) and its 499,685-byte result, sit under a
-// sixteenth of it. Refusing a put only costs a cache write; refusing a result
-// fails the job, which is why this is generous rather than tight.
-const maxWorkerPolygonBodyBytes = 8 << 20
+// accepted. The cap is set by the longest drive the API allows, not by bike or
+// transit: a 240-minute drive from Fresno reaches 15 stations, each polygon a
+// four-hour drive across the Valley and the Sierra, and its result ran past the
+// earlier 8 MB cap on staging (SPA-561). For scale, the San Jose 240-minute
+// bike chain, testdata/chain-result-sj-240-bike.json, is 499,685 bytes.
+// Refusing a put only costs a cache write; refusing a result fails the job,
+// which is why this is generous rather than tight. It stays bounded because
+// the body is held in memory while it is decoded.
+const maxWorkerPolygonBodyBytes = 32 << 20
 
 // A key is a uuid, a slug, a mode, a contour, a date and a budget: under 300
 // bytes, so this admits every lookup maxWorkerCacheBatch allows.

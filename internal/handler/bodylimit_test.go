@@ -116,7 +116,7 @@ func TestCreatePrerenderedIsochrone_413(t *testing.T) {
 func TestWorkerCachePut_413_writesNothing(t *testing.T) {
 	store := &fakeWorkerStore{}
 	big := `{"entries":[{"key":{"compile_job_id":"c1","station_slug":"north","mode":"walk","contour_mins":30},` +
-		`"geometry":{"pad":"` + strings.Repeat("x", 9<<20) + `"}}]}`
+		`"geometry":{"pad":"` + strings.Repeat("x", 33<<20) + `"}}]}`
 
 	assertTooLarge(t, postJSON(t, handler.WorkerCachePut(store), "/api/internal/isochrone-cache", big))
 	if store.putEntries != nil {
@@ -212,11 +212,42 @@ func TestWorkerCacheLookup_200_atTheKeyCap(t *testing.T) {
 
 func TestWorkerMarkSucceeded_413_recordsNothing(t *testing.T) {
 	store := &fakeWorkerStore{}
-	big := `{"result":{"pad":"` + strings.Repeat("x", 9<<20) + `"}}`
+	big := `{"result":{"pad":"` + strings.Repeat("x", 33<<20) + `"}}`
 
 	assertTooLarge(t, postJSON(t, handler.WorkerMarkSucceeded(store), "/api/internal/routing-jobs/j/succeeded", big))
 	if store.succeededID != "" {
 		t.Error("an oversized result reached the store")
+	}
+}
+
+// A result past the old 8 MB cap, the size of the Fresno 240-minute drive
+// chains that staging refused (SPA-561), must now be recorded: refusing it
+// fails a job whose routing already succeeded.
+func TestWorkerMarkSucceeded_204_pastTheOld8MBCap(t *testing.T) {
+	store := &fakeWorkerStore{}
+	big := `{"result":{"pad":"` + strings.Repeat("x", 12<<20) + `"}}`
+
+	rec := postJSON(t, handler.WorkerMarkSucceeded(store), "/api/internal/routing-jobs/j/succeeded", big)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body %.200s", rec.Code, rec.Body.String())
+	}
+	if len(store.succeeded.Result) < 12<<20 {
+		t.Errorf("stored result is %d bytes, want the whole body: it never reached the store", len(store.succeeded.Result))
+	}
+}
+
+// The egress put carries the same polygons as the result, so it fits too.
+func TestWorkerCachePut_204_pastTheOld8MBCap(t *testing.T) {
+	store := &fakeWorkerStore{}
+	big := `{"entries":[{"key":{"compile_job_id":"c1","station_slug":"north","mode":"drive","contour_mins":240},` +
+		`"geometry":{"pad":"` + strings.Repeat("x", 12<<20) + `"}}]}`
+
+	rec := postJSON(t, handler.WorkerCachePut(store), "/api/internal/isochrone-cache", big)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body %.200s", rec.Code, rec.Body.String())
+	}
+	if len(store.putEntries) != 1 {
+		t.Errorf("put %d entries, want 1", len(store.putEntries))
 	}
 }
 
