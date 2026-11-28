@@ -1,5 +1,8 @@
 # sparks-effect-api
 
+> [!IMPORTANT]
+> **This repository has moved.** As of Nov 28, 2026, this code lives in the [`api/`](https://github.com/andrewcgraves/sparks-effect/tree/main/api) directory of the [sparks-effect](https://github.com/andrewcgraves/sparks-effect) monorepo, with its history. Open issues, branches and pull requests there. This repository no longer builds or releases, and it will be archived.
+
 Go REST API for the Sparks Effect project. It serves scenario seed data,
 compiles it into transit graphs, and hands multimodal isochrone requests to the
 routing worker over a queue.
